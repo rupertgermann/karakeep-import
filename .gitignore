@@ -1,0 +1,7 @@
+.env
+.karakeep-import-errors.jsonl
+.karakeep-import-state.jsonl
+__pycache__/
+
+bookmarks_*.html
+.agents/skills/*
