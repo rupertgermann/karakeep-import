@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::Serialize;
 use tauri::Manager;
 
@@ -79,8 +81,34 @@ fn select_x_source(
         .map_err(|error| error.to_string())
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileSourceCommandError {
+    code: &'static str,
+    message: &'static str,
+}
+
+#[tauri::command]
+fn preview_file_source(
+    path: PathBuf,
+    format: file_source::FileSourceFormat,
+) -> Result<file_source::FileSourcePreview, FileSourceCommandError> {
+    if !path.is_file() {
+        return Err(FileSourceCommandError {
+            code: "fileUnreadable",
+            message: "The selected file could not be read.",
+        });
+    }
+
+    file_source::preview_file(&path, format).map_err(|_| FileSourceCommandError {
+        code: "invalidFileSource",
+        message: "The selected file is not a valid supported File Source.",
+    })
+}
+
 fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
+        .plugin(tauri_plugin_dialog::init())
         .manage(diagnostics::DiagnosticsStore::default())
         .setup(|app| {
             let resource_dir = app.path().resource_dir()?;
@@ -93,7 +121,8 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
             manual_update_check,
             export_diagnostics,
             discover_x_sources,
-            select_x_source
+            select_x_source,
+            preview_file_source
         ])
 }
 
@@ -105,14 +134,16 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use serde_json::{Value, json};
     use tauri::{
         WebviewWindowBuilder,
-        test::{INVOKE_KEY, assert_ipc_response, mock_builder, mock_context, noop_assets},
+        test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop_assets},
         webview::InvokeRequest,
     };
 
-    fn assert_command_response(command: &str, expected: Value) {
+    fn command_response(command: &str, body: tauri::ipc::InvokeBody) -> Result<Value, Value> {
         let app = super::configure_builder(mock_builder())
             .build(mock_context(noop_assets()))
             .expect("mock app builds");
@@ -120,7 +151,7 @@ mod tests {
             .build()
             .expect("mock webview builds");
 
-        assert_ipc_response(
+        get_ipc_response(
             &webview,
             InvokeRequest {
                 cmd: command.into(),
@@ -133,12 +164,24 @@ mod tests {
                 }
                 .parse()
                 .expect("valid IPC origin"),
-                body: tauri::ipc::InvokeBody::default(),
+                body,
                 headers: Default::default(),
                 invoke_key: INVOKE_KEY.to_string(),
             },
-            Ok::<_, Value>(expected),
-        );
+        )
+        .map(|response| response.deserialize::<Value>().expect("response is JSON"))
+    }
+
+    fn assert_command_response_with_body(
+        command: &str,
+        body: tauri::ipc::InvokeBody,
+        expected: Result<Value, Value>,
+    ) {
+        assert_eq!(command_response(command, body), expected);
+    }
+
+    fn assert_command_response(command: &str, expected: Value) {
+        assert_command_response_with_body(command, tauri::ipc::InvokeBody::default(), Ok(expected));
     }
 
     #[test]
@@ -194,6 +237,73 @@ mod tests {
                 },
                 "lastFailure": null
             }),
+        );
+    }
+
+    #[test]
+    fn file_source_preview_is_available_through_the_desktop_contract() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl");
+        let response = command_response(
+            "preview_file_source",
+            tauri::ipc::InvokeBody::Json(json!({
+                "path": path,
+                "format": "fieldTheoryJsonl"
+            })),
+        )
+        .expect("preview command succeeds");
+        let preview: super::file_source::FileSourcePreview =
+            serde_json::from_value(response).expect("typed File Source preview");
+
+        assert_eq!(
+            (
+                preview.format,
+                preview.bookmarks.len(),
+                preview.bookmarks[0].source_id.as_str(),
+            ),
+            (
+                super::file_source::ResolvedFileSourceFormat::FieldTheoryJsonl,
+                1,
+                "123",
+            )
+        );
+    }
+
+    #[test]
+    fn file_source_command_errors_do_not_expose_the_selected_path() {
+        let private_path = "/private/selected/bookmarks.jsonl";
+        assert_command_response_with_body(
+            "preview_file_source",
+            tauri::ipc::InvokeBody::Json(json!({
+                "path": private_path,
+                "format": "fieldTheoryJsonl"
+            })),
+            Err(json!({
+                "code": "fileUnreadable",
+                "message": "The selected file could not be read."
+            })),
+        );
+    }
+
+    #[test]
+    fn invalid_file_source_details_are_redacted_at_the_desktop_boundary() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let path = temporary.path().join("private-bookmarks.jsonl");
+        std::fs::write(
+            &path,
+            "{\"id\":\"bookmark-content-canary\",\"url\":\"not-a-web-url\"}\n",
+        )
+        .expect("invalid fixture");
+        assert_command_response_with_body(
+            "preview_file_source",
+            tauri::ipc::InvokeBody::Json(json!({
+                "path": path,
+                "format": "fieldTheoryJsonl"
+            })),
+            Err(json!({
+                "code": "invalidFileSource",
+                "message": "The selected file is not a valid supported File Source."
+            })),
         );
     }
 }

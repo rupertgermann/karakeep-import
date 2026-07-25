@@ -227,6 +227,76 @@ footer p {
   margin: 0;
 }
 
+.file-source-panel {
+  width: min(100%, 46rem);
+  margin: 0 auto;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border: 1px solid #cec9bc;
+  border-radius: 1.5rem;
+  background: rgb(251 248 241 / 92%);
+}
+
+.file-source-panel h2,
+.file-source-panel h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+}
+
+.file-source-format {
+  display: grid;
+  gap: 0.4rem;
+  margin: 1.5rem 0 1rem;
+}
+
+.file-source-format span {
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.file-source-format select,
+.file-source-panel button {
+  min-height: 2.75rem;
+  border: 1px solid #9e9a8f;
+  border-radius: 0.75rem;
+}
+
+.file-source-format select {
+  padding: 0.6rem 0.75rem;
+  background: #fffdf8;
+  color: inherit;
+}
+
+.file-source-panel button {
+  padding: 0.65rem 1rem;
+  background: #526b54;
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.file-source-panel button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.file-source-preview {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #cec9bc;
+}
+
+.file-source-preview > ul {
+  display: grid;
+  gap: 0.75rem;
+  padding-left: 1.25rem;
+}
+
+.bookmark-url {
+  display: block;
+  color: #3e5641;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 560px) {
   .app-shell {
     padding: 1rem;

@@ -2,17 +2,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
+  open: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: mocks.invoke,
 }));
 
-import { desktopApi, type HealthResponse } from "./desktop-api";
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: mocks.open,
+}));
+
+import {
+  desktopApi,
+  type FileSourcePreview,
+  type HealthResponse,
+} from "./desktop-api";
 
 describe("desktop API", () => {
   beforeEach(() => {
     mocks.invoke.mockReset();
+    mocks.open.mockReset();
   });
 
   it("requests health through the typed Tauri command boundary", async () => {
@@ -65,5 +75,42 @@ describe("desktop API", () => {
     expect(JSON.stringify(mocks.invoke.mock.calls)).not.toMatch(
       /ct0|auth.?token|cookie/i,
     );
+  });
+
+  it("opens a native picker limited to supported File Sources", async () => {
+    mocks.open.mockResolvedValue("/private/bookmarks.jsonl");
+
+    await expect(desktopApi.selectFileSource()).resolves.toBe(
+      "/private/bookmarks.jsonl",
+    );
+    expect(mocks.open).toHaveBeenCalledWith({
+      directory: false,
+      multiple: false,
+      filters: [
+        {
+          name: "Bookmark files",
+          extensions: ["jsonl", "json", "html", "htm", "txt"],
+        },
+      ],
+    });
+  });
+
+  it("requests an in-place preview with an explicit format", async () => {
+    const preview: FileSourcePreview = {
+      format: "fieldTheoryJsonl",
+      bookmarks: [],
+    };
+    mocks.invoke.mockResolvedValue(preview);
+
+    await expect(
+      desktopApi.previewFileSource(
+        "/private/bookmarks.txt",
+        "fieldTheoryJsonl",
+      ),
+    ).resolves.toEqual(preview);
+    expect(mocks.invoke).toHaveBeenCalledWith("preview_file_source", {
+      path: "/private/bookmarks.txt",
+      format: "fieldTheoryJsonl",
+    });
   });
 });
