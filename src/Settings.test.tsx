@@ -186,6 +186,66 @@ describe("Settings", () => {
     await waitFor(() => expect(onLocalDataDeleted).toHaveBeenCalledOnce());
   });
 
+  it("notifies the shell when deletion succeeds but refreshing data fails", async () => {
+    const api = createSettingsApi();
+    vi.mocked(api.inspectPrivateData)
+      .mockResolvedValueOnce({
+        dataDirectory: "/Application Support/Karakeep Transfer",
+        snapshotBytes: 1_024,
+        acquisitionStateBytes: 512,
+        ledgerBytes: 2_048,
+        totalBytes: 3_584,
+      })
+      .mockRejectedValueOnce(new Error("refresh failed"));
+    const onLocalDataDeleted = vi.fn();
+    render(
+      <Settings
+        api={api}
+        onLocalDataDeleted={onLocalDataDeleted}
+      />,
+    );
+    await screen.findByText("/Application Support/Karakeep Transfer");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete local transfer data" }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm local data deletion" }),
+    );
+
+    await waitFor(() => expect(onLocalDataDeleted).toHaveBeenCalledOnce());
+  });
+
+  it("notifies the shell when source replacement succeeds but refreshing data fails", async () => {
+    const api = createSettingsApi();
+    vi.mocked(api.inspectPrivateData)
+      .mockResolvedValueOnce({
+        dataDirectory: "/Application Support/Karakeep Transfer",
+        snapshotBytes: 1_024,
+        acquisitionStateBytes: 512,
+        ledgerBytes: 2_048,
+        totalBytes: 3_584,
+      })
+      .mockRejectedValueOnce(new Error("refresh failed"));
+    const onXSourceReplaced = vi.fn();
+    render(
+      <Settings
+        api={api}
+        onXSourceReplaced={onXSourceReplaced}
+      />,
+    );
+    await screen.findByText("/Application Support/Karakeep Transfer");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Replace X Source" }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm source replacement" }),
+    );
+
+    await waitFor(() => expect(onXSourceReplaced).toHaveBeenCalledOnce());
+  });
+
   it("does not notify the shell when local data deletion is rejected", async () => {
     const api = createSettingsApi();
     const onLocalDataDeleted = vi.fn();

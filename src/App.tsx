@@ -84,8 +84,8 @@ type WorkflowAction =
   | { type: "acquisition.running-changed"; running: boolean }
   | { type: "acquisition.cancelled" }
   | { type: "acquisition.failed" }
-  | { type: "delivery.started"; preview: TransferPreview }
-  | { type: "delivery.retry-started"; preview: TransferPreview }
+  | { type: "delivery.started"; total: number }
+  | { type: "delivery.retry-started"; total: number }
   | { type: "delivery.progressed"; progress: TransferProgress }
   | { type: "delivery.completed"; result: TransferResult }
   | { type: "delivery.cancelled"; result: TransferResult }
@@ -178,7 +178,7 @@ function workflowReducer(
         phase: "delivery",
         transferProgress: {
           completed: 0,
-          total: action.preview.pending,
+          total: action.total,
         },
         transferResult: null,
         transferError: null,
@@ -366,7 +366,10 @@ export default function App({
     const preview = transferPreview;
     dispatch({
       type: retry ? "delivery.retry-started" : "delivery.started",
-      preview,
+      total:
+        retry && transferResult
+          ? transferResult.failed + transferResult.cancelled
+          : preview.pending,
     });
     activeDelivery.current = { id: deliveryId };
     try {

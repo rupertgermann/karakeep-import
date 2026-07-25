@@ -80,20 +80,20 @@ export default function Settings({
   function confirmSourceReplacement() {
     return runAction(async () => {
       await api.replaceXSource(REPLACE_X_SOURCE);
+      onXSourceReplaced?.();
       await refreshPrivateData();
       setStatus("X Source data was removed. Delivery history was preserved.");
-      onXSourceReplaced?.();
     });
   }
 
   function confirmLocalDataDeletion() {
     return runAction(async () => {
       await api.deleteLocalTransferData(DELETE_LOCAL_TRANSFER_DATA);
+      onLocalDataDeleted?.();
       await refreshPrivateData();
       setStatus(
         "Local transfer data was deleted. Karakeep bookmarks were unchanged.",
       );
-      onLocalDataDeleted?.();
     });
   }
 

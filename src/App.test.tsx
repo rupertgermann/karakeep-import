@@ -364,7 +364,7 @@ describe("Karakeep Transfer shell", () => {
     expect(stopListening).toHaveBeenCalledOnce();
   });
 
-  it("cancels the active delivery and keeps its partial result", async () => {
+  it("cancels the active delivery and retries only its pending result", async () => {
     let publish: ((event: DeliveryEvent) => void) | undefined;
     const deliveryApi = transferApi({
       previewTransfer: vi.fn().mockResolvedValue({
@@ -470,6 +470,16 @@ describe("Karakeep Transfer shell", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Retry 1 pending" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Retry 1 pending" }),
+    );
+
+    expect(
+      screen.getByRole("progressbar", {
+        name: "0 of 1 bookmarks processed",
+      }),
     ).toBeInTheDocument();
   });
 
