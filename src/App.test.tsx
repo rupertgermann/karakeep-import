@@ -469,6 +469,230 @@ describe("Karakeep Transfer shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("reports a redacted error when the backend cannot prepare a file preview", async () => {
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        selectFileSource: vi.fn().mockResolvedValue("/private/bookmarks.jsonl"),
+        previewFileSource: vi.fn().mockResolvedValue({
+          format: "fieldTheoryJsonl",
+          bookmarks: [
+            {
+              sourceId: "one",
+              url: "https://example.com/one",
+              title: "One",
+              note: "",
+              createdAt: null,
+              tags: [],
+              folders: [],
+            },
+          ],
+        }),
+      },
+    );
+    const deliveryApi = transferApi({
+      previewTransfer: vi
+        .fn()
+        .mockRejectedValue(new Error("private backend detail")),
+    });
+
+    render(<App desktopApi={api} transferApi={deliveryApi} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use a bookmark file" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose and preview file" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Continue with 1 bookmark",
+      }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The transfer preview could not be prepared. Choose the file again.",
+    );
+    expect(screen.queryByText("private backend detail")).not.toBeInTheDocument();
+  });
+
+  it("returns safely to the preview when delivery startup fails", async () => {
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        selectFileSource: vi.fn().mockResolvedValue("/private/bookmarks.jsonl"),
+        previewFileSource: vi.fn().mockResolvedValue({
+          format: "fieldTheoryJsonl",
+          bookmarks: [
+            {
+              sourceId: "one",
+              url: "https://example.com/one",
+              title: "One",
+              note: "",
+              createdAt: null,
+              tags: [],
+              folders: [],
+            },
+          ],
+        }),
+      },
+    );
+    const deliveryApi = transferApi({
+      previewTransfer: vi.fn().mockResolvedValue({
+        total: 1,
+        pending: 1,
+        previouslyDelivered: 0,
+        folders: [],
+        destination: {
+          serverUrl: rememberedDestination.serverUrl,
+          userId: rememberedDestination.userId,
+          userName: rememberedDestination.displayName,
+        },
+      }),
+      startDelivery: vi
+        .fn()
+        .mockRejectedValue(new Error("credential-and-path-canary")),
+    });
+
+    render(
+      <App
+        desktopApi={api}
+        transferApi={deliveryApi}
+        createDeliveryId={() => "delivery-start-failure"}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use a bookmark file" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose and preview file" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Continue with 1 bookmark",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Start transfer" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm transfer" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Delivery could not be started. Check the connection and try again.",
+    );
+    expect(
+      screen.getByRole("heading", { name: "Review this transfer" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("credential-and-path-canary"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("handles rejected cancellation and a redacted terminal failure", async () => {
+    let publish: ((event: DeliveryEvent) => void) | undefined;
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        selectFileSource: vi.fn().mockResolvedValue("/private/bookmarks.html"),
+        previewFileSource: vi.fn().mockResolvedValue({
+          format: "chromeNetscape",
+          bookmarks: [
+            {
+              sourceId: "one",
+              url: "https://example.com/one",
+              title: "One",
+              note: "",
+              createdAt: null,
+              tags: [],
+              folders: [],
+            },
+          ],
+        }),
+      },
+    );
+    const deliveryApi = transferApi({
+      previewTransfer: vi.fn().mockResolvedValue({
+        total: 1,
+        pending: 1,
+        previouslyDelivered: 0,
+        folders: [],
+        destination: {
+          serverUrl: rememberedDestination.serverUrl,
+          userId: rememberedDestination.userId,
+          userName: rememberedDestination.displayName,
+        },
+      }),
+      startDelivery: vi.fn().mockImplementation(async (_request, onEvent) => {
+        publish = onEvent;
+        return vi.fn();
+      }),
+      cancelDelivery: vi
+        .fn()
+        .mockRejectedValue(new Error("private cancellation detail")),
+    });
+
+    render(
+      <App
+        desktopApi={api}
+        transferApi={deliveryApi}
+        createDeliveryId={() => "delivery-terminal-failure"}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use a bookmark file" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose and preview file" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Continue with 1 bookmark",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Start transfer" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm transfer" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Cancel transfer" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The cancellation request could not be sent.",
+    );
+
+    act(() => {
+      publish?.({
+        type: "failed",
+        deliveryId: "delivery-terminal-failure",
+        code: "network",
+      });
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Karakeep could not be reached. Check the connection and try again.",
+    );
+    expect(
+      screen.getByRole("heading", { name: "Review this transfer" }),
+    ).toBeInTheDocument();
+  });
+
   it("advances a confirmed X source to snapshot acquisition", async () => {
     const api = desktopApi(
       vi.fn().mockResolvedValue({
