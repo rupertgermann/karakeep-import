@@ -10,6 +10,11 @@ import type {
 } from "./desktop-api";
 import FileSourcePanel from "./FileSourcePanel";
 import type { FileSourceSelection } from "./FileSourcePanel";
+import Settings from "./Settings";
+import {
+  settingsDesktopApi as defaultSettingsApi,
+  type SettingsApi,
+} from "./settings-api";
 import XSourceSetup from "./x-source/XSourceSetup";
 import DestinationSetup from "./DestinationSetup";
 
@@ -21,15 +26,20 @@ type ReadySource =
 
 interface AppProps {
   desktopApi?: AppDesktopApi;
+  settingsApi?: SettingsApi;
 }
 
-export default function App({ desktopApi = defaultDesktopApi }: AppProps) {
+export default function App({
+  desktopApi = defaultDesktopApi,
+  settingsApi = defaultSettingsApi,
+}: AppProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthFailed, setHealthFailed] = useState(false);
   const [destination, setDestination] =
     useState<DestinationSummary | null>(null);
   const [sourceMode, setSourceMode] = useState<SourceMode>(null);
   const [readySource, setReadySource] = useState<ReadySource | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -90,7 +100,16 @@ export default function App({ desktopApi = defaultDesktopApi }: AppProps) {
           <span className="status-dot" aria-hidden="true" />
           {status.text}
         </p>
-        {health && !destination ? (
+        {health ? (
+          <button
+            type="button"
+            className="settings-link"
+            onClick={() => setShowSettings(true)}
+          >
+            Open Settings
+          </button>
+        ) : null}
+        {health && !showSettings && !destination ? (
           <DestinationSetup
             desktopApi={desktopApi}
             onReady={setDestination}
@@ -98,7 +117,7 @@ export default function App({ desktopApi = defaultDesktopApi }: AppProps) {
         ) : null}
       </section>
 
-      {health && destination && sourceMode === null ? (
+      {health && destination && !showSettings && sourceMode === null ? (
         <section className="source-card" aria-labelledby="source-choice-title">
           <p className="eyebrow">Step 2 · Source</p>
           <h2 id="source-choice-title">Choose a bookmark source</h2>
@@ -117,14 +136,22 @@ export default function App({ desktopApi = defaultDesktopApi }: AppProps) {
         </section>
       ) : null}
 
-      {health && destination && sourceMode === "x" && !readySource ? (
+      {health &&
+      destination &&
+      !showSettings &&
+      sourceMode === "x" &&
+      !readySource ? (
         <XSourceSetup
           api={desktopApi}
           onSelected={(source) => setReadySource({ kind: "x", source })}
         />
       ) : null}
 
-      {health && destination && sourceMode === "file" && !readySource ? (
+      {health &&
+      destination &&
+      !showSettings &&
+      sourceMode === "file" &&
+      !readySource ? (
         <FileSourcePanel
           api={desktopApi}
           onContinue={(selection) =>
@@ -133,7 +160,7 @@ export default function App({ desktopApi = defaultDesktopApi }: AppProps) {
         />
       ) : null}
 
-      {health && destination && readySource ? (
+      {health && destination && !showSettings && readySource ? (
         <section className="source-card" aria-labelledby="source-ready-title">
           <p className="eyebrow">Step 3 · Preview</p>
           <h2 id="source-ready-title">
@@ -157,6 +184,32 @@ export default function App({ desktopApi = defaultDesktopApi }: AppProps) {
             Choose another source
           </button>
         </section>
+      ) : null}
+
+      {health && showSettings ? (
+        <div className="settings-view">
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={() => setShowSettings(false)}
+          >
+            Back to transfer
+          </button>
+          <Settings
+            api={settingsApi}
+            onForgetKarakeepConnection={
+              destination
+                ? async () => {
+                    await desktopApi.forgetDestination();
+                    setDestination(null);
+                    setSourceMode(null);
+                    setReadySource(null);
+                    setShowSettings(false);
+                  }
+                : undefined
+            }
+          />
+        </div>
       ) : null}
 
       <footer>

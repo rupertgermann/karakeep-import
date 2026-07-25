@@ -130,6 +130,29 @@ select {
   gap: 0.75rem;
 }
 
+.settings-link {
+  margin-left: 0.75rem;
+  border: 0;
+  background: transparent;
+  color: #405a43;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.settings-view {
+  display: grid;
+  width: min(100%, 46rem);
+  gap: 1rem;
+  margin: 0 auto;
+}
+
+.settings-view > .button {
+  justify-self: end;
+}
+
 .source-result {
   color: #3e5641;
   font-weight: 700;

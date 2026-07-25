@@ -6,6 +6,7 @@ import type {
   DesktopApi,
   FileSourceApi,
 } from "./desktop-api";
+import type { SettingsApi } from "./settings-api";
 
 type AppApi = DesktopApi & FileSourceApi;
 
@@ -16,6 +17,48 @@ const rememberedDestination = {
   email: "ada@example.com",
   insecureHttp: false,
 };
+
+function settingsApi(): SettingsApi {
+  return {
+    inspectPrivateData: vi.fn().mockResolvedValue({
+      dataDirectory: "/Application Support/Karakeep Transfer",
+      snapshotBytes: 0,
+      acquisitionStateBytes: 0,
+      ledgerBytes: 0,
+      totalBytes: 0,
+    }),
+    replaceXSource: vi.fn().mockResolvedValue(undefined),
+    deleteLocalTransferData: vi.fn().mockResolvedValue(undefined),
+    exportDiagnostics: vi.fn().mockResolvedValue({
+      generatedByUserAction: true,
+      includesBookmarkContent: false,
+      telemetryEnabled: false,
+      versions: {
+        app: "0.1.0",
+        fieldTheory: "1.3.22",
+        node: "22.20.0",
+        schema: "1",
+        karakeepBaseline: "0.32.0",
+      },
+      source: "ready",
+      destination: "ready",
+      storage: {
+        dataDirectory: "[redacted]",
+        snapshotBytes: 0,
+        ledgerBytes: 0,
+      },
+      lastFailure: null,
+    }),
+    versionInformation: vi.fn().mockResolvedValue({
+      app: "0.1.0",
+      fieldTheory: "1.3.22",
+      node: "22.20.0",
+      schema: "1",
+      karakeepBaseline: "0.32.0",
+    }),
+    manualUpdateCheck: vi.fn(),
+  };
+}
 
 describe("Karakeep Transfer shell", () => {
   function desktopApi(
@@ -166,5 +209,45 @@ describe("Karakeep Transfer shell", () => {
     expect(
       screen.getByRole("heading", { name: "Preview a bookmark file" }),
     ).toBeInTheDocument();
+  });
+
+  it("opens Settings and can forget the active destination", async () => {
+    const forgetDestination = vi.fn().mockResolvedValue(undefined);
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi
+          .fn()
+          .mockResolvedValueOnce(rememberedDestination)
+          .mockResolvedValue(null),
+        forgetDestination,
+      },
+    );
+
+    render(<App desktopApi={api} settingsApi={settingsApi()} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open Settings" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Settings" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Forget Karakeep connection" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Confirm forgetting connection",
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Connect Karakeep" }),
+    ).toBeInTheDocument();
+    expect(forgetDestination).toHaveBeenCalledOnce();
   });
 });
