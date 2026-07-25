@@ -10,9 +10,10 @@ use karakeep_transfer_lib::{
     domain::{BookmarkKey, DeliveryAttempt, DeliveryOutcome, DestinationIdentity, TimestampMillis},
     fieldtheory::{
         AcquisitionEvent, AcquisitionFailureCode, AcquisitionPhase, AcquisitionStartError,
-        AcquisitionSupervisor, BridgeRunner, DestinationPreview, SnapshotStore,
+        AcquisitionSupervisor, BridgeRunner, DestinationPreview, FieldTheoryState, SnapshotStore,
         XAcquisitionRequest, XSourceReference,
     },
+    file_source::ResolvedFileSourceFormat,
     ledger::DeliveryLedger,
 };
 
@@ -294,6 +295,65 @@ fn snapshot_preview_partitions_pending_records_by_destination_without_delivery()
                 user_name: "Reader".to_string(),
             },
         }
+    );
+}
+
+#[test]
+fn snapshot_store_returns_the_parsed_retained_x_source_for_delivery() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    fs::create_dir_all(store.root()).expect("snapshot directory");
+    fs::write(
+        store.snapshot_path(),
+        "{\"id\":\"one\",\"tweetId\":\"1\",\"url\":\"https://x.com/example/status/1\",\"folderNames\":[\"Research\"]}\n",
+    )
+    .expect("snapshot");
+
+    let source = store
+        .delivery_source()
+        .expect("parsed retained X delivery source");
+
+    assert_eq!(
+        (
+            source.format,
+            source.bookmarks.len(),
+            source.bookmarks[0].source_id.as_str(),
+            source.bookmarks[0].tags.join(","),
+        ),
+        (
+            ResolvedFileSourceFormat::FieldTheoryJsonl,
+            1,
+            "1",
+            "twitter,Research".to_string(),
+        )
+    );
+}
+
+#[test]
+fn field_theory_state_exposes_parsed_snapshot_data_without_its_private_path() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let snapshot_root = temporary.path().join("fieldtheory");
+    fs::create_dir_all(&snapshot_root).expect("snapshot directory");
+    fs::write(
+        snapshot_root.join("bookmarks.jsonl"),
+        "{\"id\":\"one\",\"tweetId\":\"1\",\"url\":\"https://x.com/example/status/1\",\"auth_token\":\"raw-auth-secret\",\"ct0\":\"raw-csrf-secret\"}\n",
+    )
+    .expect("snapshot");
+    let state = FieldTheoryState::bundled(temporary.path(), temporary.path());
+
+    let source = state
+        .snapshot_delivery_source()
+        .expect("parsed snapshot through application state");
+    let serialized = serde_json::to_string(&source).expect("source serializes");
+
+    assert_eq!(
+        (
+            source.bookmarks[0].url.as_str(),
+            serialized.contains(&temporary.path().display().to_string()),
+            serialized.contains("auth_token"),
+            serialized.contains("ct0"),
+        ),
+        ("https://x.com/example/status/1", false, false, false)
     );
 }
 

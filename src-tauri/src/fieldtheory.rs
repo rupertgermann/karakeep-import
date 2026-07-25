@@ -8,7 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::{domain::DestinationIdentity, ledger::DeliveryLedger};
+use crate::{domain::DestinationIdentity, file_source::FileSourcePreview, ledger::DeliveryLedger};
 
 #[path = "fieldtheory_acquisition.rs"]
 mod acquisition;
@@ -183,6 +183,12 @@ impl FieldTheoryState {
 
     pub fn cancel_acquisition(&self, acquisition_id: &str) -> Result<(), AcquisitionStartError> {
         self.acquisitions.cancel(acquisition_id)
+    }
+
+    /// Returns parsed retained X bookmarks for backend delivery without
+    /// exposing their private storage path.
+    pub fn snapshot_delivery_source(&self) -> Result<FileSourcePreview, SnapshotPreviewError> {
+        self.snapshots.delivery_source()
     }
 
     pub fn preview(

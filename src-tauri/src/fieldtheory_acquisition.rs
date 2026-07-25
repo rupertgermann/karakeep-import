@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use super::{BridgeRunner, PROTOCOL_VERSION, XSourceReference};
 use crate::{
     domain::{BookmarkKey, DestinationIdentity},
-    file_source::{FileSourceFormat, preview_file},
+    file_source::{FileSourceFormat, FileSourcePreview, preview_file},
     ledger::DeliveryLedger,
 };
 
@@ -152,14 +152,20 @@ impl SnapshotStore {
         self.snapshot_path().is_file()
     }
 
+    /// Returns the retained X snapshot through the same parsed delivery seam
+    /// used by one-off File Sources. The private storage path stays internal.
+    pub fn delivery_source(&self) -> Result<FileSourcePreview, SnapshotPreviewError> {
+        preview_file(&self.snapshot_path(), FileSourceFormat::FieldTheoryJsonl)
+            .map_err(|_| SnapshotPreviewError)
+    }
+
     pub fn preview(
         &self,
         ledger: &DeliveryLedger,
         destination_identity: &DestinationIdentity,
         destination: DestinationPreview,
     ) -> Result<XTransferPreview, SnapshotPreviewError> {
-        let source = preview_file(&self.snapshot_path(), FileSourceFormat::FieldTheoryJsonl)
-            .map_err(|_| SnapshotPreviewError)?;
+        let source = self.delivery_source()?;
         let mut previously_delivered = 0_u64;
         let mut folder_keys = HashSet::new();
         let mut folders = Vec::new();
