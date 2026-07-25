@@ -471,7 +471,7 @@ describe("Karakeep Transfer shell", () => {
     ).toBeInTheDocument();
   });
 
-  it("reports a redacted error when the backend cannot prepare a file preview", async () => {
+  it("reports a redacted file preview error with a source reset route", async () => {
     const api = desktopApi(
       vi.fn().mockResolvedValue({
         status: "ok",
@@ -520,6 +520,13 @@ describe("Karakeep Transfer shell", () => {
       "The transfer preview could not be prepared. Choose the file again.",
     );
     expect(screen.queryByText("private backend detail")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose another source" }),
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Choose a bookmark source" }),
+    ).toBeInTheDocument();
   });
 
   it("returns safely to the preview when delivery startup fails", async () => {

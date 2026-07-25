@@ -569,9 +569,16 @@ export default function App({
       ) : null}
 
       {health && destination && !showSettings && transferError ? (
-        <p role="alert" className="source-card">
-          {transferError}
-        </p>
+        <section className="source-card">
+          <p role="alert">{transferError}</p>
+          {workflow.phase === "failure" &&
+          readySource?.kind === "file" &&
+          !transferPreview ? (
+            <button type="button" onClick={chooseAnotherSource}>
+              Choose another source
+            </button>
+          ) : null}
+        </section>
       ) : null}
 
       {health &&
