@@ -122,3 +122,11 @@ npm run release:rust-inventory
 
 Review every version/license change in `release/rust-dependencies.json`. The
 local staging gate rejects a stale or incomplete Rust inventory.
+
+## Acceptance evidence
+
+Retain platform acceptance results separately from the deterministic build
+inputs. The current unsigned macOS universal preflight is recorded in
+[`macos-universal-preflight.md`](./macos-universal-preflight.md); its failed and
+unavailable signing and smoke-test gates must be resolved before issue #16 can
+be accepted.
