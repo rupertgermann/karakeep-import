@@ -115,7 +115,7 @@ describe("Destination connection", () => {
       connectDestination: vi.fn().mockRejectedValue({
         code: "authentication",
         message:
-          "backend-canary-api-key-and-private-path-/Users/example/bookmarks",
+          "backend-canary-api-key-and-private-path-/private/canary/bookmarks",
       }),
     });
 
