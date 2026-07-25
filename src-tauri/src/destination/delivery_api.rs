@@ -12,6 +12,7 @@ use reqwest::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashSet,
     future::Future,
     pin::Pin,
     sync::{
@@ -162,6 +163,7 @@ impl KarakeepApi for ReqwestDeliveryApi {
         if tags.is_empty() {
             return Ok(());
         }
+        let expected_tag_count = tags.len();
         let body = AttachTagsRequest {
             tags: tags
                 .iter()
@@ -185,7 +187,17 @@ impl KarakeepApi for ReqwestDeliveryApi {
                 .json::<AttachTagsResponse>()
                 .await
                 .map_err(response_contract_error)?;
-            let _ = response.attached;
+            let attached_ids = response
+                .attached
+                .iter()
+                .map(|id| id.trim())
+                .filter(|id| !id.is_empty())
+                .collect::<HashSet<_>>();
+            if response.attached.len() != expected_tag_count
+                || attached_ids.len() != expected_tag_count
+            {
+                return Err(response_contract_error(()));
+            }
             Ok(())
         })
     }

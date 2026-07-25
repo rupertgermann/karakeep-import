@@ -472,6 +472,45 @@ fn delivery_engine_attaches_only_tags_missing_from_an_existing_bookmark() {
 }
 
 #[test]
+fn partial_tag_attachment_response_is_not_recorded_as_delivered() {
+    let (server_url, requests, server) = scripted_server(vec![
+        PlannedResponse::json(200, r#"{"id":"existing-1","tags":[]}"#),
+        PlannedResponse::json(200, r#"{"attached":["tag-1"]}"#),
+    ]);
+    let api = delivery_api(server_url, "delivery-vault-canary", Duration::from_secs(2));
+    let ledger = Arc::new(CompletedLedger::default());
+    let engine = karakeep_transfer_lib::delivery::DeliveryEngine::new(
+        api,
+        ledger.clone(),
+        DeliveryConfig {
+            max_concurrency: 1,
+            requests_per_second: 1000.0,
+            retry: RetryPolicy {
+                max_retries: 0,
+                base_delay: Duration::ZERO,
+                max_delay: Duration::ZERO,
+            },
+        },
+    )
+    .expect("delivery engine");
+
+    let report = engine
+        .run(
+            &OneRecord,
+            &DestinationId::new("destination-1"),
+            &TestCancellation::default(),
+            &NoopProgressSink,
+        )
+        .expect("delivery run completes with a failed record");
+
+    assert_eq!(report.totals.delivered, 0);
+    assert_eq!(report.totals.failed, 1);
+    assert!(!*ledger.0.lock().expect("ledger lock"));
+    server.join().expect("fake Karakeep joins");
+    assert_eq!(requests.recv().expect("captured requests").len(), 2);
+}
+
+#[test]
 fn connection_failures_are_retryable_network_errors() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("reserve unused port");
     let server_url = format!("http://{}", listener.local_addr().unwrap());
