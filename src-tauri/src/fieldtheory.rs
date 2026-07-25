@@ -3,7 +3,6 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::Mutex,
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -151,7 +150,6 @@ pub struct FieldTheoryState {
     acquisitions: AcquisitionSupervisor,
     snapshots: SnapshotStore,
     ledger_path: PathBuf,
-    ledger: Mutex<Option<DeliveryLedger>>,
 }
 
 impl FieldTheoryState {
@@ -161,7 +159,6 @@ impl FieldTheoryState {
             acquisitions: AcquisitionSupervisor::default(),
             snapshots: SnapshotStore::new(app_data_dir.join("fieldtheory")),
             ledger_path: app_data_dir.join("delivery-ledger.sqlite3"),
-            ledger: Mutex::new(None),
         }
     }
 
@@ -197,16 +194,8 @@ impl FieldTheoryState {
     ) -> Result<XTransferPreview, SnapshotPreviewError> {
         let identity = DestinationIdentity::new(&destination.server_url, &destination.user_id)
             .map_err(|_| SnapshotPreviewError)?;
-        let mut ledger = self.ledger.lock().map_err(|_| SnapshotPreviewError)?;
-        if ledger.is_none() {
-            *ledger =
-                Some(DeliveryLedger::open(&self.ledger_path).map_err(|_| SnapshotPreviewError)?);
-        }
-        self.snapshots.preview(
-            ledger.as_ref().ok_or(SnapshotPreviewError)?,
-            &identity,
-            destination,
-        )
+        let ledger = DeliveryLedger::open(&self.ledger_path).map_err(|_| SnapshotPreviewError)?;
+        self.snapshots.preview(&ledger, &identity, destination)
     }
 }
 
