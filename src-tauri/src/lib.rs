@@ -206,11 +206,15 @@ async fn forget_destination(
     state: tauri::State<'_, DestinationState>,
     transfers: tauri::State<'_, TransferState>,
 ) -> Result<(), DestinationError> {
-    if transfers.operations.is_active() {
-        return Err(DestinationError::for_code(DestinationErrorCode::Storage));
-    }
+    let operation = transfers
+        .operations
+        .reserve(OperationKind::Maintenance)
+        .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?;
     let service = Arc::clone(&state.0);
-    tauri::async_runtime::spawn_blocking(move || service.forget())
+    tauri::async_runtime::spawn_blocking(move || {
+        let _operation = operation;
+        service.forget()
+    })
         .await
         .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?
 }
@@ -230,9 +234,10 @@ fn replace_x_source(
     transfers: tauri::State<'_, TransferState>,
     confirmation: settings::ReplaceXSourceConfirmation,
 ) -> Result<(), &'static str> {
-    if transfers.operations.is_active() {
-        return Err("local transfer data is in use");
-    }
+    let _operation = transfers
+        .operations
+        .reserve(OperationKind::Maintenance)
+        .map_err(|_| "local transfer data is in use")?;
     state
         .replace_x_source(confirmation.capability())
         .map_err(|_| "X source data could not be replaced")
@@ -244,9 +249,10 @@ fn delete_local_transfer_data(
     transfers: tauri::State<'_, TransferState>,
     confirmation: settings::DeleteLocalTransferDataConfirmation,
 ) -> Result<(), &'static str> {
-    if transfers.operations.is_active() {
-        return Err("local transfer data is in use");
-    }
+    let _operation = transfers
+        .operations
+        .reserve(OperationKind::Maintenance)
+        .map_err(|_| "local transfer data is in use")?;
     transfers.close_ledger()?;
     state
         .delete_local_transfer_data(confirmation.capability())

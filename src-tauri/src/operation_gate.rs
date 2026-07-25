@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 pub enum OperationKind {
     Acquisition,
     Delivery,
+    Maintenance,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

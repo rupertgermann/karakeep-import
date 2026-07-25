@@ -41,3 +41,21 @@ fn dropping_an_old_lease_cannot_release_a_newer_operation() {
     drop(second);
     assert!(!gate.is_active());
 }
+
+#[test]
+fn destructive_maintenance_reserves_the_same_slot_as_transfer_work() {
+    let gate = OperationGate::default();
+    let maintenance = gate
+        .reserve(OperationKind::Maintenance)
+        .expect("maintenance reserves the shared slot atomically");
+
+    assert!(gate.reserve(OperationKind::Acquisition).is_err());
+    assert!(gate.reserve(OperationKind::Delivery).is_err());
+
+    drop(maintenance);
+    let delivery = gate
+        .reserve(OperationKind::Delivery)
+        .expect("maintenance releases the slot when mutation is finished");
+    assert!(gate.reserve(OperationKind::Maintenance).is_err());
+    drop(delivery);
+}
