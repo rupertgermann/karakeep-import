@@ -199,6 +199,50 @@ fn compatibility_failure_preserves_the_previous_snapshot_and_redacts_session_val
 }
 
 #[test]
+fn reported_promotion_failure_keeps_the_prior_safe_snapshot() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let supervisor = AcquisitionSupervisor::default();
+    let runner = BridgeRunner::new(PathBuf::from("node"), fixture());
+    assert!(matches!(
+        run_acquisition(
+            &supervisor,
+            &runner,
+            &store,
+            request_for_profile("acquire-profile-a", "Profile A"),
+        ),
+        AcquisitionEvent::Completed { .. }
+    ));
+    let prior_snapshot = fs::read_to_string(store.snapshot_path()).expect("prior snapshot");
+    let state_directory = store.root().join("acquisition");
+    fs::remove_dir_all(&state_directory).expect("remove state directory");
+    fs::write(&state_directory, b"not a directory").expect("block promotion state");
+
+    let event = run_acquisition(
+        &supervisor,
+        &runner,
+        &store,
+        request_for_profile("acquire-profile-b", "Profile B"),
+    );
+
+    assert_eq!(
+        (
+            event,
+            fs::read_to_string(store.snapshot_path()).expect("prior snapshot remains"),
+        ),
+        (
+            AcquisitionEvent::Failed {
+                acquisition_id: "acquire-profile-b".to_string(),
+                code: AcquisitionFailureCode::Unexpected,
+                message: "X bookmark acquisition could not be completed.".to_string(),
+                previous_snapshot_available: false,
+            },
+            prior_snapshot,
+        )
+    );
+}
+
+#[test]
 fn failed_acquisition_for_another_source_neither_seeds_nor_offers_the_retained_snapshot() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let store = SnapshotStore::new(temporary.path().join("fieldtheory"));

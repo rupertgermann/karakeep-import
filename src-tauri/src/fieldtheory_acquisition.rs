@@ -267,6 +267,7 @@ impl SnapshotStore {
         }
         preview_file(&incoming, FileSourceFormat::FieldTheoryJsonl)
             .map_err(|_| SnapshotPreviewError)?;
+        set_private_file_permissions(&incoming).map_err(|_| SnapshotPreviewError)?;
 
         let state_directory = self.root.join(ACQUISITION_STATE_DIRECTORY);
         fs::create_dir_all(&state_directory).map_err(|_| SnapshotPreviewError)?;
@@ -310,11 +311,9 @@ impl SnapshotStore {
             restore_file(&source_binding_backup, &source_binding);
             return Err(SnapshotPreviewError);
         }
-        set_private_file_permissions(&snapshot).map_err(|_| SnapshotPreviewError)?;
-        set_private_file_permissions(&source_binding).map_err(|_| SnapshotPreviewError)?;
         for backup in [snapshot_backup, source_binding_backup] {
             if backup.exists() {
-                fs::remove_file(backup).map_err(|_| SnapshotPreviewError)?;
+                let _ = fs::remove_file(backup);
             }
         }
         Ok(())

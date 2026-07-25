@@ -18,6 +18,7 @@ pub struct PrivateDataSummary {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PrivateTransferData {
     ledger_path: PathBuf,
+    source_root_path: PathBuf,
     snapshot_path: PathBuf,
     acquisition_state_path: PathBuf,
 }
@@ -48,9 +49,14 @@ impl PrivateTransferData {
         snapshot_path: impl Into<PathBuf>,
         acquisition_state_path: impl Into<PathBuf>,
     ) -> Self {
+        let snapshot_path = snapshot_path.into();
         Self {
             ledger_path: ledger_path.into(),
-            snapshot_path: snapshot_path.into(),
+            source_root_path: snapshot_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default(),
+            snapshot_path,
             acquisition_state_path: acquisition_state_path.into(),
         }
     }
@@ -60,7 +66,8 @@ impl PrivateTransferData {
             + path_size(&sqlite_sidecar(&self.ledger_path, "-wal"))?
             + path_size(&sqlite_sidecar(&self.ledger_path, "-shm"))?;
         let snapshot_bytes = path_size(&self.snapshot_path)?;
-        let acquisition_state_bytes = path_size(&self.acquisition_state_path)?;
+        let acquisition_state_bytes = path_size(&self.acquisition_state_path)?
+            + abandoned_staging_size(&self.source_root_path)?;
         Ok(PrivateDataSummary {
             ledger_path: self.ledger_path.clone(),
             snapshot_path: self.snapshot_path.clone(),
@@ -74,17 +81,54 @@ impl PrivateTransferData {
 
     pub fn replace_x_source(&self, _confirmation: ReplaceXSource) -> io::Result<()> {
         remove_path(&self.snapshot_path)?;
-        remove_path(&self.acquisition_state_path)
+        remove_path(&self.acquisition_state_path)?;
+        remove_abandoned_staging_dirs(&self.source_root_path)
     }
 
     pub fn delete(&self, _confirmation: DeleteLocalTransferData) -> io::Result<()> {
         remove_path(&self.snapshot_path)?;
         remove_path(&self.acquisition_state_path)?;
+        remove_abandoned_staging_dirs(&self.source_root_path)?;
         remove_path(&self.ledger_path)?;
         remove_path(&sqlite_sidecar(&self.ledger_path, "-wal"))?;
         remove_path(&sqlite_sidecar(&self.ledger_path, "-shm"))?;
         Ok(())
     }
+}
+
+fn abandoned_staging_size(source_root: &Path) -> io::Result<u64> {
+    abandoned_staging_dirs(source_root)?
+        .into_iter()
+        .try_fold(0, |total, path| Ok(total + path_size(&path)?))
+}
+
+fn remove_abandoned_staging_dirs(source_root: &Path) -> io::Result<()> {
+    for path in abandoned_staging_dirs(source_root)? {
+        fs::remove_dir_all(path)?;
+    }
+    Ok(())
+}
+
+fn abandoned_staging_dirs(source_root: &Path) -> io::Result<Vec<PathBuf>> {
+    let entries = match fs::read_dir(source_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut staging = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name
+            .to_str()
+            .is_none_or(|name| !name.starts_with(".acquisition-") || name.len() == 13)
+            || !entry.file_type()?.is_dir()
+        {
+            continue;
+        }
+        staging.push(entry.path());
+    }
+    Ok(staging)
 }
 
 fn path_size(path: &Path) -> io::Result<u64> {
