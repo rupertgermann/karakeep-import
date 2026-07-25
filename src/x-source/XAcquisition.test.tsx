@@ -150,7 +150,7 @@ describe("X acquisition", () => {
     });
 
     expect(
-      await screen.findByText(/resume acquisition to continue from the saved cursor/i),
+      await screen.findByText(/resume acquisition to continue from the saved progress/i),
     ).toBeInTheDocument();
     expect(onPreview).not.toHaveBeenCalled();
     expect(onRunningChange).toHaveBeenLastCalledWith(false);
@@ -160,6 +160,37 @@ describe("X acquisition", () => {
     await waitFor(() =>
       expect(controlled.api.startXAcquisition).toHaveBeenCalledTimes(2),
     );
+  });
+
+  it("describes the runtime ceiling as a neutral resumable pause", async () => {
+    const controlled = controlledApi();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-runtime-resume"}
+        onPreview={() => {}}
+        onChooseAnotherSource={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalledOnce(),
+    );
+    controlled.emit({
+      type: "resumable",
+      acquisitionId: "acquire-ui-runtime-resume",
+      reason: "maxRuntime",
+    });
+
+    expect(
+      await screen.findByText(/acquisition paused before it finished/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/X paused the acquisition/i)).toBeNull();
   });
 
   it("offers another source after acquisition fails", async () => {

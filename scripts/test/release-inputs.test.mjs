@@ -682,6 +682,42 @@ test("password-equivalent values in NUL-containing packaged resources are reject
   assert.match(result.stderr, /Forbidden secret-like value/);
 });
 
+test("X cookie-header values in packaged resources are rejected", async () => {
+  const root = await createRepositoryFixture();
+  await writeFile(
+    path.join(
+      root,
+      "src-tauri",
+      "resources",
+      "fieldtheory",
+      "bridge",
+      "node_modules",
+      "fieldtheory",
+      "cookie-canary.js",
+    ),
+    'const cookie = "auth_token=live-auth-cookie-value; ct0=live-csrf-cookie-value";\n',
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.match(result.stderr, /Forbidden secret-like value/);
+  await assert.rejects(
+    readFile(
+      path.join(
+        root,
+        "out",
+        "resources",
+        "fieldtheory",
+        "bridge",
+        "node_modules",
+        "fieldtheory",
+        "cookie-canary.js",
+      ),
+    ),
+    { code: "ENOENT" },
+  );
+});
+
 test("password-equivalent values in unstaged Tauri resources are rejected", async () => {
   const root = await createRepositoryFixture();
   await writeFile(

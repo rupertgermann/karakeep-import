@@ -288,7 +288,10 @@ async function validateNoSecrets(roots) {
       const bearers = content.matchAll(
         /\bBearer\s+([A-Za-z0-9._~+/-]{8,})/gi,
       );
-      for (const match of [...assignments, ...bearers]) {
+      const cookieValues = content.matchAll(
+        /\b(?:auth_token|ct0)=([^;\s"'\\]{8,})/gi,
+      );
+      for (const match of [...assignments, ...bearers, ...cookieValues]) {
         if (!isPlaceholderCredential(match[1])) {
           throw new Error(
             `Forbidden secret-like value in packaged text: ${file}`,

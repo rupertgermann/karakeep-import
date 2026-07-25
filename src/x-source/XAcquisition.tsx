@@ -31,7 +31,7 @@ type ViewState =
       total: number | null;
     }
   | { step: "cancelled" }
-  | { step: "resumable"; reason: "rateLimited" | "maxRuntime" }
+  | { step: "resumable" }
   | {
       step: "failed";
       previousSnapshotAvailable: boolean;
@@ -110,7 +110,7 @@ export default function XAcquisition({
         terminalReceived.current = true;
         unlisten.current?.();
         unlisten.current = null;
-        setView({ step: "resumable", reason: event.reason });
+        setView({ step: "resumable" });
         break;
       case "cancelled":
         setCancellationError(null);
@@ -227,8 +227,8 @@ export default function XAcquisition({
       ) : null}
       {view.step === "resumable" ? (
         <p role="status">
-          X paused the acquisition. Select Resume acquisition to continue from
-          the saved cursor.
+          Acquisition paused before it finished. Select Resume acquisition to
+          continue from the saved progress.
         </p>
       ) : null}
       {cancellationError ? <p role="alert">{cancellationError}</p> : null}
