@@ -38,4 +38,32 @@ describe("desktop API", () => {
 
     await expect(desktopApi.health()).resolves.toEqual(response);
   });
+
+  it("discovers X sources through the structured Tauri command", async () => {
+    mocks.invoke.mockResolvedValue({ browsers: [] });
+
+    await desktopApi.discoverXSources();
+
+    expect(mocks.invoke).toHaveBeenCalledWith("discover_x_sources");
+  });
+
+  it("selects an X source without passing session values", async () => {
+    const request = {
+      consent: true as const,
+      source: { browserId: "chrome", profileId: "Default" },
+    };
+    mocks.invoke.mockResolvedValue({
+      browserId: "chrome",
+      browserName: "Google Chrome",
+      profileId: "Default",
+      profileName: "Personal",
+    });
+
+    await desktopApi.selectXSource(request);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("select_x_source", { request });
+    expect(JSON.stringify(mocks.invoke.mock.calls)).not.toMatch(
+      /ct0|auth.?token|cookie/i,
+    );
+  });
 });

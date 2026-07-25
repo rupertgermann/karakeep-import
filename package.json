@@ -9,7 +9,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:fieldtheory": "node --test fieldtheory-bridge/test/*.test.mjs scripts/test/*.test.mjs",
     "typecheck": "tsc --noEmit",
+    "prepare:fieldtheory": "node scripts/prepare-fieldtheory-runtime.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

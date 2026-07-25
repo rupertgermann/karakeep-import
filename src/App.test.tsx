@@ -5,8 +5,14 @@ import App from "./App";
 import type { DesktopApi } from "./desktop-api";
 
 describe("Karakeep Transfer shell", () => {
+  const xSourceApi = {
+    discoverXSources: vi.fn().mockResolvedValue({ browsers: [] }),
+    selectXSource: vi.fn(),
+  };
+
   it("shows a checking state while the desktop bridge responds", () => {
     const desktopApi: DesktopApi = {
+      ...xSourceApi,
       health: vi.fn().mockReturnValue(new Promise<never>(() => undefined)),
     };
 
@@ -19,6 +25,7 @@ describe("Karakeep Transfer shell", () => {
 
   it("shows the branded desktop shell after the backend health check", async () => {
     const desktopApi: DesktopApi = {
+      ...xSourceApi,
       health: vi.fn().mockResolvedValue({
         status: "ok",
         appName: "Karakeep Transfer",
@@ -40,6 +47,7 @@ describe("Karakeep Transfer shell", () => {
 
   it("reports when the desktop bridge is unavailable", async () => {
     const desktopApi: DesktopApi = {
+      ...xSourceApi,
       health: vi.fn().mockRejectedValue(new Error("bridge unavailable")),
     };
 

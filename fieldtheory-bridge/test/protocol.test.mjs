@@ -1,0 +1,171 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { handleLine } from "../src/protocol.mjs";
+
+test("returns a versioned structured discovery result", async () => {
+  const output = await handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "discover-1",
+      command: "discoverSources",
+    }),
+    {
+      discoverSources: async () => ({
+        browsers: [
+          {
+            id: "chrome",
+            name: "Google Chrome",
+            profiles: [{ id: "Default", name: "Personal" }],
+          },
+        ],
+      }),
+    },
+  );
+
+  assert.deepEqual(JSON.parse(output), {
+    protocolVersion: 1,
+    requestId: "discover-1",
+    type: "result",
+    command: "discoverSources",
+    data: {
+      browsers: [
+        {
+          id: "chrome",
+          name: "Google Chrome",
+          profiles: [{ id: "Default", name: "Personal" }],
+        },
+      ],
+    },
+  });
+});
+
+test("rejects secret-bearing input without echoing password-equivalent values", async () => {
+  const secret = "auth-token-canary-8472";
+  const output = await handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "secret-1",
+      command: "selectSource",
+      consent: true,
+      source: { browserId: "chrome", profileId: "Default" },
+      authToken: secret,
+    }),
+  );
+
+  assert.doesNotMatch(output, new RegExp(secret));
+  assert.deepEqual(JSON.parse(output), {
+    protocolVersion: 1,
+    requestId: "secret-1",
+    type: "error",
+    error: {
+      code: "invalid_request",
+      message: "Request contains unsupported fields.",
+    },
+  });
+});
+
+test("returns a structured selected source without session material", async () => {
+  const output = await handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "select-1",
+      command: "selectSource",
+      consent: true,
+      source: { browserId: "firefox", profileId: "Profiles/default" },
+    }),
+    {
+      selectSource: async () => ({
+        browserId: "firefox",
+        browserName: "Firefox",
+        profileId: "Profiles/default",
+        profileName: "default-release",
+      }),
+    },
+  );
+
+  assert.deepEqual(JSON.parse(output), {
+    protocolVersion: 1,
+    requestId: "select-1",
+    type: "result",
+    command: "selectSource",
+    data: {
+      browserId: "firefox",
+      browserName: "Firefox",
+      profileId: "Profiles/default",
+      profileName: "default-release",
+    },
+  });
+  assert.doesNotMatch(output, /ct0|auth.?token|cookie/i);
+});
+
+test("returns stable errors for malformed or unsupported requests", async () => {
+  const cases = [
+    ["{", "unknown", "invalid_json"],
+    ["[]", "unknown", "invalid_request"],
+    [
+      JSON.stringify({
+        protocolVersion: 2,
+        requestId: "version-1",
+        command: "discoverSources",
+      }),
+      "version-1",
+      "unsupported_protocol",
+    ],
+    [
+      JSON.stringify({
+        protocolVersion: 1,
+        requestId: "contains spaces",
+        command: "discoverSources",
+      }),
+      "unknown",
+      "invalid_request",
+    ],
+    [
+      JSON.stringify({
+        protocolVersion: 1,
+        requestId: "command-1",
+        command: "runShell",
+      }),
+      "command-1",
+      "unsupported_command",
+    ],
+    [
+      JSON.stringify({
+        protocolVersion: 1,
+        requestId: "source-1",
+        command: "selectSource",
+        consent: true,
+        source: { browserId: "chrome" },
+      }),
+      "source-1",
+      "invalid_request",
+    ],
+  ];
+
+  for (const [input, requestId, code] of cases) {
+    const parsed = JSON.parse(await handleLine(input));
+    assert.equal(parsed.requestId, requestId);
+    assert.equal(parsed.type, "error");
+    assert.equal(parsed.error.code, code);
+  }
+});
+
+test("redacts unexpected bridge failures", async () => {
+  const secret = "ct0-canary-9921";
+  const output = await handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "failure-1",
+      command: "discoverSources",
+    }),
+    {
+      discoverSources: async () => {
+        throw new Error(`profile failure ${secret}`);
+      },
+    },
+  );
+
+  assert.doesNotMatch(output, new RegExp(secret));
+  assert.equal(JSON.parse(output).error.code, "bridge_error");
+});

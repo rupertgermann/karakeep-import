@@ -1,4 +1,12 @@
 use serde::Serialize;
+use tauri::Manager;
+
+pub mod fieldtheory;
+
+use fieldtheory::{
+    BridgeCommand, BridgeRequest, DiscoveryResponse, FieldTheoryState, SelectedXSource,
+    XSourceSelection,
+};
 
 pub mod bookmark;
 pub mod diagnostics;
@@ -44,14 +52,45 @@ fn export_diagnostics(
     state.explicit_export()
 }
 
+#[tauri::command]
+fn discover_x_sources(
+    state: tauri::State<'_, FieldTheoryState>,
+) -> Result<DiscoveryResponse, String> {
+    state
+        .runner()
+        .request(&BridgeRequest::new(
+            "discover-x-sources",
+            BridgeCommand::DiscoverSources,
+        ))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn select_x_source(
+    state: tauri::State<'_, FieldTheoryState>,
+    request: XSourceSelection,
+) -> Result<SelectedXSource, String> {
+    state
+        .runner()
+        .request(&BridgeRequest::select("select-x-source", request))
+        .map_err(|error| error.to_string())
+}
+
 fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .manage(diagnostics::DiagnosticsStore::default())
+        .setup(|app| {
+            let resource_dir = app.path().resource_dir()?;
+            app.manage(FieldTheoryState::bundled(&resource_dir));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             health,
             version_information,
             manual_update_check,
-            export_diagnostics
+            export_diagnostics,
+            discover_x_sources,
+            select_x_source
         ])
 }
 

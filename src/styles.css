@@ -22,7 +22,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -45,6 +46,96 @@ input {
   box-shadow:
     0 1.5rem 4rem rgb(38 48 40 / 12%),
     inset 0 1px 0 rgb(255 255 255 / 70%);
+}
+
+.source-card {
+  width: min(100%, 46rem);
+  margin: 0 auto;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border: 1px solid #cec9bc;
+  border-radius: 2rem;
+  background: rgb(251 248 241 / 92%);
+  box-shadow: 0 1.5rem 4rem rgb(38 48 40 / 8%);
+}
+
+.source-card h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.75rem, 4vw, 2.6rem);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+.source-explanation,
+.affiliation-note {
+  color: #687067;
+  line-height: 1.55;
+}
+
+.source-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.source-fields label {
+  display: grid;
+  gap: 0.5rem;
+  color: #3e5641;
+  font-weight: 650;
+}
+
+.source-fields select {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid #b9b4a7;
+  border-radius: 0.75rem;
+  background: #fffdf8;
+  color: #263028;
+}
+
+.consent {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin: 1.5rem 0;
+  color: #3f4940;
+  line-height: 1.45;
+}
+
+.consent input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.1rem;
+  accent-color: #526b54;
+}
+
+.source-card button {
+  padding: 0.8rem 1.15rem;
+  border: 0;
+  border-radius: 999px;
+  background: #526b54;
+  color: #fff;
+  font-weight: 700;
+}
+
+.source-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.source-result {
+  color: #3e5641;
+  font-weight: 700;
+}
+
+.source-error {
+  color: #8c352f;
+}
+
+.affiliation-note {
+  margin-bottom: 0;
+  font-size: 0.8rem;
 }
 
 .brand-mark {
@@ -143,6 +234,14 @@ footer p {
 
   .welcome-card {
     border-radius: 1.5rem;
+  }
+
+  .source-card {
+    border-radius: 1.5rem;
+  }
+
+  .source-fields {
+    grid-template-columns: 1fr;
   }
 }
 

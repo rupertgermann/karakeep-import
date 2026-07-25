@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { desktopApi as defaultDesktopApi } from "./desktop-api";
 import type { DesktopApi, HealthResponse } from "./desktop-api";
+import XSourceSetup from "./x-source/XSourceSetup";
 
 interface AppProps {
   desktopApi?: DesktopApi;
@@ -71,6 +72,8 @@ export default function App({ desktopApi = defaultDesktopApi }: AppProps) {
           {status.text}
         </p>
       </section>
+
+      {health ? <XSourceSetup api={desktopApi} /> : null}
 
       <footer>
         <p>Unofficial community tool · No telemetry</p>

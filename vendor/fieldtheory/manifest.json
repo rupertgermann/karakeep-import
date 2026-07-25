@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "fieldTheory": {
+    "repository": "https://github.com/afar1/fieldtheory-cli",
+    "version": "1.3.22",
+    "commit": "4b4a0f677e7077ac76848408b22091fc34330391",
+    "sourceUrl": "https://github.com/afar1/fieldtheory-cli/archive/4b4a0f677e7077ac76848408b22091fc34330391.tar.gz",
+    "sourceSha256": "1ebb91f6f20bd23f6a18a6222d3a207f044ae8437be55fe86146732f0b4c2f87",
+    "packageFile": "vendor/fieldtheory/fieldtheory-1.3.22.tgz",
+    "packageSha256": "a949e76f77b8ee0eeae71ac095fb50dfc5e21d1432f90aa777a076a21e6dcc75",
+    "license": "MIT"
+  },
+  "node": {
+    "version": "22.20.0",
+    "license": "MIT",
+    "artifacts": {
+      "darwin-arm64": {
+        "file": "node-v22.20.0-darwin-arm64.tar.xz",
+        "sha256": "f2ed1fbdfb79afb9343dfbb609efde657b41e7efcd5215264ce78f8906356b4d"
+      },
+      "darwin-x64": {
+        "file": "node-v22.20.0-darwin-x64.tar.xz",
+        "sha256": "2a291f0a9555f5d6685d96ce9429da3d0ea3cd896c012702c6ee0015f818684e"
+      },
+      "win-x64": {
+        "file": "node-v22.20.0-win-x64.zip",
+        "sha256": "bb819d6eb8f5bfda294bbc83a7e4ec6539da67c4233d54b0d655b9248b15e29d"
+      }
+    }
+  }
+}
