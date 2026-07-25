@@ -2,16 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
-  open: vi.fn(),
   listen: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: mocks.invoke,
-}));
-
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: mocks.open,
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -29,7 +24,6 @@ import {
 describe("desktop API", () => {
   beforeEach(() => {
     mocks.invoke.mockReset();
-    mocks.open.mockReset();
     mocks.listen.mockReset();
   });
 
@@ -86,21 +80,12 @@ describe("desktop API", () => {
   });
 
   it("opens a native picker limited to supported File Sources", async () => {
-    mocks.open.mockResolvedValue("/private/bookmarks.jsonl");
+    mocks.invoke.mockResolvedValue("/private/bookmarks.jsonl");
 
     await expect(desktopApi.selectFileSource()).resolves.toBe(
       "/private/bookmarks.jsonl",
     );
-    expect(mocks.open).toHaveBeenCalledWith({
-      directory: false,
-      multiple: false,
-      filters: [
-        {
-          name: "Bookmark files",
-          extensions: ["jsonl", "json", "html", "htm", "txt"],
-        },
-      ],
-    });
+    expect(mocks.invoke).toHaveBeenCalledWith("select_file_source");
   });
 
   it("requests an in-place preview with an explicit format", async () => {

@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
 
 import type {
   DestinationSummary as TransferDestinationSummary,
@@ -162,20 +161,7 @@ export const desktopApi: DesktopApi & FileSourceApi = {
   discoverXSources: () => invoke<XSourceDiscovery>("discover_x_sources"),
   selectXSource: (request) =>
     invoke<SelectedXSource>("select_x_source", { request }),
-  selectFileSource: async () => {
-    const selection = await open({
-      directory: false,
-      multiple: false,
-      filters: [
-        {
-          name: "Bookmark files",
-          extensions: ["jsonl", "json", "html", "htm", "txt"],
-        },
-      ],
-    });
-
-    return typeof selection === "string" ? selection : null;
-  },
+  selectFileSource: () => invoke<string | null>("select_file_source"),
   previewFileSource: (path, format) =>
     invoke<FileSourcePreview>("preview_file_source", { path, format }),
   destinationStatus: () =>

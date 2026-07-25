@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -8,6 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 pub mod bookmark;
 pub mod delivery;
@@ -189,22 +190,72 @@ struct FileSourceCommandError {
     message: &'static str,
 }
 
-#[tauri::command]
-fn preview_file_source(
-    path: PathBuf,
-    format: file_source::FileSourceFormat,
-) -> Result<file_source::FileSourcePreview, FileSourceCommandError> {
-    if !path.is_file() {
-        return Err(FileSourceCommandError {
-            code: "fileUnreadable",
-            message: "The selected file could not be read.",
-        });
+#[derive(Default)]
+struct FileSelectionState(Mutex<Option<PathBuf>>);
+
+impl FileSelectionState {
+    fn select(&self, path: PathBuf) -> Result<(), FileSourceCommandError> {
+        if !path.is_file() {
+            return Err(file_unreadable());
+        }
+        *self.0.lock().map_err(|_| file_unreadable())? = Some(path);
+        Ok(())
     }
 
-    file_source::preview_file(&path, format).map_err(|_| FileSourceCommandError {
+    fn authorize(&self, path: &Path) -> Result<(), FileSourceCommandError> {
+        let selected = self.0.lock().map_err(|_| file_unreadable())?;
+        if selected.as_deref() == Some(path) {
+            Ok(())
+        } else {
+            Err(file_unreadable())
+        }
+    }
+}
+
+fn file_unreadable() -> FileSourceCommandError {
+    FileSourceCommandError {
+        code: "fileUnreadable",
+        message: "The selected file could not be read.",
+    }
+}
+
+#[tauri::command]
+async fn select_file_source<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    selections: tauri::State<'_, FileSelectionState>,
+) -> Result<Option<PathBuf>, FileSourceCommandError> {
+    let Some(selection) = app
+        .dialog()
+        .file()
+        .add_filter("Bookmark files", &["jsonl", "json", "html", "htm", "txt"])
+        .blocking_pick_file()
+    else {
+        return Ok(None);
+    };
+    let path = selection.into_path().map_err(|_| file_unreadable())?;
+    selections.select(path.clone())?;
+    Ok(Some(path))
+}
+
+fn preview_selected_file_source(
+    selections: &FileSelectionState,
+    path: &Path,
+    format: file_source::FileSourceFormat,
+) -> Result<file_source::FileSourcePreview, FileSourceCommandError> {
+    selections.authorize(path)?;
+    file_source::preview_file(path, format).map_err(|_| FileSourceCommandError {
         code: "invalidFileSource",
         message: "The selected file is not a valid supported File Source.",
     })
+}
+
+#[tauri::command]
+fn preview_file_source(
+    selections: tauri::State<'_, FileSelectionState>,
+    path: PathBuf,
+    format: file_source::FileSourceFormat,
+) -> Result<file_source::FileSourcePreview, FileSourceCommandError> {
+    preview_selected_file_source(&selections, &path, format)
 }
 
 type NativeDestinationService =
@@ -371,6 +422,7 @@ fn delete_local_transfer_data(
         .reserve(OperationKind::Maintenance)
         .map_err(|_| "local transfer data is in use")?;
     transfers.close_ledger()?;
+    transfers.clear_file_approval()?;
     let result = state
         .delete_local_transfer_data(confirmation.capability())
         .map_err(|_| "local transfer data could not be deleted");
@@ -562,6 +614,15 @@ impl TransferState {
         *coordinator = None;
         Ok(())
     }
+
+    fn clear_file_approval(&self) -> Result<(), &'static str> {
+        let mut approved = self
+            .approved_file_source
+            .lock()
+            .map_err(|_| "local transfer data is unavailable")?;
+        *approved = None;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -672,12 +733,18 @@ fn connected_destination(
 #[tauri::command]
 fn preview_transfer(
     source: TransferSourceRequest,
+    selections: tauri::State<'_, FileSelectionState>,
     field_theory: tauri::State<'_, FieldTheoryState>,
     destination: tauri::State<'_, DestinationState>,
     transfers: tauri::State<'_, TransferState>,
 ) -> Result<TransferPreview, TransferCommandError> {
     let (destination_summary, destination_identity) =
         connected_destination(destination.0.as_ref())?;
+    if let TransferSourceRequest::File { path, .. } = &source {
+        selections.authorize(path).map_err(|_| {
+            TransferCommandError::for_code(TransferCommandErrorCode::SourceUnavailable)
+        })?;
+    }
     let preview =
         resolve_transfer_source(&source, &field_theory).map_err(map_transfer_source_error)?;
     let counts = transfers
@@ -794,6 +861,7 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
     builder
         .plugin(tauri_plugin_dialog::init())
         .manage(diagnostics::DiagnosticsStore::default())
+        .manage(FileSelectionState::default())
         .setup(|app| {
             let resource_dir = app.path().resource_dir()?;
             let app_data_directory = app.path().app_data_dir()?;
@@ -824,6 +892,7 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
             save_diagnostics,
             discover_x_sources,
             select_x_source,
+            select_file_source,
             preview_file_source,
             destination_status,
             connect_destination,
@@ -986,6 +1055,17 @@ mod tests {
             .manage(test_transfer_state())
             .build(mock_context(noop_assets()))
             .expect("mock app builds");
+        if let tauri::ipc::InvokeBody::Json(value) = &body
+            && let Some(path) = value
+                .get("path")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+                .filter(|path| path.is_file())
+        {
+            app.state::<super::FileSelectionState>()
+                .select(path)
+                .expect("test fixture is selected");
+        }
         let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("mock webview builds");
@@ -1046,6 +1126,9 @@ mod tests {
                 .manage(test_transfer_state())
                 .build(mock_context(noop_assets()))
                 .expect("mock app builds");
+            app.state::<super::FileSelectionState>()
+                .select(source.clone())
+                .expect("test fixture is selected");
             let (events, delivered) = mpsc::channel();
             app.listen("delivery", move |event| {
                 let _ = events.send(event.payload().to_owned());
@@ -1422,6 +1505,41 @@ mod tests {
     }
 
     #[test]
+    fn file_preview_requires_the_exact_path_selected_by_the_native_picker() {
+        let selected =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl");
+        let unselected = selected.with_file_name("field-theory-many.jsonl");
+        let selections = super::FileSelectionState::default();
+
+        let error = super::preview_selected_file_source(
+            &selections,
+            &selected,
+            super::file_source::FileSourceFormat::FieldTheoryJsonl,
+        )
+        .expect_err("an arbitrary frontend path is not authorized");
+        assert_eq!(error.code, "fileUnreadable");
+
+        selections
+            .select(selected.clone())
+            .expect("native picker records the selection");
+        let preview = super::preview_selected_file_source(
+            &selections,
+            &selected,
+            super::file_source::FileSourceFormat::FieldTheoryJsonl,
+        )
+        .expect("the exact native selection is previewable");
+        assert_eq!(preview.bookmarks.len(), 1);
+
+        let error = super::preview_selected_file_source(
+            &selections,
+            &unselected,
+            super::file_source::FileSourceFormat::FieldTheoryJsonl,
+        )
+        .expect_err("a different frontend path remains unauthorized");
+        assert_eq!(error.code, "fileUnreadable");
+    }
+
+    #[test]
     fn file_source_preview_is_available_through_the_desktop_contract() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl");
@@ -1591,6 +1709,55 @@ mod tests {
     }
 
     #[test]
+    fn transfer_preview_rejects_an_existing_file_that_was_not_selected_natively() {
+        let directory = tempdir().expect("temporary app state");
+        let source =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl");
+        let api = Arc::new(SuccessfulDeliveryApi::default());
+        let app = super::configure_builder(mock_builder())
+            .manage(super::FieldTheoryState::bundled(
+                directory.path(),
+                directory.path(),
+            ))
+            .manage(super::DestinationState(Arc::new(ConnectedDestination(api))))
+            .manage(test_transfer_state())
+            .build(mock_context(noop_assets()))
+            .expect("mock app builds");
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview builds");
+
+        assert_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: "preview_transfer".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: if cfg!(any(windows, target_os = "android")) {
+                    "http://tauri.localhost"
+                } else {
+                    "tauri://localhost"
+                }
+                .parse()
+                .expect("valid IPC origin"),
+                body: tauri::ipc::InvokeBody::Json(json!({
+                    "source": {
+                        "kind": "file",
+                        "path": source,
+                        "format": "fieldTheoryJsonl"
+                    }
+                })),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+            Err(json!({
+                "code": "source-unavailable",
+                "message": "The selected bookmark source is unavailable."
+            })),
+        );
+    }
+
+    #[test]
     fn invalid_delivery_identifiers_are_redacted_before_startup() {
         assert_command_response_with_body(
             "start_delivery",
@@ -1691,6 +1858,40 @@ mod tests {
                     }
                 }),
             )
+        );
+    }
+
+    #[test]
+    fn clearing_local_transfer_state_invalidates_the_reviewed_file_approval() {
+        let transfers = test_transfer_state();
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl");
+        let source = super::TransferSourceRequest::File {
+            path: path.clone(),
+            format: super::file_source::FileSourceFormat::FieldTheoryJsonl,
+        };
+        let preview = super::file_source::preview_file(
+            &path,
+            super::file_source::FileSourceFormat::FieldTheoryJsonl,
+        )
+        .expect("reviewed file preview");
+        let destination = super::DestinationIdentity::new("https://keep.example", "user-a")
+            .expect("reviewed destination");
+        let approval = transfers
+            .approve_file_source(&source, &preview, &destination)
+            .expect("file approval")
+            .expect("opaque approval ID");
+
+        transfers
+            .clear_file_approval()
+            .expect("ephemeral file approval clears");
+
+        let error = transfers
+            .approved_file_preview(Some(&approval), &source, &destination)
+            .expect_err("deleted local state cannot reuse the old approval");
+        assert_eq!(
+            error.code,
+            super::TransferCommandErrorCode::SourceUnavailable
         );
     }
 
