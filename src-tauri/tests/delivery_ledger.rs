@@ -10,7 +10,7 @@ use karakeep_transfer_lib::{
         FailureCode, RunStatus, TimestampMillis,
     },
     ledger::{DeliveryLedger, LedgerError},
-    private_data::PrivateTransferData,
+    private_data::{DeleteLocalTransferData, PrivateTransferData},
 };
 
 static NEXT_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -299,9 +299,17 @@ fn history_reports_created_existing_and_failed_outcomes_per_run() {
     );
 }
 
-#[test]
-fn replacing_source_and_confirming_local_data_deletion_obey_separate_boundaries() {
-    let directory = TestDirectory::new("private-data");
+struct PrivateDataFixture {
+    _directory: TestDirectory,
+    ledger_path: PathBuf,
+    snapshot_path: PathBuf,
+    acquisition_path: PathBuf,
+    private_data: PrivateTransferData,
+    destination: DestinationIdentity,
+}
+
+fn private_data_fixture(label: &str) -> PrivateDataFixture {
+    let directory = TestDirectory::new(label);
     let ledger_path = directory.join("delivery-ledger.sqlite3");
     let snapshot_path = directory.join("fieldtheory/bookmarks.jsonl");
     let acquisition_path = directory.join("fieldtheory/acquisition");
@@ -314,7 +322,6 @@ fn replacing_source_and_confirming_local_data_deletion_obey_separate_boundaries(
     fs::write(acquisition_path.join("cursor"), b"opaque-cursor").expect("acquisition fixture");
     let private_data = PrivateTransferData::new(&ledger_path, &snapshot_path, &acquisition_path);
     let destination = destination("https://keep.example", "user-a");
-
     {
         let mut ledger = DeliveryLedger::open(&ledger_path).expect("ledger opens");
         let run = ledger
@@ -333,46 +340,64 @@ fn replacing_source_and_confirming_local_data_deletion_obey_separate_boundaries(
             .expect("delivery is recorded");
     }
 
-    let summary = private_data.inspect().expect("private data summary");
-    assert_eq!(summary.ledger_path, ledger_path);
-    assert_eq!(summary.snapshot_path, snapshot_path);
+    PrivateDataFixture {
+        _directory: directory,
+        ledger_path,
+        snapshot_path,
+        acquisition_path,
+        private_data,
+        destination,
+    }
+}
+
+#[test]
+fn private_data_inspection_reports_local_paths_and_sizes() {
+    let fixture = private_data_fixture("private-data-inspection");
+
+    let summary = fixture
+        .private_data
+        .inspect()
+        .expect("private data summary");
+
+    assert_eq!(summary.ledger_path, fixture.ledger_path);
+    assert_eq!(summary.snapshot_path, fixture.snapshot_path);
     assert!(summary.ledger_bytes > 0);
     assert_eq!(
         summary.snapshot_bytes,
         include_bytes!("fixtures/bookmark-snapshot.jsonl").len() as u64
     );
+}
 
-    private_data
+#[test]
+fn replacing_x_source_clears_only_snapshot_and_acquisition_state() {
+    let fixture = private_data_fixture("private-data-source-replacement");
+
+    fixture
+        .private_data
         .replace_x_source()
         .expect("source replacement clears source data");
-    assert!(!snapshot_path.exists());
-    assert!(!acquisition_path.exists());
-    assert!(ledger_path.exists());
-    let ledger = DeliveryLedger::open(&ledger_path).expect("ledger remains readable");
+    assert!(!fixture.snapshot_path.exists());
+    assert!(!fixture.acquisition_path.exists());
+    assert!(fixture.ledger_path.exists());
+    let ledger = DeliveryLedger::open(&fixture.ledger_path).expect("ledger remains readable");
     assert!(
         ledger
-            .delivery_for(&destination, &bookmark("tweet-7"))
+            .delivery_for(&fixture.destination, &bookmark("tweet-7"))
             .expect("delivery query")
             .is_some()
     );
-    drop(ledger);
+}
 
-    fs::create_dir_all(&acquisition_path).expect("acquisition directory recreated");
-    fs::write(&snapshot_path, b"snapshot").expect("snapshot recreated");
-    assert!(
-        !private_data
-            .delete_if_confirmed(false)
-            .expect("unconfirmed deletion is a no-op")
-    );
-    assert!(ledger_path.exists());
-    assert!(snapshot_path.exists());
+#[test]
+fn confirmed_local_data_deletion_removes_snapshot_ledger_and_side_state() {
+    let fixture = private_data_fixture("private-data-deletion");
 
-    assert!(
-        private_data
-            .delete_if_confirmed(true)
-            .expect("confirmed deletion succeeds")
-    );
-    assert!(!ledger_path.exists());
-    assert!(!snapshot_path.exists());
-    assert!(!acquisition_path.exists());
+    fixture
+        .private_data
+        .delete(DeleteLocalTransferData::confirmed())
+        .expect("confirmed deletion succeeds");
+
+    assert!(!fixture.ledger_path.exists());
+    assert!(!fixture.snapshot_path.exists());
+    assert!(!fixture.acquisition_path.exists());
 }

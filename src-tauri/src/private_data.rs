@@ -22,6 +22,15 @@ pub struct PrivateTransferData {
     acquisition_state_path: PathBuf,
 }
 
+/// Capability created only after the UI's destructive-action confirmation.
+pub struct DeleteLocalTransferData(());
+
+impl DeleteLocalTransferData {
+    pub fn confirmed() -> Self {
+        Self(())
+    }
+}
+
 impl PrivateTransferData {
     pub fn new(
         ledger_path: impl Into<PathBuf>,
@@ -57,16 +66,13 @@ impl PrivateTransferData {
         remove_path(&self.acquisition_state_path)
     }
 
-    pub fn delete_if_confirmed(&self, confirmed: bool) -> io::Result<bool> {
-        if !confirmed {
-            return Ok(false);
-        }
+    pub fn delete(&self, _confirmation: DeleteLocalTransferData) -> io::Result<()> {
         remove_path(&self.snapshot_path)?;
         remove_path(&self.acquisition_state_path)?;
         remove_path(&self.ledger_path)?;
         remove_path(&sqlite_sidecar(&self.ledger_path, "-wal"))?;
         remove_path(&sqlite_sidecar(&self.ledger_path, "-shm"))?;
-        Ok(true)
+        Ok(())
     }
 }
 

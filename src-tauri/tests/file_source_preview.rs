@@ -41,7 +41,7 @@ fn one_field_theory_record_maps_to_a_read_only_transfer_preview() {
             .note
             .contains("> Quoted from Quoted Person (@quoted):\n> Quoted context\n> on two lines.")
     );
-    assert!(bookmark.note.ends_with("Imported from Field Theory."));
+    assert!(bookmark.note.ends_with("Transferred from Field Theory."));
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn chrome_netscape_header_is_auto_detected_and_mapped() {
         bookmark.note,
         "Chrome folder: Bookmarks bar > Research & Docs\n\
          Added to Chrome: 2024-07-24T00:00:00Z\n\
-         Imported from Chrome bookmarks."
+         Transferred from Chrome bookmarks."
     );
 }
 
@@ -122,7 +122,7 @@ fn chrome_folder_path_is_preserved_while_human_tags_are_deduplicated() {
 }
 
 #[test]
-fn field_theory_duplicate_source_ids_and_urls_are_rejected() {
+fn field_theory_duplicate_source_ids_are_rejected() {
     let duplicate_id = concat!(
         "{\"id\":\"same\",\"url\":\"https://example.com/one\"}\n",
         "{\"id\":\"same\",\"url\":\"https://example.com/two\"}\n"
@@ -138,7 +138,10 @@ fn field_theory_duplicate_source_ids_and_urls_are_rejected() {
             .to_string()
             .contains("Duplicate source ID same on line 2")
     );
+}
 
+#[test]
+fn field_theory_duplicate_urls_are_rejected() {
     let duplicate_url = concat!(
         "{\"id\":\"one\",\"url\":\"https://example.com/same\"}\n",
         "{\"id\":\"two\",\"url\":\"https://example.com/same\"}\n"
@@ -175,7 +178,7 @@ fn chrome_duplicates_are_rejected_after_view_source_normalization() {
 }
 
 #[test]
-fn invalid_json_objects_and_non_web_urls_are_rejected() {
+fn invalid_json_objects_are_rejected() {
     let error = preview_text(
         "bookmarks.jsonl",
         "[]\n",
@@ -183,7 +186,10 @@ fn invalid_json_objects_and_non_web_urls_are_rejected() {
     )
     .expect_err("non-object JSONL value must fail");
     assert!(error.to_string().contains("line 1 is not a JSON object"));
+}
 
+#[test]
+fn non_web_chrome_urls_are_rejected() {
     let error = preview_text(
         "bookmarks.html",
         r#"<DL><p><DT><A HREF="javascript:alert(1)">Bookmarklet</A></DL><p>"#,
