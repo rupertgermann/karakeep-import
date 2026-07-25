@@ -19,6 +19,7 @@ import {
   readBundleManifest,
   selectRuntimeTargets,
   sha256,
+  sha3_256,
   verifyVendoredPackage,
 } from "./lib/fieldtheory-bundle.mjs";
 
@@ -39,8 +40,14 @@ async function download(url, destination) {
   await rename(temporary, destination);
 }
 
-async function verifiedArchive(manifest, target) {
-  const artifact = manifest.node.artifacts[target];
+function requireSha256(value, description) {
+  if (!/^[a-f0-9]{64}$/.test(value ?? "")) {
+    throw new Error(`${description} is not pinned with SHA-256.`);
+  }
+}
+
+async function verifiedArchive(artifact, url, description) {
+  requireSha256(artifact.sha256, `${description} archive`);
   const archive = path.join(cache, artifact.file);
   await mkdir(cache, { recursive: true });
   let valid = false;
@@ -51,13 +58,16 @@ async function verifiedArchive(manifest, target) {
   }
   if (!valid) {
     await rm(archive, { force: true });
-    await download(
-      `https://nodejs.org/dist/v${manifest.node.version}/${artifact.file}`,
-      archive,
-    );
+    await download(url, archive);
   }
   if ((await sha256(archive)) !== artifact.sha256) {
-    throw new Error(`Node runtime checksum mismatch for ${target}.`);
+    throw new Error(`${description} archive checksum mismatch.`);
+  }
+  if (
+    artifact.sha3_256 &&
+    (await sha3_256(archive)) !== artifact.sha3_256
+  ) {
+    throw new Error(`${description} archive SHA3-256 mismatch.`);
   }
   return archive;
 }
@@ -103,19 +113,70 @@ async function extractNode(manifest, target, archive) {
     `node-v${manifest.node.version}-${target}`,
   );
   const executable = target === "win-x64" ? "node.exe" : path.join("bin", "node");
-  await copyFile(
-    path.join(extractedRoot, executable),
-    path.join(destination, path.basename(executable)),
+  const sourceExecutable = path.join(extractedRoot, executable);
+  const artifact = manifest.node.artifacts[target];
+  requireSha256(
+    artifact.executableSha256,
+    `Node runtime ${target} executable`,
   );
-  if (target !== "win-x64") {
-    await chmod(path.join(destination, "node"), 0o755);
+  try {
+    if ((await sha256(sourceExecutable)) !== artifact.executableSha256) {
+      throw new Error(
+        `Node runtime ${target} executable checksum mismatch after extraction.`,
+      );
+    }
+    await copyFile(
+      sourceExecutable,
+      path.join(destination, path.basename(executable)),
+    );
+    if (target !== "win-x64") {
+      await chmod(path.join(destination, "node"), 0o755);
+    }
+    await mkdir(path.join(resources, "node"), { recursive: true });
+    await copyFile(
+      path.join(extractedRoot, "LICENSE"),
+      path.join(resources, "node", "LICENSE"),
+    );
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
   }
-  await mkdir(path.join(resources, "node"), { recursive: true });
-  await copyFile(
-    path.join(extractedRoot, "LICENSE"),
-    path.join(resources, "node", "LICENSE"),
+}
+
+async function extractSqlite(manifest, target, archive) {
+  const artifact = manifest.sqlite.artifacts[target];
+  requireSha256(
+    artifact.executableSha256,
+    `SQLite runtime ${target} executable`,
   );
-  await rm(temporary, { recursive: true, force: true });
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "karakeep-sqlite-"));
+  const destination = path.join(resources, "sqlite", target);
+  await rm(destination, { recursive: true, force: true });
+  await mkdir(destination, { recursive: true });
+  try {
+    run(
+      "powershell.exe",
+      [
+        "-NonInteractive",
+        "-NoProfile",
+        "-Command",
+        "Expand-Archive",
+        "-LiteralPath",
+        archive,
+        "-DestinationPath",
+        temporary,
+      ],
+      repositoryRoot,
+    );
+    const sourceExecutable = path.join(temporary, "sqlite3.exe");
+    if ((await sha256(sourceExecutable)) !== artifact.executableSha256) {
+      throw new Error(
+        `SQLite runtime ${target} executable checksum mismatch after extraction.`,
+      );
+    }
+    await copyFile(sourceExecutable, path.join(destination, "sqlite3.exe"));
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 }
 
 async function prepareBridge() {
@@ -157,9 +218,34 @@ async function prepareBridge() {
 const manifest = await readBundleManifest(repositoryRoot);
 await verifyVendoredPackage(repositoryRoot, manifest);
 await mkdir(resources, { recursive: true });
+await rm(path.join(resources, "node"), { recursive: true, force: true });
+await rm(path.join(resources, "sqlite"), { recursive: true, force: true });
 await prepareBridge();
-for (const target of selectRuntimeTargets(process.platform, process.arch)) {
-  await extractNode(manifest, target, await verifiedArchive(manifest, target));
+const runtimeTargets = selectRuntimeTargets(process.platform, process.arch);
+for (const target of runtimeTargets) {
+  const artifact = manifest.node.artifacts[target];
+  await extractNode(
+    manifest,
+    target,
+    await verifiedArchive(
+      artifact,
+      `https://nodejs.org/dist/v${manifest.node.version}/${artifact.file}`,
+      `Node runtime ${target}`,
+    ),
+  );
+}
+if (runtimeTargets.includes("win-x64")) {
+  const target = "win-x64";
+  const artifact = manifest.sqlite.artifacts[target];
+  await extractSqlite(
+    manifest,
+    target,
+    await verifiedArchive(
+      artifact,
+      manifest.sqlite.sourceUrl,
+      `SQLite runtime ${target}`,
+    ),
+  );
 }
 await copyFile(
   path.join(repositoryRoot, "vendor", "fieldtheory", "manifest.json"),
@@ -174,5 +260,5 @@ const preparedManifest = JSON.parse(
   await readFile(path.join(resources, "fieldtheory-manifest.json"), "utf8"),
 );
 process.stdout.write(
-  `Prepared Field Theory ${preparedManifest.fieldTheory.version} with private Node ${preparedManifest.node.version}.\n`,
+  `Prepared Field Theory ${preparedManifest.fieldTheory.version} with private Node ${preparedManifest.node.version}${runtimeTargets.includes("win-x64") ? ` and SQLite ${preparedManifest.sqlite.version}` : ""}.\n`,
 );

@@ -46,6 +46,10 @@ async function sha256(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
 }
 
+async function sha3_256(file) {
+  return createHash("sha3-256").update(await readFile(file)).digest("hex");
+}
+
 function nativeBuildCommand(targetConfig) {
   for (const [name, value] of [
     ["Rust target", targetConfig.rustTarget],
@@ -258,10 +262,7 @@ async function validateNoSecrets(roots) {
   for (const root of roots) {
     for (const file of await regularFiles(root)) {
       const bytes = await readFile(file);
-      if (bytes.includes(0)) {
-        continue;
-      }
-      const content = bytes.toString("utf8");
+      const content = bytes.toString("utf8").replaceAll("\0", "");
       const assignments = content.matchAll(
         /\b(?:KARAKEEP_API_KEY|X_AUTH_TOKEN|TWITTER_AUTH_TOKEN|auth_token|ct0)\s*[:=]\s*["']([^"'\r\n]{8,})["']/gi,
       );
@@ -279,24 +280,26 @@ async function validateNoSecrets(roots) {
   }
 }
 
-async function expectedNodeRuntimeSha256(
+async function extractedArchiveMemberSha256(
   archiveCache,
-  manifest,
-  runtime,
   artifact,
+  member,
+  description,
 ) {
   const archive = path.join(archiveCache, artifact.file);
-  await requireNonempty(archive, "pinned Node runtime archive");
+  await requireNonempty(archive, `pinned ${description} archive`);
   if ((await sha256(archive)) !== artifact.sha256) {
-    throw new Error(`Pinned Node runtime archive checksum mismatch for ${runtime}.`);
+    throw new Error(`Pinned ${description} archive checksum mismatch.`);
+  }
+  if (
+    artifact.sha3_256 &&
+    (await sha3_256(archive)) !== artifact.sha3_256
+  ) {
+    throw new Error(`Pinned ${description} archive SHA3-256 mismatch.`);
   }
 
-  const extractedRoot = `node-v${manifest.node.version}-${runtime}`;
-  const executable =
-    runtime === "win-x64" ? "node.exe" : path.posix.join("bin", "node");
-  const member = path.posix.join(extractedRoot, executable);
   const temporary = await mkdtemp(
-    path.join(os.tmpdir(), "karakeep-release-node-"),
+    path.join(os.tmpdir(), "karakeep-release-runtime-"),
   );
   try {
     const result = spawnSync(
@@ -305,9 +308,9 @@ async function expectedNodeRuntimeSha256(
       { encoding: "utf8" },
     );
     if (result.error || result.status !== 0) {
-      throw new Error(`Could not inspect pinned Node runtime archive for ${runtime}.`);
+      throw new Error(`Could not inspect pinned ${description} archive.`);
     }
-    return await sha256(path.join(temporary, extractedRoot, executable));
+    return await sha256(path.join(temporary, member));
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
@@ -405,6 +408,7 @@ async function validateInputs(
     "THIRD_PARTY_NOTICES.md",
     "node/LICENSE",
     "fieldtheory/bridge/src/index.mjs",
+    "fieldtheory/bridge/src/runtime-environment.mjs",
     "fieldtheory/bridge/package.json",
     "fieldtheory/bridge/package-lock.json",
     "fieldtheory/bridge/node_modules/fieldtheory/package.json",
@@ -468,17 +472,75 @@ async function validateInputs(
     if (!artifact?.file || !/^[a-f0-9]{64}$/.test(artifact.sha256 ?? "")) {
       throw new Error(`Node runtime ${runtime} is not pinned with SHA-256.`);
     }
+    if (!/^[a-f0-9]{64}$/.test(artifact.executableSha256 ?? "")) {
+      throw new Error(
+        `Node runtime ${runtime} executable is not pinned with SHA-256.`,
+      );
+    }
+    const extractedRoot = `node-v${vendorManifest.node.version}-${runtime}`;
+    const executableMember = path.posix.join(
+      extractedRoot,
+      runtime === "win-x64" ? "node.exe" : path.posix.join("bin", "node"),
+    );
+    const archiveExecutableSha256 = await extractedArchiveMemberSha256(
+      nodeArchiveCache,
+      artifact,
+      executableMember,
+      `Node runtime ${runtime}`,
+    );
+    if (archiveExecutableSha256 !== artifact.executableSha256) {
+      throw new Error(
+        `Pinned Node runtime ${runtime} archive does not contain its executable pin.`,
+      );
+    }
     if (
-      (await sha256(preparedExecutable)) !==
-      (await expectedNodeRuntimeSha256(
-        nodeArchiveCache,
-        vendorManifest,
-        runtime,
-        artifact,
-      ))
+      (await sha256(preparedExecutable)) !== artifact.executableSha256
     ) {
       throw new Error(
-        `Prepared Node runtime ${runtime} does not match its pinned archive.`,
+        `Prepared Node runtime ${runtime} does not match its executable pin.`,
+      );
+    }
+  }
+  const sqliteRuntimes = targetConfig.nodeRuntimes.includes("win-x64")
+    ? ["win-x64"]
+    : [];
+  for (const runtime of sqliteRuntimes) {
+    const artifact = vendorManifest.sqlite?.artifacts?.[runtime];
+    if (
+      !artifact?.file ||
+      !/^[a-f0-9]{64}$/.test(artifact.sha256 ?? "") ||
+      !/^[a-f0-9]{64}$/.test(artifact.sha3_256 ?? "")
+    ) {
+      throw new Error(
+        `SQLite runtime ${runtime} archive is not pinned with SHA-256 and SHA3-256.`,
+      );
+    }
+    if (!/^[a-f0-9]{64}$/.test(artifact.executableSha256 ?? "")) {
+      throw new Error(
+        `SQLite runtime ${runtime} executable is not pinned with SHA-256.`,
+      );
+    }
+    const archiveExecutableSha256 = await extractedArchiveMemberSha256(
+      nodeArchiveCache,
+      artifact,
+      "sqlite3.exe",
+      `SQLite runtime ${runtime}`,
+    );
+    if (archiveExecutableSha256 !== artifact.executableSha256) {
+      throw new Error(
+        `Pinned SQLite runtime ${runtime} archive does not contain its executable pin.`,
+      );
+    }
+    const preparedExecutable = path.join(
+      resources,
+      "sqlite",
+      runtime,
+      "sqlite3.exe",
+    );
+    await requireNonempty(preparedExecutable, "SQLite runtime resource");
+    if ((await sha256(preparedExecutable)) !== artifact.executableSha256) {
+      throw new Error(
+        `Prepared SQLite runtime ${runtime} does not match its executable pin.`,
       );
     }
   }
@@ -508,12 +570,20 @@ async function validateInputs(
         .join(","),
       license: vendorManifest.node.license,
     },
+    ...sqliteRuntimes.map((runtime) => ({
+      ecosystem: "bundled",
+      name: "sqlite3",
+      version: vendorManifest.sqlite.version,
+      integrity: `sha256-${vendorManifest.sqlite.artifacts[runtime].executableSha256}`,
+      license: vendorManifest.sqlite.license,
+    })),
     ...javascriptComponents(packageLock),
     ...javascriptComponents(bridgeLock, "fieldtheory-javascript"),
     ...rustComponents(cargoLock, rustInventory),
   ]);
   return {
     targetConfig,
+    sqliteRuntimes,
     vendorManifestFile,
     bridgeLockFile,
     resources,
@@ -521,7 +591,13 @@ async function validateInputs(
   };
 }
 
-async function copyInputs(root, output, resources, runtimeTargets) {
+async function copyInputs(
+  root,
+  output,
+  resources,
+  runtimeTargets,
+  sqliteRuntimes,
+) {
   await cp(path.join(root, "dist"), path.join(output, "frontend"), {
     recursive: true,
   });
@@ -551,6 +627,12 @@ async function copyInputs(root, output, resources, runtimeTargets) {
       path.join(resources, "node", runtime),
       path.join(output, "resources", "node", runtime),
       { recursive: true, dereference: true },
+    );
+  }
+  for (const runtime of sqliteRuntimes) {
+    await cp(
+      path.join(resources, "sqlite", runtime, "sqlite3.exe"),
+      path.join(output, "resources", "sqlite", runtime, "sqlite3.exe"),
     );
   }
 }
@@ -608,7 +690,7 @@ async function normalizeOutput(output, epoch) {
       if (entry.isDirectory()) {
         await visit(item);
       } else {
-        const executable = /(?:^|\/)node(?:\.exe)?$/.test(
+        const executable = /(?:^|\/)(?:node|sqlite3)(?:\.exe)?$/.test(
           item.split(path.sep).join("/"),
         );
         await chmod(item, executable ? 0o755 : 0o644);
@@ -700,13 +782,15 @@ async function prepare(options) {
 
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
-  await copyInputs(
-    root,
-    output,
-    validated.resources,
-    validated.targetConfig.nodeRuntimes,
-  );
   try {
+    await validateNoSecrets([validated.resources]);
+    await copyInputs(
+      root,
+      output,
+      validated.resources,
+      validated.targetConfig.nodeRuntimes,
+      validated.sqliteRuntimes,
+    );
     await validateNoSecrets([
       path.join(output, "resources"),
       path.join(output, "frontend"),

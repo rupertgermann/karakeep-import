@@ -3,12 +3,20 @@ import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-export async function sha256(file) {
-  const hash = createHash("sha256");
+async function fileDigest(file, algorithm) {
+  const hash = createHash(algorithm);
   for await (const chunk of createReadStream(file)) {
     hash.update(chunk);
   }
   return hash.digest("hex");
+}
+
+export async function sha256(file) {
+  return fileDigest(file, "sha256");
+}
+
+export async function sha3_256(file) {
+  return fileDigest(file, "sha3-256");
 }
 
 export async function readBundleManifest(repositoryRoot) {

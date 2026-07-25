@@ -16,15 +16,31 @@
     "artifacts": {
       "darwin-arm64": {
         "file": "node-v22.20.0-darwin-arm64.tar.xz",
-        "sha256": "f2ed1fbdfb79afb9343dfbb609efde657b41e7efcd5215264ce78f8906356b4d"
+        "sha256": "f2ed1fbdfb79afb9343dfbb609efde657b41e7efcd5215264ce78f8906356b4d",
+        "executableSha256": "49161ba4e67afda85c25b2daa1f0e91d1bffc023d2dbc4886eda7a9ba38bca62"
       },
       "darwin-x64": {
         "file": "node-v22.20.0-darwin-x64.tar.xz",
-        "sha256": "2a291f0a9555f5d6685d96ce9429da3d0ea3cd896c012702c6ee0015f818684e"
+        "sha256": "2a291f0a9555f5d6685d96ce9429da3d0ea3cd896c012702c6ee0015f818684e",
+        "executableSha256": "1fdf607e61ae32be3f77e4e3cf1257c677aeb694e409f99586084839f61ad931"
       },
       "win-x64": {
         "file": "node-v22.20.0-win-x64.zip",
-        "sha256": "bb819d6eb8f5bfda294bbc83a7e4ec6539da67c4233d54b0d655b9248b15e29d"
+        "sha256": "bb819d6eb8f5bfda294bbc83a7e4ec6539da67c4233d54b0d655b9248b15e29d",
+        "executableSha256": "fdddbf4581e046b8102815d56208d6a248950bb554570b81519a8a5dacfee95d"
+      }
+    }
+  },
+  "sqlite": {
+    "version": "3.53.4",
+    "license": "Public-Domain",
+    "sourceUrl": "https://www.sqlite.org/2026/sqlite-tools-win-x64-3530400.zip",
+    "artifacts": {
+      "win-x64": {
+        "file": "sqlite-tools-win-x64-3530400.zip",
+        "sha256": "f46ee2475de4cbe287e6e5f7d43c838796b14e7379cd216bdbb28d391429f9fc",
+        "sha3_256": "88b4659fe747896b853af10157316b4ade143553efb89c1c8ca7423a278dcc8b",
+        "executableSha256": "5da2398d4913b893bd1ea578d85403b3a83a06fabf9d2303ca9f63ef0849fc6f"
       }
     }
   }

@@ -1,6 +1,10 @@
 import { createInterface } from "node:readline";
 
-import { createBridgeSession } from "./protocol.mjs";
+import { runtimeEnvironment } from "./runtime-environment.mjs";
+
+Object.assign(process.env, runtimeEnvironment());
+
+const { createBridgeSession } = await import("./protocol.mjs");
 
 const input = createInterface({
   input: process.stdin,

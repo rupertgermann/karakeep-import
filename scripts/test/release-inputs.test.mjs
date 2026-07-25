@@ -42,19 +42,22 @@ async function sha256(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
 }
 
+async function sha3_256(file) {
+  return createHash("sha3-256").update(await readFile(file)).digest("hex");
+}
+
 async function createRuntimeArchive(cache, version, target, executableContent) {
   const archiveRoot = path.join(cache, "sources");
   const extractedRoot = path.join(archiveRoot, `node-v${version}-${target}`);
   const executable =
     target === "win-x64" ? "node.exe" : path.join("bin", "node");
+  const executablePath = path.join(extractedRoot, executable);
   const file =
     target === "win-x64"
       ? `node-v${version}-${target}.zip`
       : `node-v${version}-${target}.tar.xz`;
-  await mkdir(path.dirname(path.join(extractedRoot, executable)), {
-    recursive: true,
-  });
-  await writeFile(path.join(extractedRoot, executable), executableContent);
+  await mkdir(path.dirname(executablePath), { recursive: true });
+  await writeFile(executablePath, executableContent);
   await writeFile(path.join(extractedRoot, "LICENSE"), "Node MIT\n");
   const result = spawnSync(
     "tar",
@@ -62,7 +65,32 @@ async function createRuntimeArchive(cache, version, target, executableContent) {
     { cwd: archiveRoot, encoding: "utf8" },
   );
   assert.equal(result.status, 0, result.stderr);
-  return { file, sha256: await sha256(path.join(cache, file)) };
+  return {
+    file,
+    sha256: await sha256(path.join(cache, file)),
+    executableSha256: await sha256(executablePath),
+  };
+}
+
+async function createSqliteArchive(cache, executableContent) {
+  const archiveRoot = path.join(cache, "sqlite-source");
+  const executable = path.join(archiveRoot, "sqlite3.exe");
+  const file = "sqlite-tools-win-x64-3530400.zip";
+  await mkdir(archiveRoot, { recursive: true });
+  await writeFile(executable, executableContent);
+  await writeFile(path.join(archiveRoot, "sqldiff.exe"), "must not ship\n");
+  const result = spawnSync(
+    "tar",
+    ["-cf", path.join(cache, file), "sqlite3.exe", "sqldiff.exe"],
+    { cwd: archiveRoot, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return {
+    file,
+    sha256: await sha256(path.join(cache, file)),
+    sha3_256: await sha3_256(path.join(cache, file)),
+    executableSha256: await sha256(executable),
+  };
 }
 
 async function createRepositoryFixture() {
@@ -75,6 +103,7 @@ async function createRepositoryFixture() {
     "darwin-x64": "x64 node\n",
     "win-x64": "windows node\n",
   };
+  const sqliteContent = "official sqlite3 executable\n";
   const nodeArtifacts = {};
   for (const [target, content] of Object.entries(runtimeContents)) {
     nodeArtifacts[target] = await createRuntimeArchive(
@@ -84,6 +113,10 @@ async function createRepositoryFixture() {
       content,
     );
   }
+  const sqliteArtifact = await createSqliteArchive(
+    nodeArchiveCache,
+    sqliteContent,
+  );
   const vendoredPackage = path.join(
     root,
     "vendor",
@@ -111,6 +144,15 @@ async function createRepositoryFixture() {
       version: nodeVersion,
       license: "MIT",
       artifacts: nodeArtifacts,
+    },
+    sqlite: {
+      version: "3.53.4",
+      license: "Public-Domain",
+      sourceUrl:
+        "https://www.sqlite.org/2026/sqlite-tools-win-x64-3530400.zip",
+      artifacts: {
+        "win-x64": sqliteArtifact,
+      },
     },
   };
 
@@ -222,12 +264,27 @@ async function createRepositoryFixture() {
   await chmod(path.join(resources, "node", "darwin-arm64", "node"), 0o755);
   await chmod(path.join(resources, "node", "darwin-x64", "node"), 0o755);
   await writeFile(path.join(resources, "node", "LICENSE"), "Node MIT\n");
+  await mkdir(path.join(resources, "sqlite", "win-x64"), { recursive: true });
+  await writeFile(
+    path.join(resources, "sqlite", "win-x64", "sqlite3.exe"),
+    sqliteContent,
+  );
   await mkdir(path.join(resources, "fieldtheory", "bridge", "src"), {
     recursive: true,
   });
   await writeFile(
     path.join(resources, "fieldtheory", "bridge", "src", "index.mjs"),
     'process.stdout.write("ready\\n");\n',
+  );
+  await writeFile(
+    path.join(
+      resources,
+      "fieldtheory",
+      "bridge",
+      "src",
+      "runtime-environment.mjs",
+    ),
+    "export const runtimeEnvironment = (environment) => environment;\n",
   );
   await writeJson(path.join(resources, "fieldtheory", "bridge", "package.json"), {
     name: "karakeep-fieldtheory-bridge",
@@ -352,6 +409,24 @@ test("Windows staging contains only the declared Windows runtime", async () => {
     ["LICENSE", "win-x64"],
     result.stderr,
   );
+  assert.deepEqual(
+    await readdir(path.join(output, "resources", "sqlite", "win-x64")),
+    ["sqlite3.exe"],
+    result.stderr,
+  );
+});
+
+test("macOS staging does not contain the Windows-only SQLite runtime", async () => {
+  const root = await createRepositoryFixture();
+  const output = path.join(root, "out");
+
+  const result = run(root, "macos-universal", output);
+  assert.equal(result.status, 0, result.stderr);
+
+  await assert.rejects(
+    readFile(path.join(output, "resources", "sqlite", "win-x64", "sqlite3.exe")),
+    { code: "ENOENT" },
+  );
 });
 
 for (const [target, expected] of [
@@ -442,6 +517,72 @@ test("a prepared Node executable modified after extraction is rejected", async (
   assert.match(result.stderr, /Prepared Node runtime darwin-arm64 does not match/);
 });
 
+test("a Node executable without an independent manifest pin is rejected", async () => {
+  const root = await createRepositoryFixture();
+  const manifestFile = path.join(root, "vendor", "fieldtheory", "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+  delete manifest.node.artifacts["darwin-arm64"].executableSha256;
+  await writeJson(manifestFile, manifest);
+  await writeJson(
+    path.join(root, "src-tauri", "resources", "fieldtheory-manifest.json"),
+    manifest,
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.match(
+    result.stderr,
+    /Node runtime darwin-arm64 executable is not pinned with SHA-256/,
+  );
+});
+
+test("a repinned Node archive cannot replace the independent executable pin", async () => {
+  const root = await createRepositoryFixture();
+  const manifestFile = path.join(root, "vendor", "fieldtheory", "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestFile, "utf8"));
+  const replacement = await createRuntimeArchive(
+    path.join(root, "node-archive-cache"),
+    manifest.node.version,
+    "darwin-arm64",
+    "different archive executable\n",
+  );
+  manifest.node.artifacts["darwin-arm64"].sha256 = replacement.sha256;
+  await writeJson(manifestFile, manifest);
+  await writeJson(
+    path.join(root, "src-tauri", "resources", "fieldtheory-manifest.json"),
+    manifest,
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.match(
+    result.stderr,
+    /Pinned Node runtime darwin-arm64 archive does not contain its executable pin/,
+  );
+});
+
+test("a prepared SQLite executable modified after extraction is rejected", async () => {
+  const root = await createRepositoryFixture();
+  await writeFile(
+    path.join(
+      root,
+      "src-tauri",
+      "resources",
+      "sqlite",
+      "win-x64",
+      "sqlite3.exe",
+    ),
+    "modified after extraction\n",
+  );
+
+  const result = run(root, "windows-x64", path.join(root, "out"));
+
+  assert.match(
+    result.stderr,
+    /Prepared SQLite runtime win-x64 does not match its executable pin/,
+  );
+});
+
 test("password-equivalent values in packaged text are rejected", async () => {
   const root = await createRepositoryFixture();
   await writeFile(
@@ -476,6 +617,50 @@ test("password-equivalent values in packaged node_modules are rejected", async (
       "leak.mjs",
     ),
     'const X_AUTH_TOKEN = "live-secret-value-that-must-not-ship";\n',
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.match(result.stderr, /Forbidden secret-like value/);
+});
+
+test("password-equivalent values in NUL-containing packaged resources are rejected", async () => {
+  const root = await createRepositoryFixture();
+  const secret = Buffer.from(
+    'KARAKEEP_API_KEY = "live-secret-value-that-must-not-ship"',
+    "utf16le",
+  );
+  await writeFile(
+    path.join(
+      root,
+      "src-tauri",
+      "resources",
+      "fieldtheory",
+      "bridge",
+      "node_modules",
+      "fieldtheory",
+      "leak.bin",
+    ),
+    secret,
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.match(result.stderr, /Forbidden secret-like value/);
+});
+
+test("password-equivalent values in unstaged Tauri resources are rejected", async () => {
+  const root = await createRepositoryFixture();
+  await writeFile(
+    path.join(
+      root,
+      "src-tauri",
+      "resources",
+      "node",
+      "win-x64",
+      "stale-secret.txt",
+    ),
+    'const KARAKEEP_API_KEY = "stale-secret-value-that-must-not-ship";\n',
   );
 
   const result = run(root, "macos-universal", path.join(root, "out"));
@@ -564,6 +749,34 @@ test("generated inventory records versions, integrity, and licenses", async () =
       },
     ],
     result.stderr,
+  );
+});
+
+test("Windows inventory records the independently pinned SQLite executable", async () => {
+  const root = await createRepositoryFixture();
+  const output = path.join(root, "out");
+
+  const result = run(root, "windows-x64", output);
+  assert.equal(result.status, 0, result.stderr);
+  const inventory = JSON.parse(
+    await readFile(path.join(output, "DEPENDENCY-INVENTORY.json"), "utf8"),
+  );
+  const manifest = JSON.parse(
+    await readFile(path.join(root, "vendor", "fieldtheory", "manifest.json"), "utf8"),
+  );
+
+  assert.deepEqual(
+    inventory.components.find(
+      ({ ecosystem, name }) =>
+        ecosystem === "bundled" && name === "sqlite3",
+    ),
+    {
+      ecosystem: "bundled",
+      name: "sqlite3",
+      version: "3.53.4",
+      integrity: `sha256-${manifest.sqlite.artifacts["win-x64"].executableSha256}`,
+      license: "Public-Domain",
+    },
   );
 });
 
