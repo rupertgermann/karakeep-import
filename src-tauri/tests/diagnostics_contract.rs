@@ -1,60 +1,47 @@
 use karakeep_transfer_lib::{
     diagnostics::{
-        ComponentStatus, DiagnosticFailure, DiagnosticsInput, StorageSummary, build_explicit_export,
+        ComponentStatus, DiagnosticFailure, DiagnosticsInput, DiagnosticsStore, StorageSummary,
+        build_explicit_export,
     },
     ledger::DeliveryLedger,
-    redaction::{DiagnosticSurface, REDACTED, SecretRedactor},
+    redaction::{REDACTED, SecretRedactor},
     updates::{GITHUB_RELEASES_URL, manual_update_check},
     versions::ComponentVersions,
 };
-use serde_json::json;
 
 const KARAKEEP_KEY_CANARY: &str = "ak2_KARAKEEP_KEY_MUST_NOT_ESCAPE";
 const X_SESSION_CANARY: &str = "x_session_MUST_NOT_ESCAPE";
 
 #[test]
-fn password_equivalent_values_are_redacted_on_every_output_surface() {
-    let redactor = SecretRedactor::new([KARAKEEP_KEY_CANARY, X_SESSION_CANARY]);
-    let unsafe_value = json!({
-        "message": format!(
-            "request failed with {KARAKEEP_KEY_CANARY}; session={X_SESSION_CANARY}"
-        ),
-        "apiKey": KARAKEEP_KEY_CANARY,
-        "auth_token": X_SESSION_CANARY,
-        "safe": "network timeout",
-        "nested": {
-            "authorization": format!("Bearer {KARAKEEP_KEY_CANARY}"),
-            "cookie": format!("auth_token={X_SESSION_CANARY}"),
-        }
-    });
+fn diagnostics_store_redacts_canaries_at_the_export_boundary() {
+    let store = DiagnosticsStore::new(
+        DiagnosticsInput {
+            source: ComponentStatus::Unavailable,
+            destination: ComponentStatus::Ready,
+            storage: StorageSummary {
+                data_directory: format!(
+                    "/private/{X_SESSION_CANARY}/karakeep-transfer/{KARAKEEP_KEY_CANARY}"
+                ),
+                snapshot_bytes: 1_024,
+                ledger_bytes: 2_048,
+            },
+            last_failure: Some(DiagnosticFailure::BrowserAccess),
+        },
+        ComponentVersions::new("0.1.0", "1.3.22", "22.17.0", "3"),
+        SecretRedactor::new([KARAKEEP_KEY_CANARY, X_SESSION_CANARY]),
+    );
 
-    for surface in [
-        DiagnosticSurface::UiState,
-        DiagnosticSurface::Log,
-        DiagnosticSurface::Sqlite,
-        DiagnosticSurface::Diagnostics,
-        DiagnosticSurface::Arguments,
-    ] {
-        let redacted = redactor.redact_value(surface, &unsafe_value);
-        let serialized = serde_json::to_string(&redacted).expect("redacted value serializes");
+    let serialized = serde_json::to_string(
+        &store
+            .explicit_export()
+            .expect("diagnostics state is available"),
+    )
+    .expect("diagnostics export serializes");
 
-        assert!(
-            !serialized.contains(KARAKEEP_KEY_CANARY),
-            "{surface:?} exposed the Karakeep key canary"
-        );
-        assert!(
-            !serialized.contains(X_SESSION_CANARY),
-            "{surface:?} exposed the X session canary"
-        );
-        assert!(
-            serialized.contains(REDACTED),
-            "{surface:?} did not mark removed secrets"
-        );
-        assert!(
-            serialized.contains("network timeout"),
-            "{surface:?} removed safe diagnostic context"
-        );
-    }
+    assert!(!serialized.contains(KARAKEEP_KEY_CANARY));
+    assert!(!serialized.contains(X_SESSION_CANARY));
+    assert!(serialized.contains(REDACTED));
+    assert!(serialized.contains("browserAccess"));
 }
 
 #[test]

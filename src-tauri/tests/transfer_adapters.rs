@@ -281,7 +281,7 @@ fn sqlite_adapter_persists_only_redacted_failure_details() {
                 source_id: "tweet-1".into(),
                 bookmark_id: Some("karakeep-1".into()),
                 origin: Some(BookmarkOrigin::Created),
-                error: "bookmark-content-and-api-key-canary".into(),
+                error: "bookmark-content-and-api-key-canary x-session-canary".into(),
             },
         )
         .expect("pending tagging is recorded");
@@ -299,6 +299,18 @@ fn sqlite_adapter_persists_only_redacted_failure_details() {
     assert_eq!(
         (stage.as_str(), code.as_str()),
         ("attach_tags", "TAG_DELIVERY_FAILED")
+    );
+    drop(inspection);
+    let database = std::fs::read(&path).expect("SQLite file remains inspectable");
+    assert!(
+        !database
+            .windows(b"bookmark-content-and-api-key-canary".len())
+            .any(|window| window == b"bookmark-content-and-api-key-canary")
+    );
+    assert!(
+        !database
+            .windows(b"x-session-canary".len())
+            .any(|window| window == b"x-session-canary")
     );
 }
 

@@ -98,6 +98,44 @@ impl KarakeepApi for ClassifiedFailureApi {
     }
 }
 
+struct MixedOutcomeApi;
+
+impl KarakeepApi for MixedOutcomeApi {
+    fn ensure_bookmark(
+        &self,
+        draft: &BookmarkDraft,
+        _cancellation: &dyn RequestCancellation,
+    ) -> Result<EnsuredBookmark, ApiError> {
+        if draft.url.ends_with("/authentication-failure") {
+            return Err(ApiError::new(
+                ApiErrorKind::Authentication,
+                "mixed-outcome-api-key-canary",
+            ));
+        }
+        let (id, origin) = if draft.url.ends_with("/resumed-existing") {
+            ("existing-bookmark", BookmarkOrigin::Existing)
+        } else {
+            ("created-bookmark", BookmarkOrigin::Created)
+        };
+        Ok(EnsuredBookmark {
+            bookmark: KarakeepBookmark {
+                id: id.into(),
+                human_tags: vec!["twitter".into()],
+            },
+            origin,
+        })
+    }
+
+    fn attach_tags(
+        &self,
+        _bookmark_id: &str,
+        _tags: &[String],
+        _cancellation: &dyn RequestCancellation,
+    ) -> Result<(), ApiError> {
+        panic!("the mixed-outcome fixture already has every required tag")
+    }
+}
+
 impl FailOnceApi {
     fn new() -> Self {
         Self {
@@ -488,6 +526,57 @@ fn delivery_http_failure_classes_reach_the_frontend_terminal_contract() {
         assert!(!serialized.contains("bookmark-content-and-api-key-canary"));
         assert!(!serialized.contains("private-bookmark"));
     }
+}
+
+#[test]
+fn classified_failure_retains_all_aggregate_totals_after_partial_delivery() {
+    let ledger = ledger();
+    let coordinator = DeliveryCoordinator::with_config(Arc::clone(&ledger), fast_config()).unwrap();
+    let destination = destination("user-a");
+
+    coordinator
+        .run(
+            Arc::new(ClassifiedFailureApi(ApiErrorKind::Permanent)),
+            delivery_id("delivery-seed-retry"),
+            preview(&["resumed-existing"]),
+            destination.clone(),
+            Arc::new(RecordingEvents::default()),
+        )
+        .expect("failed seed attempt is retained in the ledger");
+
+    let events = Arc::new(RecordingEvents::default());
+    let terminal = coordinator
+        .run(
+            Arc::new(MixedOutcomeApi),
+            delivery_id("delivery-mixed-failure"),
+            preview(&["created", "resumed-existing", "authentication-failure"]),
+            destination,
+            events.clone(),
+        )
+        .expect("classified partial failure is a terminal event");
+
+    assert_eq!(
+        terminal,
+        DeliveryTerminalEvent::Failed {
+            delivery_id: delivery_id("delivery-mixed-failure"),
+            code: DeliveryFailureCode::DestinationAuthentication,
+            result: delivery_coordinator::DeliveryResult {
+                delivered: 2,
+                created: 1,
+                existing: 1,
+                retried: 1,
+                failed: 1,
+                cancelled: 0,
+            },
+        }
+    );
+    assert_eq!(
+        events.events().last(),
+        Some(&DeliveryEvent::Terminal(terminal))
+    );
+    let serialized = serde_json::to_string(&events.events()).expect("events serialize");
+    assert!(!serialized.contains("mixed-outcome-api-key-canary"));
+    assert!(!serialized.contains("authentication-failure"));
 }
 
 #[test]
