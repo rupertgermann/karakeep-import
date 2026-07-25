@@ -43,6 +43,48 @@ Run all examples from the repository root:
 cd karakeep-bookmark-importer
 ```
 
+## Develop the Tauri desktop app
+
+Karakeep Transfer is the native desktop replacement for the browser-based GUI.
+The first implementation slice provides the cross-platform shell and a typed
+health check across the React-to-Rust bridge. The macOS app has been validated
+locally; Windows validation remains a required native-platform gate. The
+existing Python GUI remains available while the transfer workflow moves into
+the desktop app.
+
+In addition to Python, desktop development requires current Node.js, npm, the
+stable Rust toolchain, and the
+[Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/) for
+your operating system.
+
+Install the frontend dependencies and run the automated checks:
+
+```bash
+npm install
+npm test
+npm run test:coverage
+npm run typecheck
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+Start the native app in development mode:
+
+```bash
+npm run tauri dev
+```
+
+Create an installer for the current operating system:
+
+```bash
+npm run tauri build
+```
+
+macOS and Windows installers are built locally on their respective operating
+systems. This project does not use GitHub Actions for desktop builds.
+
 ## Use the graphical interface
 
 The GUI runs on current macOS, Windows, and Linux desktop systems with Python

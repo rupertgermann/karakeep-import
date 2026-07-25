@@ -1,0 +1,156 @@
+:root {
+  color: #263028;
+  background: #f3efe6;
+  font-family:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 15% 10%, rgb(228 183 93 / 18%), transparent 30%),
+    linear-gradient(145deg, #f3efe6, #e7e3d8);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  min-height: 100vh;
+  grid-template-rows: 1fr auto;
+  gap: 2rem;
+  padding: clamp(1.5rem, 5vw, 4rem);
+}
+
+.welcome-card {
+  align-self: center;
+  width: min(100%, 46rem);
+  margin: 0 auto;
+  padding: clamp(2rem, 6vw, 4.5rem);
+  border: 1px solid #cec9bc;
+  border-radius: 2rem;
+  background: rgb(251 248 241 / 92%);
+  box-shadow:
+    0 1.5rem 4rem rgb(38 48 40 / 12%),
+    inset 0 1px 0 rgb(255 255 255 / 70%);
+}
+
+.brand-mark {
+  display: grid;
+  width: 5rem;
+  height: 5rem;
+  margin-bottom: 2rem;
+  place-items: center;
+  border: 1px solid #cec9bc;
+  border-radius: 1.5rem;
+  background: #f3efe6;
+  box-shadow: 0 0.75rem 1.75rem rgb(82 107 84 / 12%);
+}
+
+.brand-mark img {
+  width: 3.5rem;
+  height: 3.5rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.75rem;
+  color: #526b54;
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+h1 {
+  max-width: 10ch;
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(3rem, 9vw, 6rem);
+  font-weight: 500;
+  letter-spacing: -0.055em;
+  line-height: 0.92;
+}
+
+.introduction {
+  max-width: 34rem;
+  margin: 1.75rem 0 2rem;
+  color: #687067;
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  line-height: 1.65;
+}
+
+.bridge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #cec9bc;
+  border-radius: 999px;
+  background: #f3efe6;
+  color: #3e5641;
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.status-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: #e4b75d;
+}
+
+.bridge-status--ready .status-dot {
+  background: #526b54;
+  box-shadow: 0 0 0 0.25rem rgb(82 107 84 / 12%);
+}
+
+.bridge-status--error {
+  color: #8c352f;
+}
+
+.bridge-status--error .status-dot {
+  background: #a9453d;
+}
+
+footer {
+  color: #687067;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+footer p {
+  margin: 0;
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    padding: 1rem;
+  }
+
+  .welcome-card {
+    border-radius: 1.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

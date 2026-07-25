@@ -1,0 +1,22 @@
+[package]
+name = "karakeep-transfer"
+version = "0.1.0"
+description = "Transfer bookmarks to Karakeep from a private desktop app"
+authors = ["Rupert Germann"]
+edition = "2024"
+license = "MIT"
+
+[lib]
+name = "karakeep_transfer_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tauri = { version = "2.11.5", features = [] }
+
+[dev-dependencies]
+tauri = { version = "2.11.5", features = ["test"] }
