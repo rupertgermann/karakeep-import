@@ -470,7 +470,7 @@ fn existing_bookmark_gets_only_missing_tags_before_it_is_recorded_delivered() {
     let report = engine
         .run(
             &VecSource(vec![record("123", &["twitter", "Reading"])]),
-            &DestinationId::new("https://karakeep.example|user-1"),
+            &DestinationId::new("https://karakeep.example.com/user-1"),
             &CancellationToken::new(),
             &NoopProgressSink,
         )
@@ -493,7 +493,7 @@ fn incomplete_tagging_stays_pending_and_the_next_run_finishes_the_existing_bookm
     let ledger = Arc::new(MemoryLedger::default());
     let engine = DeliveryEngine::new(api, ledger.clone(), DeliveryConfig::default()).unwrap();
     let source = VecSource(vec![record("123", &["twitter", "Reading"])]);
-    let destination = DestinationId::new("https://karakeep.example|user-1");
+    let destination = DestinationId::new("https://karakeep.example.com/user-1");
 
     let first = engine
         .run(
