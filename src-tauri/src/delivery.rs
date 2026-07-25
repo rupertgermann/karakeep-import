@@ -137,6 +137,8 @@ pub struct RecordResult {
     pub status: RecordStatus,
     pub retried: bool,
     pub error: Option<String>,
+    #[serde(skip)]
+    pub failure_kind: Option<ApiErrorKind>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -438,12 +440,14 @@ impl DeliveryEngine {
                 );
             }
             Err(RequestFailure::Api { error, retried }) => {
+                let failure_kind = error.kind.clone();
                 return self.record_failure(
                     destination,
                     record.source_id,
                     None,
                     None,
                     resumed || retried,
+                    failure_kind,
                     error.to_string(),
                 );
             }
@@ -471,12 +475,14 @@ impl DeliveryEngine {
                     error,
                     retried: tag_retried,
                 }) => {
+                    let failure_kind = error.kind.clone();
                     return self.record_failure(
                         destination,
                         record.source_id,
                         Some(ensured.bookmark.id),
                         Some(ensured.origin),
                         retried || tag_retried,
+                        failure_kind,
                         error.to_string(),
                     );
                 }
@@ -492,6 +498,7 @@ impl DeliveryEngine {
                 record.source_id,
                 Some(ensured.origin),
                 retried,
+                None,
                 error.to_string(),
             );
         }
@@ -501,6 +508,7 @@ impl DeliveryEngine {
             status: RecordStatus::Delivered,
             retried,
             error: None,
+            failure_kind: None,
         }
     }
 
@@ -552,6 +560,7 @@ impl DeliveryEngine {
         bookmark_id: Option<String>,
         origin: Option<BookmarkOrigin>,
         retried: bool,
+        failure_kind: ApiErrorKind,
         error: String,
     ) -> RecordResult {
         let ledger_result = self.ledger.record_pending(
@@ -563,14 +572,10 @@ impl DeliveryEngine {
                 error: error.clone(),
             },
         );
-        failed(
-            source_id,
-            origin,
-            retried,
-            ledger_result
-                .err()
-                .map_or(error, |ledger_error| ledger_error.to_string()),
-        )
+        match ledger_result {
+            Ok(()) => failed(source_id, origin, retried, Some(failure_kind), error),
+            Err(ledger_error) => failed(source_id, origin, retried, None, ledger_error.to_string()),
+        }
     }
 
     fn record_cancellation(
@@ -636,6 +641,7 @@ fn failed(
     source_id: String,
     origin: Option<BookmarkOrigin>,
     retried: bool,
+    failure_kind: Option<ApiErrorKind>,
     error: String,
 ) -> RecordResult {
     RecordResult {
@@ -644,6 +650,7 @@ fn failed(
         status: RecordStatus::Failed,
         retried,
         error: Some(error),
+        failure_kind,
     }
 }
 
@@ -654,6 +661,7 @@ fn cancelled(source_id: String, origin: Option<BookmarkOrigin>, retried: bool) -
         status: RecordStatus::Cancelled,
         retried,
         error: None,
+        failure_kind: None,
     }
 }
 

@@ -74,6 +74,30 @@ struct FailOnceApi {
     ensure_calls: AtomicUsize,
 }
 
+struct ClassifiedFailureApi(ApiErrorKind);
+
+impl KarakeepApi for ClassifiedFailureApi {
+    fn ensure_bookmark(
+        &self,
+        _draft: &BookmarkDraft,
+        _cancellation: &dyn RequestCancellation,
+    ) -> Result<EnsuredBookmark, ApiError> {
+        Err(ApiError::new(
+            self.0.clone(),
+            "bookmark-content-and-api-key-canary",
+        ))
+    }
+
+    fn attach_tags(
+        &self,
+        _bookmark_id: &str,
+        _tags: &[String],
+        _cancellation: &dyn RequestCancellation,
+    ) -> Result<(), ApiError> {
+        panic!("failed bookmark creation must not attach tags")
+    }
+}
+
 impl FailOnceApi {
     fn new() -> Self {
         Self {
@@ -408,6 +432,52 @@ fn failure_codes_match_the_frontend_contract() {
             "unexpected"
         ])
     );
+}
+
+#[test]
+fn delivery_http_failure_classes_reach_the_frontend_terminal_contract() {
+    for (suffix, kind, code) in [
+        (
+            "authentication",
+            ApiErrorKind::Authentication,
+            DeliveryFailureCode::DestinationAuthentication,
+        ),
+        (
+            "compatibility",
+            ApiErrorKind::Compatibility,
+            DeliveryFailureCode::DestinationCompatibility,
+        ),
+        (
+            "network",
+            ApiErrorKind::Network,
+            DeliveryFailureCode::Network,
+        ),
+    ] {
+        let coordinator =
+            DeliveryCoordinator::with_config(ledger(), fast_config()).expect("coordinator");
+        let events = Arc::new(RecordingEvents::default());
+        let id = delivery_id(&format!("delivery-{suffix}"));
+        let terminal = coordinator
+            .run(
+                Arc::new(ClassifiedFailureApi(kind)),
+                id.clone(),
+                preview(&["private-bookmark"]),
+                destination("user-a"),
+                events.clone(),
+            )
+            .expect("classified delivery failure is a terminal event");
+
+        assert_eq!(
+            terminal,
+            DeliveryTerminalEvent::Failed {
+                delivery_id: id,
+                code,
+            }
+        );
+        let serialized = serde_json::to_string(&events.events()).expect("events serialize");
+        assert!(!serialized.contains("bookmark-content-and-api-key-canary"));
+        assert!(!serialized.contains("private-bookmark"));
+    }
 }
 
 #[test]

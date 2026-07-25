@@ -286,9 +286,15 @@ fn status_error(status: StatusCode, headers: &reqwest::header::HeaderMap) -> Api
             "Karakeep encountered a temporary server error.",
         ),
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => ApiError::new(
-            ApiErrorKind::Permanent,
+            ApiErrorKind::Authentication,
             "Karakeep rejected the saved API key. Reconnect the destination.",
         ),
+        StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED | StatusCode::NOT_IMPLEMENTED => {
+            ApiError::new(
+                ApiErrorKind::Compatibility,
+                "Karakeep is missing a required delivery endpoint.",
+            )
+        }
         _ => ApiError::new(
             ApiErrorKind::Permanent,
             format!("Karakeep rejected the request with HTTP {status}."),

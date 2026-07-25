@@ -591,7 +591,11 @@ fn response_statuses_are_safe_and_retry_aware() {
         ),
         (
             PlannedResponse::json(401, r#"{"message":"delivery-vault-canary rejected"}"#),
-            ApiErrorKind::Permanent,
+            ApiErrorKind::Authentication,
+        ),
+        (
+            PlannedResponse::json(404, r#"{"message":"delivery-vault-canary missing"}"#),
+            ApiErrorKind::Compatibility,
         ),
     ];
 

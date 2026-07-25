@@ -34,6 +34,8 @@ pub struct EnsuredBookmark {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApiErrorKind {
+    Authentication,
+    Compatibility,
     RateLimited { retry_after: Option<Duration> },
     Server,
     Network,
@@ -57,7 +59,13 @@ impl ApiError {
     }
 
     pub fn is_retryable(&self) -> bool {
-        !matches!(self.kind, ApiErrorKind::Permanent)
+        matches!(
+            self.kind,
+            ApiErrorKind::RateLimited { .. }
+                | ApiErrorKind::Server
+                | ApiErrorKind::Network
+                | ApiErrorKind::Timeout
+        )
     }
 }
 

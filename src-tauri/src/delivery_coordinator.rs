@@ -13,7 +13,7 @@ use crate::{
     },
     domain::{DestinationIdentity, RunStatus},
     file_source::FileSourcePreview,
-    karakeep::KarakeepApi,
+    karakeep::{ApiErrorKind, KarakeepApi},
     transfer::{
         FileDeliverySource, SharedSqliteLedger, SqliteDeliveryLedgerAdapter, TransferPreviewCounts,
         preview_delivery_counts,
@@ -389,6 +389,7 @@ impl DeliveryRun {
                 );
             }
         };
+        let classified_failure = classified_failure_code(&report.records);
         let run_status = if report.totals.cancelled > 0 {
             RunStatus::Interrupted
         } else if report.totals.failed > 0 {
@@ -411,6 +412,11 @@ impl DeliveryRun {
             DeliveryTerminalEvent::Cancelled {
                 delivery_id: self.delivery_id.clone(),
                 result,
+            }
+        } else if let Some(code) = classified_failure {
+            DeliveryTerminalEvent::Failed {
+                delivery_id: self.delivery_id.clone(),
+                code,
             }
         } else {
             DeliveryTerminalEvent::Completed {
@@ -480,5 +486,33 @@ fn failure_code(error: DeliveryRunError) -> DeliveryFailureCode {
     match error {
         DeliveryRunError::Source(_) => DeliveryFailureCode::Unexpected,
         DeliveryRunError::Ledger(_) => DeliveryFailureCode::DeliveryFailed,
+    }
+}
+
+fn classified_failure_code(records: &[delivery::RecordResult]) -> Option<DeliveryFailureCode> {
+    let mut compatibility = false;
+    let mut network = false;
+    for kind in records
+        .iter()
+        .filter_map(|record| record.failure_kind.as_ref())
+    {
+        match kind {
+            ApiErrorKind::Authentication => {
+                return Some(DeliveryFailureCode::DestinationAuthentication);
+            }
+            ApiErrorKind::Compatibility => compatibility = true,
+            ApiErrorKind::RateLimited { .. }
+            | ApiErrorKind::Server
+            | ApiErrorKind::Network
+            | ApiErrorKind::Timeout => network = true,
+            ApiErrorKind::Permanent => {}
+        }
+    }
+    if compatibility {
+        Some(DeliveryFailureCode::DestinationCompatibility)
+    } else if network {
+        Some(DeliveryFailureCode::Network)
+    } else {
+        None
     }
 }

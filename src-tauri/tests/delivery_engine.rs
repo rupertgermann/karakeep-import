@@ -908,6 +908,7 @@ fn progress_has_a_stable_serializable_frontend_contract() {
             status: RecordStatus::Delivered,
             retried: true,
             error: None,
+            failure_kind: None,
         },
     })
     .unwrap();
