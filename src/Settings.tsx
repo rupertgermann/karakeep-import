@@ -219,7 +219,7 @@ export default function Settings({
           <p>
             Karakeep Transfer {versions.app} · Field Theory{" "}
             {versions.fieldTheory} · Node {versions.node} · schema{" "}
-            {versions.schema}
+            {versions.schema} · Karakeep baseline {versions.karakeepBaseline}
           </p>
         ) : (
           <p>Reading version information…</p>

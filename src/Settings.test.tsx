@@ -298,6 +298,16 @@ describe("Settings", () => {
     expect(api.manualUpdateCheck).not.toHaveBeenCalled();
   });
 
+  it("shows the tested Karakeep baseline in version information", async () => {
+    render(<Settings api={createSettingsApi()} />);
+
+    expect(
+      await screen.findByText((content) =>
+        content.includes("Karakeep baseline 0.32.0"),
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("shows the signed release link after a manual update check", async () => {
     render(<Settings api={createSettingsApi()} />);
 
