@@ -443,12 +443,14 @@ impl DeliveryEngine {
                 let failure_kind = error.kind.clone();
                 return self.record_failure(
                     destination,
-                    record.source_id,
-                    None,
-                    None,
+                    PendingDelivery {
+                        source_id: record.source_id,
+                        bookmark_id: None,
+                        origin: None,
+                        error: error.to_string(),
+                    },
                     resumed || retried,
                     failure_kind,
-                    error.to_string(),
                 );
             }
         };
@@ -478,12 +480,14 @@ impl DeliveryEngine {
                     let failure_kind = error.kind.clone();
                     return self.record_failure(
                         destination,
-                        record.source_id,
-                        Some(ensured.bookmark.id),
-                        Some(ensured.origin),
+                        PendingDelivery {
+                            source_id: record.source_id,
+                            bookmark_id: Some(ensured.bookmark.id),
+                            origin: Some(ensured.origin),
+                            error: error.to_string(),
+                        },
                         retried || tag_retried,
                         failure_kind,
-                        error.to_string(),
                     );
                 }
             }
@@ -556,22 +560,14 @@ impl DeliveryEngine {
     fn record_failure(
         &self,
         destination: &DestinationId,
-        source_id: String,
-        bookmark_id: Option<String>,
-        origin: Option<BookmarkOrigin>,
+        pending: PendingDelivery,
         retried: bool,
         failure_kind: ApiErrorKind,
-        error: String,
     ) -> RecordResult {
-        let ledger_result = self.ledger.record_pending(
-            destination,
-            PendingDelivery {
-                source_id: source_id.clone(),
-                bookmark_id,
-                origin,
-                error: error.clone(),
-            },
-        );
+        let source_id = pending.source_id.clone();
+        let origin = pending.origin;
+        let error = pending.error.clone();
+        let ledger_result = self.ledger.record_pending(destination, pending);
         match ledger_result {
             Ok(()) => failed(source_id, origin, retried, Some(failure_kind), error),
             Err(ledger_error) => failed(source_id, origin, retried, None, ledger_error.to_string()),
