@@ -42,8 +42,48 @@ async function sha256(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
 }
 
+async function createRuntimeArchive(cache, version, target, executableContent) {
+  const archiveRoot = path.join(cache, "sources");
+  const extractedRoot = path.join(archiveRoot, `node-v${version}-${target}`);
+  const executable =
+    target === "win-x64" ? "node.exe" : path.join("bin", "node");
+  const file =
+    target === "win-x64"
+      ? `node-v${version}-${target}.zip`
+      : `node-v${version}-${target}.tar.xz`;
+  await mkdir(path.dirname(path.join(extractedRoot, executable)), {
+    recursive: true,
+  });
+  await writeFile(path.join(extractedRoot, executable), executableContent);
+  await writeFile(path.join(extractedRoot, "LICENSE"), "Node MIT\n");
+  const result = spawnSync(
+    "tar",
+    ["-cf", path.join(cache, file), path.basename(extractedRoot)],
+    { cwd: archiveRoot, encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  return { file, sha256: await sha256(path.join(cache, file)) };
+}
+
 async function createRepositoryFixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), "release-inputs-test-"));
+  const nodeArchiveCache = path.join(root, "node-archive-cache");
+  await mkdir(nodeArchiveCache, { recursive: true });
+  const nodeVersion = "22.20.0";
+  const runtimeContents = {
+    "darwin-arm64": "arm64 node\n",
+    "darwin-x64": "x64 node\n",
+    "win-x64": "windows node\n",
+  };
+  const nodeArtifacts = {};
+  for (const [target, content] of Object.entries(runtimeContents)) {
+    nodeArtifacts[target] = await createRuntimeArchive(
+      nodeArchiveCache,
+      nodeVersion,
+      target,
+      content,
+    );
+  }
   const vendoredPackage = path.join(
     root,
     "vendor",
@@ -68,25 +108,9 @@ async function createRepositoryFixture() {
       license: "MIT",
     },
     node: {
-      version: "22.20.0",
+      version: nodeVersion,
       license: "MIT",
-      artifacts: {
-        "darwin-arm64": {
-          file: "node-v22.20.0-darwin-arm64.tar.xz",
-          sha256:
-            "f2ed1fbdfb79afb9343dfbb609efde657b41e7efcd5215264ce78f8906356b4d",
-        },
-        "darwin-x64": {
-          file: "node-v22.20.0-darwin-x64.tar.xz",
-          sha256:
-            "2a291f0a9555f5d6685d96ce9429da3d0ea3cd896c012702c6ee0015f818684e",
-        },
-        "win-x64": {
-          file: "node-v22.20.0-win-x64.zip",
-          sha256:
-            "bb819d6eb8f5bfda294bbc83a7e4ec6539da67c4233d54b0d655b9248b15e29d",
-        },
-      },
+      artifacts: nodeArtifacts,
     },
   };
 
@@ -183,9 +207,18 @@ async function createRepositoryFixture() {
   await mkdir(path.join(resources, "node", "darwin-arm64"), { recursive: true });
   await mkdir(path.join(resources, "node", "darwin-x64"), { recursive: true });
   await mkdir(path.join(resources, "node", "win-x64"), { recursive: true });
-  await writeFile(path.join(resources, "node", "darwin-arm64", "node"), "arm64 node\n");
-  await writeFile(path.join(resources, "node", "darwin-x64", "node"), "x64 node\n");
-  await writeFile(path.join(resources, "node", "win-x64", "node.exe"), "windows node\n");
+  await writeFile(
+    path.join(resources, "node", "darwin-arm64", "node"),
+    runtimeContents["darwin-arm64"],
+  );
+  await writeFile(
+    path.join(resources, "node", "darwin-x64", "node"),
+    runtimeContents["darwin-x64"],
+  );
+  await writeFile(
+    path.join(resources, "node", "win-x64", "node.exe"),
+    runtimeContents["win-x64"],
+  );
   await chmod(path.join(resources, "node", "darwin-arm64", "node"), 0o755);
   await chmod(path.join(resources, "node", "darwin-x64", "node"), 0o755);
   await writeFile(path.join(resources, "node", "LICENSE"), "Node MIT\n");
@@ -255,6 +288,8 @@ function run(root, target, output) {
       "0123456789abcdef0123456789abcdef01234567",
       "--source-date-epoch",
       "1750000000",
+      "--node-archive-cache",
+      path.join(root, "node-archive-cache"),
     ],
     { encoding: "utf8" },
   );
@@ -319,6 +354,30 @@ test("Windows staging contains only the declared Windows runtime", async () => {
   );
 });
 
+for (const [target, expected] of [
+  [
+    "macos-universal",
+    "npm run tauri -- build --target universal-apple-darwin --bundles dmg\n",
+  ],
+  [
+    "windows-x64",
+    "npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis\n",
+  ],
+]) {
+  test(`${target} staging produces its exact local native build command`, async () => {
+    const root = await createRepositoryFixture();
+    const output = path.join(root, "out");
+
+    const result = run(root, target, output);
+    assert.equal(result.status, 0, result.stderr);
+
+    assert.equal(
+      await readFile(path.join(output, "NATIVE-BUILD-COMMAND.txt"), "utf8"),
+      expected,
+    );
+  });
+}
+
 test("missing a required pinned runtime fails before staging", async () => {
   const root = await createRepositoryFixture();
   await writeFile(
@@ -371,6 +430,18 @@ test("a modified prepared Field Theory package is rejected", async () => {
   assert.match(result.stderr, /Prepared Field Theory package checksum mismatch/);
 });
 
+test("a prepared Node executable modified after extraction is rejected", async () => {
+  const root = await createRepositoryFixture();
+  await writeFile(
+    path.join(root, "src-tauri", "resources", "node", "darwin-arm64", "node"),
+    "modified after extraction\n",
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.match(result.stderr, /Prepared Node runtime darwin-arm64 does not match/);
+});
+
 test("password-equivalent values in packaged text are rejected", async () => {
   const root = await createRepositoryFixture();
   await writeFile(
@@ -391,6 +462,48 @@ test("password-equivalent values in packaged text are rejected", async () => {
   assert.match(result.stderr, /Forbidden secret-like value/);
 });
 
+test("password-equivalent values in packaged node_modules are rejected", async () => {
+  const root = await createRepositoryFixture();
+  await writeFile(
+    path.join(
+      root,
+      "src-tauri",
+      "resources",
+      "fieldtheory",
+      "bridge",
+      "node_modules",
+      "fieldtheory",
+      "leak.mjs",
+    ),
+    'const X_AUTH_TOKEN = "live-secret-value-that-must-not-ship";\n',
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.match(result.stderr, /Forbidden secret-like value/);
+});
+
+test("placeholder credentials in packaged dependency documentation are allowed", async () => {
+  const root = await createRepositoryFixture();
+  await writeFile(
+    path.join(
+      root,
+      "src-tauri",
+      "resources",
+      "fieldtheory",
+      "bridge",
+      "node_modules",
+      "fieldtheory",
+      "README.md",
+    ),
+    'KARAKEEP_API_KEY = "replace-me"\nAuthorization: Bearer example-token\n',
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test("generated inventory records versions, integrity, and licenses", async () => {
   const root = await createRepositoryFixture();
   const output = path.join(root, "out");
@@ -399,6 +512,9 @@ test("generated inventory records versions, integrity, and licenses", async () =
   assert.equal(result.status, 0, result.stderr);
   const inventory = JSON.parse(
     await readFile(path.join(output, "DEPENDENCY-INVENTORY.json"), "utf8"),
+  );
+  const manifest = JSON.parse(
+    await readFile(path.join(root, "vendor", "fieldtheory", "manifest.json"), "utf8"),
   );
 
   assert.deepEqual(
@@ -424,8 +540,12 @@ test("generated inventory records versions, integrity, and licenses", async () =
         ecosystem: "bundled",
         name: "node",
         version: "22.20.0",
-        integrity:
-          "sha256-f2ed1fbdfb79afb9343dfbb609efde657b41e7efcd5215264ce78f8906356b4d,sha256-2a291f0a9555f5d6685d96ce9429da3d0ea3cd896c012702c6ee0015f818684e",
+        integrity: [
+          manifest.node.artifacts["darwin-arm64"].sha256,
+          manifest.node.artifacts["darwin-x64"].sha256,
+        ]
+          .map((checksum) => `sha256-${checksum}`)
+          .join(","),
         license: "MIT",
       },
       {

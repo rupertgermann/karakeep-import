@@ -4,6 +4,7 @@ import {
   chmod,
   cp,
   mkdir,
+  mkdtemp,
   readFile,
   readdir,
   rm,
@@ -11,6 +12,7 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,6 +44,18 @@ async function readJson(file) {
 
 async function sha256(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
+}
+
+function nativeBuildCommand(targetConfig) {
+  for (const [name, value] of [
+    ["Rust target", targetConfig.rustTarget],
+    ["bundle format", targetConfig.bundleFormat],
+  ]) {
+    if (!/^[A-Za-z0-9._-]+$/.test(value ?? "")) {
+      throw new Error(`${name} is missing or invalid.`);
+    }
+  }
+  return `npm run tauri -- build --target ${targetConfig.rustTarget} --bundles ${targetConfig.bundleFormat}`;
 }
 
 function packageVersion(cargoToml) {
@@ -234,19 +248,68 @@ async function validateBridgeSources(resources) {
   }
 }
 
+function isPlaceholderCredential(value) {
+  return /^(?:<[^>]+>|\$\{[^}]+\}|(?:replace|example|sample|dummy|fake|test|canary|your|redacted|not-a-real)(?:[-_ ].*)?)$/i.test(
+    value.trim(),
+  );
+}
+
 async function validateNoSecrets(roots) {
   for (const root of roots) {
     for (const file of await regularFiles(root)) {
-      const content = await readFile(file, "utf8");
-      if (
-        /\b(?:KARAKEEP_API_KEY|X_AUTH_TOKEN|TWITTER_AUTH_TOKEN|auth_token|ct0)\s*[:=]\s*["'][^"'\r\n]{8,}["']/i.test(
-          content,
-        ) ||
-        /\bBearer\s+[A-Za-z0-9._~+/-]{8,}/i.test(content)
-      ) {
-        throw new Error(`Forbidden secret-like value in packaged text: ${file}`);
+      const bytes = await readFile(file);
+      if (bytes.includes(0)) {
+        continue;
+      }
+      const content = bytes.toString("utf8");
+      const assignments = content.matchAll(
+        /\b(?:KARAKEEP_API_KEY|X_AUTH_TOKEN|TWITTER_AUTH_TOKEN|auth_token|ct0)\s*[:=]\s*["']([^"'\r\n]{8,})["']/gi,
+      );
+      const bearers = content.matchAll(
+        /\bBearer\s+([A-Za-z0-9._~+/-]{8,})/gi,
+      );
+      for (const match of [...assignments, ...bearers]) {
+        if (!isPlaceholderCredential(match[1])) {
+          throw new Error(
+            `Forbidden secret-like value in packaged text: ${file}`,
+          );
+        }
       }
     }
+  }
+}
+
+async function expectedNodeRuntimeSha256(
+  archiveCache,
+  manifest,
+  runtime,
+  artifact,
+) {
+  const archive = path.join(archiveCache, artifact.file);
+  await requireNonempty(archive, "pinned Node runtime archive");
+  if ((await sha256(archive)) !== artifact.sha256) {
+    throw new Error(`Pinned Node runtime archive checksum mismatch for ${runtime}.`);
+  }
+
+  const extractedRoot = `node-v${manifest.node.version}-${runtime}`;
+  const executable =
+    runtime === "win-x64" ? "node.exe" : path.posix.join("bin", "node");
+  const member = path.posix.join(extractedRoot, executable);
+  const temporary = await mkdtemp(
+    path.join(os.tmpdir(), "karakeep-release-node-"),
+  );
+  try {
+    const result = spawnSync(
+      process.platform === "win32" ? "tar.exe" : "tar",
+      ["-xf", archive, "-C", temporary, member],
+      { encoding: "utf8" },
+    );
+    if (result.error || result.status !== 0) {
+      throw new Error(`Could not inspect pinned Node runtime archive for ${runtime}.`);
+    }
+    return await sha256(path.join(temporary, extractedRoot, executable));
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
   }
 }
 
@@ -272,7 +335,13 @@ async function validateNoReleaseWorkflows(root) {
   }
 }
 
-async function validateInputs(root, target, config, rustInventoryFile) {
+async function validateInputs(
+  root,
+  target,
+  config,
+  rustInventoryFile,
+  nodeArchiveCache,
+) {
   if (config.schemaVersion !== 1) {
     throw new Error("Unsupported release input schema.");
   }
@@ -385,21 +454,36 @@ async function validateInputs(root, target, config, rustInventoryFile) {
   }
   for (const runtime of targetConfig.nodeRuntimes) {
     const executable = runtime === "win-x64" ? "node.exe" : "node";
+    const preparedExecutable = path.join(
+      resources,
+      "node",
+      runtime,
+      executable,
+    );
     await requireNonempty(
-      path.join(resources, "node", runtime, executable),
+      preparedExecutable,
       "runtime resource",
     );
     const artifact = vendorManifest.node.artifacts[runtime];
     if (!artifact?.file || !/^[a-f0-9]{64}$/.test(artifact.sha256 ?? "")) {
       throw new Error(`Node runtime ${runtime} is not pinned with SHA-256.`);
     }
+    if (
+      (await sha256(preparedExecutable)) !==
+      (await expectedNodeRuntimeSha256(
+        nodeArchiveCache,
+        vendorManifest,
+        runtime,
+        artifact,
+      ))
+    ) {
+      throw new Error(
+        `Prepared Node runtime ${runtime} does not match its pinned archive.`,
+      );
+    }
   }
   await requireNonempty(path.join(root, "dist", "index.html"), "frontend build");
   await validateBridgeSources(resources);
-  await validateNoSecrets([
-    path.join(resources, "fieldtheory", "bridge", "src"),
-    path.join(root, "dist"),
-  ]);
   await validateNoReleaseWorkflows(root);
 
   const rustInventory = await readJson(rustInventoryFile);
@@ -602,11 +686,16 @@ async function prepare(options) {
     options["cargo-metadata"] ??
       path.join(root, "release", "rust-dependencies.json"),
   );
+  const nodeArchiveCache = path.resolve(
+    options["node-archive-cache"] ??
+      path.join(os.tmpdir(), "karakeep-transfer-runtime-cache"),
+  );
   const validated = await validateInputs(
     root,
     target,
     config,
     rustInventoryFile,
+    nodeArchiveCache,
   );
 
   await rm(output, { recursive: true, force: true });
@@ -616,6 +705,20 @@ async function prepare(options) {
     output,
     validated.resources,
     validated.targetConfig.nodeRuntimes,
+  );
+  try {
+    await validateNoSecrets([
+      path.join(output, "resources"),
+      path.join(output, "frontend"),
+    ]);
+  } catch (error) {
+    await rm(output, { recursive: true, force: true });
+    throw error;
+  }
+  const buildCommand = nativeBuildCommand(validated.targetConfig);
+  await writeFile(
+    path.join(output, "NATIVE-BUILD-COMMAND.txt"),
+    `${buildCommand}\n`,
   );
 
   const inventory = {
@@ -642,6 +745,7 @@ async function prepare(options) {
     target,
     rustTarget: validated.targetConfig.rustTarget,
     bundleFormat: validated.targetConfig.bundleFormat,
+    nativeBuildCommand: buildCommand,
     nodeRuntimes: validated.targetConfig.nodeRuntimes,
     buildToolchains: config.buildToolchains,
     inputs: await inputChecksums(root, [
