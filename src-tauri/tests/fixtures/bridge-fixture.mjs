@@ -12,6 +12,12 @@ for await (const line of reader) {
     process.exitCode = 1;
     continue;
   }
+  const checksEnvironment = request.requestId === "environment-boundary-1";
+  const environmentIsClean =
+    !process.env.KARAKEEP_API_KEY &&
+    !process.env.FIELD_THEORY_UNRELATED_CANARY;
+  const requiredEnvironmentIsPresent =
+    process.env.XDG_CONFIG_HOME === "required-environment-canary";
 
   process.stdout.write(
     `${JSON.stringify({
@@ -22,8 +28,16 @@ for await (const line of reader) {
       data: {
         browsers: [
           {
-            id: "chrome",
-            name: "Google Chrome",
+            id: checksEnvironment
+              ? environmentIsClean
+                ? "environment-clean"
+                : "environment-leaked"
+              : "chrome",
+            name: checksEnvironment
+              ? requiredEnvironmentIsPresent
+                ? "required-environment-present"
+                : "required-environment-missing"
+              : "Google Chrome",
             profiles: [{ id: "Default", name: "Personal" }],
           },
         ],

@@ -2,19 +2,25 @@ use std::{
     ffi::{OsStr, OsString},
     fs,
     path::PathBuf,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver},
+    },
     time::Duration,
 };
 
 use karakeep_transfer_lib::{
-    domain::{BookmarkKey, DeliveryAttempt, DeliveryOutcome, DestinationIdentity, TimestampMillis},
+    delivery::DeliveryLedger as _,
+    domain::{DestinationIdentity, RunStatus},
     fieldtheory::{
         AcquisitionEvent, AcquisitionFailureCode, AcquisitionPhase, AcquisitionStartError,
         AcquisitionSupervisor, BridgeRunner, DestinationPreview, FieldTheoryState, SnapshotStore,
         XAcquisitionRequest, XSourceReference,
     },
     file_source::ResolvedFileSourceFormat,
+    karakeep::BookmarkOrigin,
     ledger::DeliveryLedger,
+    transfer::SqliteDeliveryLedgerAdapter,
 };
 
 fn fixture() -> PathBuf {
@@ -254,21 +260,27 @@ fn snapshot_preview_partitions_pending_records_by_destination_without_delivery()
     .expect("snapshot");
     let destination_identity =
         DestinationIdentity::new("https://keep.example/", "user-7").expect("destination identity");
-    let mut ledger = DeliveryLedger::open_in_memory().expect("ledger");
-    let run = ledger
-        .start_run(&destination_identity, TimestampMillis(1))
-        .expect("run");
-    ledger
-        .record_attempt(
-            run,
-            &BookmarkKey::new("twitter", "1").expect("bookmark key"),
-            DeliveryAttempt::Delivered {
-                karakeep_bookmark_id: "karakeep-1".to_string(),
-                outcome: DeliveryOutcome::Existing,
-            },
-            TimestampMillis(2),
+    let ledger = Arc::new(Mutex::new(
+        DeliveryLedger::open_in_memory().expect("ledger"),
+    ));
+    let delivery = SqliteDeliveryLedgerAdapter::start(
+        Arc::clone(&ledger),
+        destination_identity.clone(),
+        ResolvedFileSourceFormat::FieldTheoryJsonl,
+    )
+    .expect("delivery adapter");
+    delivery
+        .record_delivered(
+            &delivery.destination_id(),
+            "1",
+            "karakeep-1",
+            BookmarkOrigin::Existing,
         )
         .expect("delivery");
+    delivery
+        .finish_run(RunStatus::Completed)
+        .expect("delivery run finishes");
+    let ledger = ledger.lock().expect("ledger lock");
 
     let preview = store
         .preview(

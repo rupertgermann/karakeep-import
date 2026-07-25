@@ -18,6 +18,7 @@ use crate::{
     domain::{BookmarkKey, DestinationIdentity},
     file_source::{FileSourceFormat, FileSourcePreview, preview_file},
     ledger::DeliveryLedger,
+    transfer::FIELD_THEORY_LEDGER_SOURCE,
 };
 
 const SNAPSHOT_FILE: &str = "bookmarks.jsonl";
@@ -171,7 +172,7 @@ impl SnapshotStore {
         let mut folders = Vec::new();
 
         for bookmark in &source.bookmarks {
-            let key = BookmarkKey::new("twitter", &bookmark.source_id)
+            let key = BookmarkKey::new(FIELD_THEORY_LEDGER_SOURCE, &bookmark.source_id)
                 .map_err(|_| SnapshotPreviewError)?;
             if ledger
                 .delivery_for(destination_identity, &key)
@@ -582,7 +583,7 @@ fn stop_failed_start(child: &mut Child, store: &SnapshotStore, staging: &Path) {
     store.cleanup(staging);
 }
 
-fn copy_required_process_environment(command: &mut Command) {
+pub(super) fn copy_required_process_environment(command: &mut Command) {
     const ALLOWLIST: &[&str] = &[
         "APPDATA",
         "HOME",

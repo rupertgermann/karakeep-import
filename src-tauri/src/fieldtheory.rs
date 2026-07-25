@@ -234,8 +234,10 @@ impl BridgeRunner {
     }
 
     pub fn request<T: DeserializeOwned>(&self, request: &BridgeRequest) -> Result<T, BridgeError> {
-        let mut child = Command::new(&self.node_path)
-            .arg(&self.bridge_path)
+        let mut command = Command::new(&self.node_path);
+        command.arg(&self.bridge_path).env_clear();
+        acquisition::copy_required_process_environment(&mut command);
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

@@ -19,7 +19,7 @@ use crate::{
     ledger::{DeliveryLedger as SqliteLedger, TransferRunId},
 };
 
-const FIELD_THEORY_LEDGER_SOURCE: &str = "x";
+pub(crate) const FIELD_THEORY_LEDGER_SOURCE: &str = "x";
 const CHROME_LEDGER_SOURCE: &str = "chrome";
 
 #[derive(Clone)]
