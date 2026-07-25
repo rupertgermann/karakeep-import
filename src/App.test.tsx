@@ -525,6 +525,117 @@ describe("Karakeep Transfer shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("continues an acquired X snapshot into confirmed delivery", async () => {
+    let acquisitionEvent:
+      | Parameters<XAcquisitionApi["startXAcquisition"]>[1]
+      | undefined;
+    let acquisitionId = "";
+    const acquisitionApi: XAcquisitionApi = {
+      startXAcquisition: vi
+        .fn()
+        .mockImplementation(async (request, onEvent) => {
+          acquisitionId = request.acquisitionId;
+          acquisitionEvent = onEvent;
+          return vi.fn();
+        }),
+      cancelXAcquisition: vi.fn(),
+      previewXSnapshot: vi.fn().mockResolvedValue({
+        total: 2,
+        pending: 1,
+        previouslyDelivered: 1,
+        folders: ["Reading"],
+        destination: {
+          serverUrl: rememberedDestination.serverUrl,
+          userId: rememberedDestination.userId,
+          userName: rememberedDestination.displayName,
+        },
+      }),
+    };
+    const deliveryApi = transferApi({
+      startDelivery: vi.fn().mockResolvedValue(vi.fn()),
+    });
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        discoverXSources: vi.fn().mockResolvedValue({
+          browsers: [
+            {
+              id: "chrome",
+              name: "Google Chrome",
+              profiles: [{ id: "Default", name: "Personal" }],
+            },
+          ],
+        }),
+        selectXSource: vi.fn().mockResolvedValue({
+          browserId: "chrome",
+          browserName: "Google Chrome",
+          profileId: "Default",
+          profileName: "Personal",
+        }),
+      },
+    );
+
+    render(
+      <App
+        desktopApi={api}
+        xAcquisitionApi={acquisitionApi}
+        transferApi={deliveryApi}
+        createDeliveryId={() => "delivery-x"}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Use my X browser session",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: /temporarily using my existing authenticated X session/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use this X source" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(acquisitionApi.startXAcquisition).toHaveBeenCalledOnce(),
+    );
+
+    act(() => {
+      acquisitionEvent?.({
+        type: "completed",
+        acquisitionId,
+        total: 2,
+        added: 2,
+        folders: ["Reading"],
+      });
+    });
+    expect(
+      await screen.findByRole("heading", { name: "Review this transfer" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start transfer" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm transfer" }),
+    );
+    await waitFor(() =>
+      expect(deliveryApi.startDelivery).toHaveBeenCalledWith(
+        {
+          deliveryId: "delivery-x",
+          source: { kind: "x" },
+        },
+        expect.any(Function),
+      ),
+    );
+  });
+
   it("opens Settings and can forget the active destination", async () => {
     const forgetDestination = vi.fn().mockResolvedValue(undefined);
     const api = desktopApi(
