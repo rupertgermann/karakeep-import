@@ -1,12 +1,82 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { acquireSnapshot } from "../src/acquisition.mjs";
+import {
+  discoverSources,
+  resolveFirefoxProfileDirectory,
+  selectSource,
+} from "../src/source-discovery.mjs";
 
 const source = {
   browserId: "chrome",
   profileId: "Profile 2",
 };
+
+test("acquires a discovered absolute Firefox profile without exposing its path", async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "karakeep-x-absolute-firefox-"),
+  );
+  const firefoxRoot = path.join(fixtureRoot, "Firefox");
+  const externalProfile = path.join(
+    fixtureRoot,
+    "External Profiles",
+    "default-release",
+  );
+  await mkdir(externalProfile, { recursive: true });
+  await mkdir(firefoxRoot, { recursive: true });
+  await writeFile(
+    path.join(firefoxRoot, "profiles.ini"),
+    [
+      "[Profile0]",
+      "Name=default-release",
+      "IsRelative=0",
+      `Path=${externalProfile}`,
+      "",
+    ].join("\n"),
+  );
+  const discoveryDependencies = {
+    userDataDirForBrowser: (browserId) =>
+      browserId === "firefox" ? firefoxRoot : undefined,
+  };
+  const discovered = await discoverSources(discoveryDependencies);
+  const discoveredSource = {
+    browserId: "firefox",
+    profileId: discovered.browsers[0].profiles[0].id,
+  };
+  const profileDirectories = [];
+
+  await acquireSnapshot(
+    {
+      source: discoveredSource,
+      dataDir: path.join(fixtureRoot, "staging"),
+      signal: new AbortController().signal,
+      onProgress: () => {},
+    },
+    {
+      selectSource: (request) => selectSource(request, discoveryDependencies),
+      resolveFirefoxProfileDirectory: (selectedSource) =>
+        resolveFirefoxProfileDirectory(
+          selectedSource,
+          discoveryDependencies,
+        ),
+      syncBookmarksGraphQL: async (options) => {
+        profileDirectories.push(options.firefoxProfileDir);
+        return { added: 1, totalBookmarks: 1 };
+      },
+      syncBookmarkFolders: async (options) => {
+        profileDirectories.push(options.firefoxProfileDir);
+        return { folders: [], skippedFolders: [] };
+      },
+    },
+  );
+
+  assert.deepEqual(profileDirectories, [externalProfile, externalProfile]);
+  assert.equal(JSON.stringify(discovered).includes(fixtureRoot), false);
+});
 
 test("acquires bookmarks and folders through the pinned Field Theory modules", async () => {
   const calls = [];

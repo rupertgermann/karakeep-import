@@ -72,7 +72,7 @@ function parseFirefoxProfiles(ini) {
     const line = rawLine.trim();
     if (/^\[Profile\d+\]$/i.test(line)) {
       if (current?.path) profiles.push(current);
-      current = {};
+      current = { section: line.slice(1, -1) };
       continue;
     }
     if (!current) continue;
@@ -100,8 +100,21 @@ async function firefoxProfiles(root) {
   for (const profile of parseFirefoxProfiles(ini)) {
     const normalizedPath = profile.path.replace(/[\\/]/g, path.sep);
     const absolutePath = profile.isRelative
-      ? path.join(root, normalizedPath)
-      : normalizedPath;
+      ? path.resolve(root, normalizedPath)
+      : path.normalize(normalizedPath);
+    if (profile.isRelative) {
+      const relative = path.relative(root, absolutePath);
+      if (
+        relative.length === 0 ||
+        relative === ".." ||
+        relative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relative)
+      ) {
+        continue;
+      }
+    } else if (!path.isAbsolute(absolutePath)) {
+      continue;
+    }
     try {
       const entries = await readdir(absolutePath);
       if (!Array.isArray(entries)) continue;
@@ -111,8 +124,9 @@ async function firefoxProfiles(root) {
     profiles.push({
       id: profile.isRelative
         ? profile.path.replaceAll("\\", "/")
-        : path.basename(profile.path),
+        : `absolute:${profile.section}`,
       name: profile.name || path.basename(profile.path),
+      directory: absolutePath,
     });
   }
   return profiles;
@@ -131,10 +145,25 @@ export async function discoverSources(
         ? await firefoxProfiles(root)
         : await chromiumProfiles(root);
     if (profiles.length === 0) continue;
-    browsers.push({ id: browser.id, name: browser.name, profiles });
+    browsers.push({
+      id: browser.id,
+      name: browser.name,
+      profiles: profiles.map(({ id, name }) => ({ id, name })),
+    });
   }
 
   return { browsers };
+}
+
+export async function resolveFirefoxProfileDirectory(
+  source,
+  dependencies = defaultDependencies,
+) {
+  if (source?.browserId !== "firefox") return undefined;
+  const root = dependencies.userDataDirForBrowser("firefox");
+  if (!root) return undefined;
+  const profiles = await firefoxProfiles(root);
+  return profiles.find((profile) => profile.id === source.profileId)?.directory;
 }
 
 export async function selectSource(request, dependencies = defaultDependencies) {

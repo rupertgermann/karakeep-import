@@ -1,5 +1,3 @@
-import path from "node:path";
-
 import {
   syncBookmarkFolders,
   syncBookmarksGraphQL,
@@ -8,7 +6,10 @@ import {
   browserUserDataDir,
   getBrowser,
 } from "fieldtheory/dist/browsers.js";
-import { selectSource } from "./source-discovery.mjs";
+import {
+  resolveFirefoxProfileDirectory,
+  selectSource,
+} from "./source-discovery.mjs";
 
 const COMPATIBILITY_MESSAGE =
   "X bookmark acquisition is temporarily incompatible. A Karakeep Transfer update may be required.";
@@ -23,11 +24,12 @@ export class AcquisitionError extends Error {
 
 const defaultDependencies = {
   selectSource,
+  resolveFirefoxProfileDirectory,
   syncBookmarksGraphQL,
   syncBookmarkFolders,
 };
 
-function sourceOptions(source) {
+async function sourceOptions(source, dependencies) {
   if (source.browserId !== "firefox") {
     const root = browserUserDataDir(getBrowser(source.browserId));
     if (!root) {
@@ -40,17 +42,8 @@ function sourceOptions(source) {
     };
   }
 
-  const root = browserUserDataDir(getBrowser("firefox"));
-  if (!root) {
-    throw new AcquisitionError("source_unavailable", "Source is unavailable.");
-  }
-  const profile = path.resolve(root, source.profileId);
-  const relative = path.relative(root, profile);
-  if (
-    relative.startsWith("..") ||
-    path.isAbsolute(relative) ||
-    relative.length === 0
-  ) {
+  const profile = await dependencies.resolveFirefoxProfileDirectory(source);
+  if (!profile) {
     throw new AcquisitionError("source_unavailable", "Source is unavailable.");
   }
   return {
@@ -103,7 +96,7 @@ export async function acquireSnapshot(
         "Source is unavailable.",
       );
     }
-    const options = sourceOptions(source);
+    const options = await sourceOptions(source, dependencies);
     const bookmarks = await dependencies.syncBookmarksGraphQL({
       ...options,
       signal,

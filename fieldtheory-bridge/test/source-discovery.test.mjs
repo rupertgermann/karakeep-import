@@ -7,6 +7,7 @@ import { mkdtemp } from "node:fs/promises";
 
 import {
   discoverSources,
+  resolveFirefoxProfileDirectory,
   selectSource,
 } from "../src/source-discovery.mjs";
 
@@ -73,6 +74,77 @@ test("discovers only the supported installed browser and profile matrix", async 
       },
     ],
   });
+});
+
+test("resolves an absolute Firefox profile from its path-safe discovered ID", async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "karakeep-x-firefox-absolute-source-"),
+  );
+  const firefox = path.join(fixtureRoot, "Firefox");
+  const absoluteProfile = path.join(
+    fixtureRoot,
+    "External Profiles",
+    "abc.default-release",
+  );
+  await mkdir(absoluteProfile, { recursive: true });
+  await mkdir(firefox, { recursive: true });
+  await writeFile(
+    path.join(firefox, "profiles.ini"),
+    [
+      "[Profile0]",
+      "Name=default-release",
+      "IsRelative=0",
+      `Path=${absoluteProfile}`,
+      "",
+    ].join("\n"),
+  );
+  const dependencies = {
+    userDataDirForBrowser: (browserId) =>
+      browserId === "firefox" ? firefox : undefined,
+  };
+
+  const discovered = await discoverSources(dependencies);
+  const profile = discovered.browsers[0].profiles[0];
+
+  assert.deepEqual(profile, {
+    id: "absolute:Profile0",
+    name: "default-release",
+  });
+  assert.equal(
+    await resolveFirefoxProfileDirectory(
+      { browserId: "firefox", profileId: profile.id },
+      dependencies,
+    ),
+    absoluteProfile,
+  );
+  assert.equal(JSON.stringify(discovered).includes(fixtureRoot), false);
+});
+
+test("does not reinterpret an escaping relative Firefox profile as absolute", async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "karakeep-x-firefox-relative-escape-"),
+  );
+  const firefox = path.join(fixtureRoot, "Firefox");
+  await mkdir(path.join(fixtureRoot, "outside"), { recursive: true });
+  await mkdir(firefox, { recursive: true });
+  await writeFile(
+    path.join(firefox, "profiles.ini"),
+    [
+      "[Profile0]",
+      "Name=outside",
+      "IsRelative=1",
+      "Path=../outside",
+      "",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(
+    await discoverSources({
+      userDataDirForBrowser: (browserId) =>
+        browserId === "firefox" ? firefox : undefined,
+    }),
+    { browsers: [] },
+  );
 });
 
 test("accepts a discovered source only after explicit X-session consent", async () => {
