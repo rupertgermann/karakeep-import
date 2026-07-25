@@ -6,7 +6,6 @@ import {
   REPLACE_X_SOURCE,
   settingsDesktopApi,
   type ComponentVersions,
-  type DiagnosticsExport,
   type ForgetKarakeepConnectionConfirmation,
   type ManualUpdateCheckResult,
   type PrivateDataSummary,
@@ -21,13 +20,11 @@ interface SettingsProps {
   onForgetKarakeepConnection?: (
     confirmation: ForgetKarakeepConnectionConfirmation,
   ) => Promise<void>;
-  onSaveDiagnostics?: (diagnostics: DiagnosticsExport) => Promise<void>;
 }
 
 export default function Settings({
   api = settingsDesktopApi,
   onForgetKarakeepConnection,
-  onSaveDiagnostics,
 }: SettingsProps) {
   const [privateData, setPrivateData] = useState<PrivateDataSummary | null>(
     null,
@@ -106,12 +103,10 @@ export default function Settings({
 
   function exportDiagnostics() {
     return runAction(async () => {
-      const diagnostics = await api.exportDiagnostics();
-      if (onSaveDiagnostics) {
-        await onSaveDiagnostics(diagnostics);
+      if (await api.saveDiagnostics()) {
         setStatus("Redacted diagnostics were saved.");
       } else {
-        setStatus("Redacted diagnostics are ready for the app save dialog.");
+        setStatus("Diagnostics export was cancelled.");
       }
     });
   }

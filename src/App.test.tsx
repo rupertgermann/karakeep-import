@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import App from "./App";
@@ -8,6 +8,7 @@ import type {
   XAcquisitionApi,
 } from "./desktop-api";
 import type { SettingsApi } from "./settings-api";
+import type { DeliveryEvent, TransferApi } from "./transfer-api";
 
 type AppApi = DesktopApi & FileSourceApi;
 
@@ -67,6 +68,17 @@ function xAcquisitionApi(): XAcquisitionApi {
     startXAcquisition: vi.fn(),
     cancelXAcquisition: vi.fn(),
     previewXSnapshot: vi.fn(),
+  };
+}
+
+function transferApi(
+  overrides: Partial<TransferApi> = {},
+): TransferApi {
+  return {
+    previewTransfer: vi.fn(),
+    startDelivery: vi.fn(),
+    cancelDelivery: vi.fn(),
+    ...overrides,
   };
 }
 
@@ -218,6 +230,242 @@ describe("Karakeep Transfer shell", () => {
 
     expect(
       screen.getByRole("heading", { name: "Preview a bookmark file" }),
+    ).toBeInTheDocument();
+  });
+
+  it("previews and delivers a selected file through the guided transfer", async () => {
+    const filePreview = {
+      format: "fieldTheoryJsonl" as const,
+      bookmarks: [
+        {
+          sourceId: "bookmark-1",
+          url: "https://x.com/example/status/1",
+          title: "Saved post",
+          note: "",
+          createdAt: null,
+          tags: ["twitter", "Reading"],
+          folders: ["Reading"],
+        },
+      ],
+    };
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        selectFileSource: vi
+          .fn()
+          .mockResolvedValue("/private/selected/bookmarks.jsonl"),
+        previewFileSource: vi.fn().mockResolvedValue(filePreview),
+      },
+    );
+    let publish: ((event: DeliveryEvent) => void) | undefined;
+    const stopListening = vi.fn();
+    const deliveryApi = transferApi({
+      previewTransfer: vi.fn().mockResolvedValue({
+        total: 1,
+        pending: 1,
+        previouslyDelivered: 0,
+        folders: ["Reading"],
+        destination: {
+          serverUrl: rememberedDestination.serverUrl,
+          userId: rememberedDestination.userId,
+          userName: rememberedDestination.displayName,
+        },
+      }),
+      startDelivery: vi.fn().mockImplementation(async (_request, onEvent) => {
+        publish = onEvent;
+        return stopListening;
+      }),
+    });
+
+    render(
+      <App
+        desktopApi={api}
+        transferApi={deliveryApi}
+        createDeliveryId={() => "delivery-1"}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use a bookmark file" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose and preview file" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Continue with 1 bookmark",
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Review this transfer" }),
+    ).toBeInTheDocument();
+    expect(deliveryApi.previewTransfer).toHaveBeenCalledWith({
+      kind: "file",
+      path: "/private/selected/bookmarks.jsonl",
+      format: "fieldTheoryJsonl",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Start transfer" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm transfer" }),
+    );
+    await waitFor(() =>
+      expect(deliveryApi.startDelivery).toHaveBeenCalledWith(
+        {
+          deliveryId: "delivery-1",
+          source: {
+            kind: "file",
+            path: "/private/selected/bookmarks.jsonl",
+            format: "fieldTheoryJsonl",
+          },
+        },
+        expect.any(Function),
+      ),
+    );
+
+    act(() => {
+      publish?.({
+        type: "progress",
+        deliveryId: "delivery-1",
+        progress: { completed: 1, total: 1 },
+      });
+    });
+    expect(
+      screen.getByRole("progressbar", {
+        name: "1 of 1 bookmarks processed",
+      }),
+    ).toBeInTheDocument();
+
+    act(() => {
+      publish?.({
+        type: "completed",
+        deliveryId: "delivery-1",
+        result: {
+          created: 1,
+          existing: 0,
+          retried: 0,
+          failed: 0,
+          cancelled: 0,
+        },
+      });
+    });
+    expect(
+      screen.getByRole("heading", { name: "Delivery finished" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Created").nextSibling).toHaveTextContent("1");
+    expect(stopListening).toHaveBeenCalledOnce();
+  });
+
+  it("cancels the active delivery and keeps its partial result", async () => {
+    let publish: ((event: DeliveryEvent) => void) | undefined;
+    const deliveryApi = transferApi({
+      previewTransfer: vi.fn().mockResolvedValue({
+        total: 2,
+        pending: 2,
+        previouslyDelivered: 0,
+        folders: [],
+        destination: {
+          serverUrl: rememberedDestination.serverUrl,
+          userId: rememberedDestination.userId,
+          userName: rememberedDestination.displayName,
+        },
+      }),
+      startDelivery: vi.fn().mockImplementation(async (_request, onEvent) => {
+        publish = onEvent;
+        return vi.fn();
+      }),
+      cancelDelivery: vi.fn().mockResolvedValue(undefined),
+    });
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        selectFileSource: vi.fn().mockResolvedValue("/private/bookmarks.html"),
+        previewFileSource: vi.fn().mockResolvedValue({
+          format: "chromeNetscape",
+          bookmarks: [
+            {
+              sourceId: "bookmark-1",
+              url: "https://example.com/1",
+              title: "One",
+              note: "",
+              createdAt: null,
+              tags: ["chrome"],
+              folders: [],
+            },
+            {
+              sourceId: "bookmark-2",
+              url: "https://example.com/2",
+              title: "Two",
+              note: "",
+              createdAt: null,
+              tags: ["chrome"],
+              folders: [],
+            },
+          ],
+        }),
+      },
+    );
+
+    render(
+      <App
+        desktopApi={api}
+        transferApi={deliveryApi}
+        createDeliveryId={() => "delivery-cancel"}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use a bookmark file" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose and preview file" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Continue with 2 bookmarks",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Start transfer" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm transfer" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Cancel transfer" }),
+    );
+
+    expect(deliveryApi.cancelDelivery).toHaveBeenCalledWith(
+      "delivery-cancel",
+    );
+
+    act(() => {
+      publish?.({
+        type: "cancelled",
+        deliveryId: "delivery-cancel",
+        result: {
+          created: 1,
+          existing: 0,
+          retried: 0,
+          failed: 0,
+          cancelled: 1,
+        },
+      });
+    });
+    expect(
+      screen.getByRole("heading", { name: "Delivery finished" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Retry 1 pending" }),
     ).toBeInTheDocument();
   });
 

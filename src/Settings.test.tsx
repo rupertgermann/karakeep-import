@@ -189,35 +189,32 @@ describe("Settings", () => {
     );
   });
 
-  it("hands redacted diagnostics to the allowlisted save seam", async () => {
-    const onSaveDiagnostics = vi.fn().mockResolvedValue(undefined);
-    render(
-      <Settings
-        api={createSettingsApi()}
-        onSaveDiagnostics={onSaveDiagnostics}
-      />,
-    );
+  it("opens the native save flow for redacted diagnostics", async () => {
+    const api = createSettingsApi();
+    vi.mocked(api.saveDiagnostics).mockResolvedValue(true);
+    render(<Settings api={api} />);
 
     fireEvent.click(
       screen.getByRole("button", { name: "Export diagnostics" }),
     );
 
-    await waitFor(() =>
-      expect(onSaveDiagnostics).toHaveBeenCalledWith(diagnostics),
-    );
+    await waitFor(() => expect(api.saveDiagnostics).toHaveBeenCalledOnce());
+    expect(api.exportDiagnostics).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("Redacted diagnostics were saved."),
+    ).toBeInTheDocument();
   });
 
-  it("keeps diagnostics in memory when no save seam is connected", async () => {
-    render(<Settings api={createSettingsApi()} />);
+  it("reports when the native diagnostics save dialog is cancelled", async () => {
+    const api = createSettingsApi();
+    render(<Settings api={api} />);
 
     fireEvent.click(
       screen.getByRole("button", { name: "Export diagnostics" }),
     );
 
     expect(
-      await screen.findByText(
-        "Redacted diagnostics are ready for the app save dialog.",
-      ),
+      await screen.findByText("Diagnostics export was cancelled."),
     ).toBeInTheDocument();
   });
 

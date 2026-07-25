@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { desktopApi as defaultDesktopApi } from "./desktop-api";
 import type {
@@ -20,7 +20,19 @@ import {
 import XSourceSetup from "./x-source/XSourceSetup";
 import XAcquisition from "./x-source/XAcquisition";
 import DestinationSetup from "./DestinationSetup";
-import type { TransferPreview } from "./workflow";
+import TransferReview from "./TransferReview";
+import {
+  transferApi as defaultTransferApi,
+  type DeliveryEvent,
+  type DeliveryFailureCode,
+  type TransferApi,
+  type TransferSourceRequest,
+} from "./transfer-api";
+import type {
+  TransferPreview,
+  TransferProgress,
+  TransferResult,
+} from "./workflow";
 
 type AppDesktopApi = DesktopApi & FileSourceApi;
 type SourceMode = "x" | "file" | null;
@@ -32,12 +44,16 @@ interface AppProps {
   desktopApi?: AppDesktopApi;
   settingsApi?: SettingsApi;
   xAcquisitionApi?: XAcquisitionApi;
+  transferApi?: TransferApi;
+  createDeliveryId?: () => string;
 }
 
 export default function App({
   desktopApi = defaultDesktopApi,
   settingsApi = defaultSettingsApi,
   xAcquisitionApi = defaultXAcquisitionApi,
+  transferApi = defaultTransferApi,
+  createDeliveryId = () => crypto.randomUUID(),
 }: AppProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthFailed, setHealthFailed] = useState(false);
@@ -47,7 +63,20 @@ export default function App({
   const [readySource, setReadySource] = useState<ReadySource | null>(null);
   const [transferPreview, setTransferPreview] =
     useState<TransferPreview | null>(null);
+  const [deliverySource, setDeliverySource] =
+    useState<TransferSourceRequest | null>(null);
+  const [transferProgress, setTransferProgress] =
+    useState<TransferProgress | null>(null);
+  const [transferResult, setTransferResult] =
+    useState<TransferResult | null>(null);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [preparingPreview, setPreparingPreview] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const activeDelivery = useRef<{
+    id: string;
+    unlisten?: () => void;
+  } | null>(null);
+  const terminalDeliveries = useRef(new Set<string>());
 
   useEffect(() => {
     let active = true;
@@ -69,6 +98,119 @@ export default function App({
       active = false;
     };
   }, [desktopApi]);
+
+  useEffect(
+    () => () => {
+      activeDelivery.current?.unlisten?.();
+    },
+    [],
+  );
+
+  function chooseAnotherSource() {
+    activeDelivery.current?.unlisten?.();
+    activeDelivery.current = null;
+    setSourceMode(null);
+    setReadySource(null);
+    setDeliverySource(null);
+    setTransferPreview(null);
+    setTransferProgress(null);
+    setTransferResult(null);
+    setTransferError(null);
+    setPreparingPreview(false);
+  }
+
+  async function prepareFileTransfer(selection: FileSourceSelection) {
+    const source: TransferSourceRequest = {
+      kind: "file",
+      path: selection.path,
+      format: selection.preview.format,
+    };
+    setReadySource({ kind: "file", selection });
+    setDeliverySource(source);
+    setPreparingPreview(true);
+    setTransferError(null);
+    try {
+      setTransferPreview(await transferApi.previewTransfer(source));
+    } catch {
+      setTransferError(
+        "The transfer preview could not be prepared. Choose the file again.",
+      );
+    } finally {
+      setPreparingPreview(false);
+    }
+  }
+
+  function handleDeliveryEvent(
+    deliveryId: string,
+    preview: TransferPreview,
+    event: DeliveryEvent,
+  ) {
+    if (event.deliveryId !== deliveryId) return;
+    if (event.type === "progress") {
+      setTransferProgress(event.progress);
+      return;
+    }
+
+    const currentDelivery = activeDelivery.current;
+    if (
+      currentDelivery?.id === deliveryId &&
+      currentDelivery.unlisten !== undefined
+    ) {
+      currentDelivery.unlisten();
+    } else {
+      terminalDeliveries.current.add(deliveryId);
+    }
+    activeDelivery.current = null;
+    setTransferProgress(null);
+    if (event.type === "completed" || event.type === "cancelled") {
+      setTransferResult(event.result);
+      return;
+    }
+
+    setTransferPreview(preview);
+    setTransferError(deliveryFailureMessage(event.code));
+  }
+
+  async function startDelivery() {
+    if (!deliverySource || !transferPreview || activeDelivery.current) return;
+    const deliveryId = createDeliveryId();
+    const preview = transferPreview;
+    setTransferError(null);
+    setTransferResult(null);
+    setTransferProgress({ completed: 0, total: preview.pending });
+    activeDelivery.current = { id: deliveryId };
+    try {
+      const unlisten = await transferApi.startDelivery(
+        { deliveryId, source: deliverySource },
+        (event) => handleDeliveryEvent(deliveryId, preview, event),
+      );
+      if (terminalDeliveries.current.delete(deliveryId)) {
+        unlisten();
+      } else if (activeDelivery.current?.id === deliveryId) {
+        activeDelivery.current.unlisten = unlisten;
+      } else {
+        unlisten();
+      }
+    } catch {
+      activeDelivery.current = null;
+      setTransferProgress(null);
+      setTransferError(
+        "Delivery could not be started. Check the connection and try again.",
+      );
+    }
+  }
+
+  async function cancelDelivery() {
+    const deliveryId = activeDelivery.current?.id;
+    if (!deliveryId) return;
+    try {
+      await transferApi.cancelDelivery(deliveryId);
+    } catch {
+      setTransferError(
+        "The cancellation request could not be sent. Delivery will stop as soon as possible.",
+      );
+    }
+  }
 
   const status = health
     ? {
@@ -112,6 +254,7 @@ export default function App({
           <button
             type="button"
             className="settings-link"
+            disabled={transferProgress !== null}
             onClick={() => setShowSettings(true)}
           >
             Open Settings
@@ -162,9 +305,7 @@ export default function App({
       !readySource ? (
         <FileSourcePanel
           api={desktopApi}
-          onContinue={(selection) =>
-            setReadySource({ kind: "file", selection })
-          }
+          onContinue={(selection) => void prepareFileTransfer(selection)}
         />
       ) : null}
 
@@ -181,45 +322,61 @@ export default function App({
             userId: destination.userId,
             userName: destination.displayName,
           }}
-          onPreview={setTransferPreview}
+          onPreview={(preview) => {
+            setDeliverySource({ kind: "x" });
+            setTransferPreview(preview);
+            setTransferError(null);
+          }}
         />
       ) : null}
 
       {health &&
       destination &&
       !showSettings &&
-      readySource?.kind === "file" ? (
-        <section className="source-card" aria-labelledby="source-ready-title">
-          <p className="eyebrow">Step 3 · Preview</p>
-          <h2 id="source-ready-title">Bookmark file ready</h2>
-          <p className="source-explanation">
-            {readySource.selection.preview.bookmarks.length} bookmarks are
-            ready to preview.
-          </p>
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={() => {
-              setReadySource(null);
-              setSourceMode(null);
-              setTransferPreview(null);
-            }}
-          >
-            Choose another source
-          </button>
+      readySource?.kind === "file" &&
+      preparingPreview ? (
+        <section className="source-card" aria-live="polite">
+          <p>Preparing the transfer preview…</p>
         </section>
       ) : null}
 
-      {health && destination && !showSettings && transferPreview ? (
-        <section className="source-card" aria-labelledby="transfer-preview-title">
-          <p className="eyebrow">Step 4 · Confirm</p>
-          <h2 id="transfer-preview-title">Review this transfer</h2>
-          <p className="source-explanation">
-            {transferPreview.pending} of {transferPreview.total} bookmarks are
-            pending for {transferPreview.destination.userName}.{" "}
-            {transferPreview.previouslyDelivered} were delivered previously.
-          </p>
-        </section>
+      {health && destination && !showSettings && transferError ? (
+        <p role="alert" className="source-card">
+          {transferError}
+        </p>
+      ) : null}
+
+      {health &&
+      destination &&
+      !showSettings &&
+      transferPreview &&
+      transferResult ? (
+        <TransferReview
+          phase="result"
+          result={transferResult}
+          onRetryPending={() => void startDelivery()}
+          onChooseAnotherSource={chooseAnotherSource}
+        />
+      ) : health &&
+        destination &&
+        !showSettings &&
+        transferPreview &&
+        transferProgress ? (
+        <TransferReview
+          phase="progress"
+          progress={transferProgress}
+          onCancel={() => void cancelDelivery()}
+        />
+      ) : health &&
+        destination &&
+        !showSettings &&
+        transferPreview ? (
+        <TransferReview
+          phase="preview"
+          preview={transferPreview}
+          onStart={() => void startDelivery()}
+          onChooseAnotherSource={chooseAnotherSource}
+        />
       ) : null}
 
       {health && showSettings ? (
@@ -240,7 +397,10 @@ export default function App({
                     setDestination(null);
                     setSourceMode(null);
                     setReadySource(null);
+                    setDeliverySource(null);
                     setTransferPreview(null);
+                    setTransferProgress(null);
+                    setTransferResult(null);
                     setShowSettings(false);
                   }
                 : undefined
@@ -254,4 +414,19 @@ export default function App({
       </footer>
     </main>
   );
+}
+
+function deliveryFailureMessage(code: DeliveryFailureCode): string {
+  switch (code) {
+    case "destination-authentication":
+      return "Reconnect Karakeep before retrying delivery.";
+    case "destination-compatibility":
+      return "This Karakeep server is missing a required delivery capability.";
+    case "network":
+      return "Karakeep could not be reached. Check the connection and try again.";
+    case "delivery-failed":
+      return "Delivery stopped before all pending bookmarks were processed.";
+    case "unexpected":
+      return "Delivery could not be completed. You can safely retry pending bookmarks.";
+  }
 }
