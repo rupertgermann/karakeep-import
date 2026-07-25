@@ -8,9 +8,13 @@ import type {
 
 interface XSourceSetupProps {
   api: XSourceApi;
+  onSelected?(source: SelectedXSource): void;
 }
 
-export default function XSourceSetup({ api }: XSourceSetupProps) {
+export default function XSourceSetup({
+  api,
+  onSelected,
+}: XSourceSetupProps) {
   const [browsers, setBrowsers] = useState<BrowserSource[] | null>(null);
   const [browserId, setBrowserId] = useState("");
   const [profileId, setProfileId] = useState("");
@@ -60,12 +64,12 @@ export default function XSourceSetup({ api }: XSourceSetupProps) {
     event.preventDefault();
     setError("");
     try {
-      setSelected(
-        await api.selectXSource({
-          consent: true,
-          source: { browserId, profileId },
-        }),
-      );
+      const nextSource = await api.selectXSource({
+        consent: true,
+        source: { browserId, profileId },
+      });
+      setSelected(nextSource);
+      onSelected?.(nextSource);
     } catch {
       setError("The selected browser profile is no longer available.");
     }

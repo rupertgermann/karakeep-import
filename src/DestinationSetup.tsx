@@ -12,22 +12,43 @@ import type {
 
 interface DestinationSetupProps {
   desktopApi: DestinationApi;
+  onReady?(destination: DestinationSummary): void;
+  onForgotten?(): void;
 }
 
 function connectionErrorMessage(error: unknown): string {
-  if (
+  const code =
     typeof error === "object" &&
     error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    return error.message;
+    "code" in error &&
+    typeof error.code === "string"
+      ? error.code
+      : null;
+
+  switch (code) {
+    case "authentication":
+      return "Karakeep rejected the API key. Check the key and try again.";
+    case "insecure_destination":
+      return "This destination does not satisfy the connection security policy.";
+    case "invalid_server_url":
+      return "Enter a valid Karakeep server URL.";
+    case "missing_capability":
+      return "This Karakeep destination is missing a required delivery capability.";
+    case "network":
+      return "Karakeep could not be reached. Check the server and network.";
+    case "storage":
+      return "The Karakeep connection could not be stored securely.";
+    case "unsupported_destination":
+      return "The server did not return the expected Karakeep API contract.";
+    default:
+      return "Karakeep could not be connected. Check the server and API key.";
   }
-  return "Karakeep could not be connected. Check the server and API key.";
 }
 
 export default function DestinationSetup({
   desktopApi,
+  onReady,
+  onForgotten,
 }: DestinationSetupProps) {
   const [destination, setDestination] =
     useState<DestinationSummary | null>(null);
@@ -44,6 +65,9 @@ export default function DestinationSetup({
         if (active) {
           setDestination(remembered);
           setLoading(false);
+          if (remembered) {
+            onReady?.(remembered);
+          }
         }
       },
       (statusError: unknown) => {
@@ -56,7 +80,7 @@ export default function DestinationSetup({
     return () => {
       active = false;
     };
-  }, [desktopApi]);
+  }, [desktopApi, onReady]);
 
   async function connect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -74,6 +98,7 @@ export default function DestinationSetup({
         allowInsecureHttp: values.get("allowInsecureHttp") === "on",
       });
       setDestination(connected);
+      onReady?.(connected);
     } catch (connectError) {
       setError(connectionErrorMessage(connectError));
     } finally {
@@ -87,6 +112,7 @@ export default function DestinationSetup({
     try {
       await desktopApi.forgetDestination();
       setDestination(null);
+      onForgotten?.();
     } catch (forgetError) {
       setError(connectionErrorMessage(forgetError));
     } finally {

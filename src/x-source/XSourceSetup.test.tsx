@@ -27,7 +27,8 @@ describe("X Source setup", () => {
       }),
     };
 
-    render(<XSourceSetup api={api} />);
+    const onSelected = vi.fn();
+    render(<XSourceSetup api={api} onSelected={onSelected} />);
 
     expect(
       await screen.findByRole("combobox", { name: "Browser" }),
@@ -54,6 +55,12 @@ describe("X Source setup", () => {
         name: "X source selected: Google Chrome, Research",
       }),
     ).toBeInTheDocument();
+    expect(onSelected).toHaveBeenCalledWith({
+      browserId: "chrome",
+      browserName: "Google Chrome",
+      profileId: "Profile 2",
+      profileName: "Research",
+    });
   });
 
   it("explains when no supported browser profiles are found", async () => {

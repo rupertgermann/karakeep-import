@@ -124,6 +124,12 @@ select {
   opacity: 0.45;
 }
 
+.source-choice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
 .source-result {
   color: #3e5641;
   font-weight: 700;
