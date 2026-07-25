@@ -417,7 +417,7 @@ class GuiAcceptanceTests(unittest.TestCase):
             self.assertIn("executeDialog.showModal()", page)
             self.assertNotIn("window.confirm", page)
 
-    def test_live_import_flow_starts_ready_with_deliberate_warning(self):
+    def test_live_import_flow_has_a_deliberate_warning(self):
         gui = load_gui_module()
         with running(gui.create_server(port=0)) as server:
             with urllib.request.urlopen(
@@ -427,12 +427,12 @@ class GuiAcceptanceTests(unittest.TestCase):
 
             self.assertIn('class="dialog-warning" aria-hidden="true"', page)
             self.assertIn(
-                'id="run-status" role="status" aria-live="polite" '
-                'data-state="ready"',
+                'id="run-status" role="status" aria-live="polite"',
                 page,
             )
+            self.assertIn("Ready to preview.", page)
 
-    def test_run_status_colors_meet_text_contrast_in_both_themes(self):
+    def test_run_status_color_meets_text_contrast_in_both_themes(self):
         gui = load_gui_module()
         with running(gui.create_server(port=0)) as server:
             with urllib.request.urlopen(
@@ -451,25 +451,29 @@ class GuiAcceptanceTests(unittest.TestCase):
                 **light_variables,
                 **css_hex_variables(root_blocks[1]),
             }
+            status_rule = re.search(
+                r"#run-status\s*\{(.*?)\n\s*\}",
+                page,
+                flags=re.DOTALL,
+            )
+            self.assertIsNotNone(status_rule)
+            color_variable = re.search(
+                r"color:\s*var\((--[a-z0-9-]+)\);",
+                status_rule.group(1),
+                flags=re.IGNORECASE,
+            )
+            self.assertIsNotNone(color_variable)
             for theme_name, variables in (
                 ("light", light_variables),
                 ("dark", dark_variables),
             ):
                 console = variables["--color-console"]
-                for state in ("ready", "running", "success", "failure"):
-                    match = re.search(
-                        rf'#run-status\[data-state="{state}"\]\s*\{{'
-                        rf"\s*color:\s*var\((--[a-z0-9-]+)\);",
-                        page,
-                        flags=re.IGNORECASE,
-                    )
-                    self.assertIsNotNone(match)
-                    color = variables[match.group(1)]
-                    self.assertGreaterEqual(
-                        contrast_ratio(color, console),
-                        4.5,
-                        f"{theme_name} {state} status lacks text contrast",
-                    )
+                color = variables[color_variable.group(1)]
+                self.assertGreaterEqual(
+                    contrast_ratio(color, console),
+                    4.5,
+                    f"{theme_name} run status lacks text contrast",
+                )
 
     def test_live_import_uses_child_environment_and_streams_completion(self):
         gui = load_gui_module()

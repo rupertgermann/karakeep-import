@@ -69,10 +69,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       --color-console: #202821;
       --color-console-text: #EEF0E7;
       --color-console-muted: #AAB2A8;
-      --color-console-ready: #E4B75D;
-      --color-console-running: #A9C2A5;
-      --color-console-success: #A9C2A5;
-      --color-console-failure: #E18B7F;
+      --color-console-status: #E4B75D;
       --glow-primary: rgb(82 107 84 / 10%);
       --glow-signal: rgb(228 183 93 / 22%);
       --font-display: Fraunces, "Iowan Old Style", "Palatino Linotype",
@@ -433,7 +430,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       align-items: center;
       gap: .55rem;
       margin: 1rem 0 1.25rem;
-      color: var(--color-signal);
+      color: var(--color-console-status);
       font-size: .84rem;
       font-weight: 700;
     }}
@@ -444,21 +441,6 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       background: currentColor;
       content: "";
       box-shadow: 0 0 0 4px rgb(228 183 93 / 12%);
-    }}
-    #run-status[data-state="ready"] {{
-      color: var(--color-console-ready);
-    }}
-    #run-status[data-state="running"] {{
-      color: var(--color-console-running);
-    }}
-    #run-status[data-state="success"] {{
-      color: var(--color-console-success);
-    }}
-    #run-status[data-state="failure"] {{
-      color: var(--color-console-failure);
-    }}
-    #run-status[data-state="running"]::before {{
-      animation: quiet-pulse 1.35s ease-in-out infinite;
     }}
     #output {{
       min-height: 10rem;
@@ -512,10 +494,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
         --color-console: #111512;
         --color-console-text: #EEF0E7;
         --color-console-muted: #AAB2A8;
-        --color-console-ready: #D6AE66;
-        --color-console-running: #A9C2A5;
-        --color-console-success: #A9C2A5;
-        --color-console-failure: #E18B7F;
+        --color-console-status: #D6AE66;
         --glow-primary: rgb(169 194 165 / 10%);
         --glow-signal: rgb(214 174 102 / 12%);
         --shadow-sm: 0 1px 2px rgb(0 0 0 / 22%);
@@ -530,10 +509,6 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
     @keyframes quiet-dialog-arrive {{
       from {{ opacity: 0; transform: translateY(12px) scale(.98); }}
       to {{ opacity: 1; transform: translateY(0) scale(1); }}
-    }}
-    @keyframes quiet-pulse {{
-      0%, 100% {{ opacity: .55; transform: scale(.8); }}
-      50% {{ opacity: 1; transform: scale(1.15); }}
     }}
     @media (prefers-reduced-motion: reduce) {{
       *, *::before, *::after {{
@@ -692,7 +667,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       <section class="run-panel" aria-labelledby="output-heading">
         <p class="run-kicker">Local CLI stream</p>
         <h2 id="output-heading">Run output</h2>
-        <p id="run-status" role="status" aria-live="polite" data-state="ready">
+        <p id="run-status" role="status" aria-live="polite">
           Ready to preview.
         </p>
         <pre id="output" role="log" aria-live="polite" tabindex="0"></pre>
@@ -721,11 +696,6 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
 
     function checked(id) {{
       return document.getElementById(id).checked;
-    }}
-
-    function setRunStatus(message, state) {{
-      status.textContent = message;
-      status.dataset.state = state;
     }}
 
     function setBusy(busy, execute) {{
@@ -777,12 +747,9 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       }}
       if (event.type === "complete") {{
         const action = execute ? "Import" : "Preview";
-        setRunStatus(
-          event.exitCode === 0
-            ? action + " complete."
-            : action + " failed with exit code " + event.exitCode + ".",
-          event.exitCode === 0 ? "success" : "failure"
-        );
+        status.textContent = event.exitCode === 0
+          ? action + " complete."
+          : action + " failed with exit code " + event.exitCode + ".";
       }}
     }}
 
@@ -790,10 +757,9 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       if (!form.reportValidity()) return;
       setBusy(true, execute);
       output.textContent = "";
-      setRunStatus(
-        execute ? "Preparing live import…" : "Preparing preview…",
-        "running"
-      );
+      status.textContent = execute
+        ? "Preparing live import…"
+        : "Preparing preview…";
       try {{
         const response = await fetch("/api/run", {{
           method: "POST",
@@ -806,10 +772,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
         if (!response.ok || !response.body) {{
           throw new Error(await response.text() || "Run could not start.");
         }}
-        setRunStatus(
-          execute ? "Import running…" : "Preview running…",
-          "running"
-        );
+        status.textContent = execute ? "Import running…" : "Preview running…";
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffered = "";
@@ -827,10 +790,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
         }}
         if (buffered) handleEvent(JSON.parse(buffered), execute);
       }} catch (error) {{
-        setRunStatus(
-          execute ? "Import failed." : "Preview failed.",
-          "failure"
-        );
+        status.textContent = execute ? "Import failed." : "Preview failed.";
         output.textContent += String(error) + "\\n";
       }} finally {{
         setBusy(false, execute);
