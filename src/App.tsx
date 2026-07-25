@@ -93,6 +93,7 @@ type WorkflowAction =
       type: "delivery.failed";
       preview: TransferPreview;
       message: string;
+      result: TransferResult;
     }
   | { type: "delivery.start-failed"; message: string }
   | { type: "delivery.cancellation-request-failed"; message: string }
@@ -201,6 +202,7 @@ function workflowReducer(
         phase: "failure",
         transferPreview: action.preview,
         transferProgress: null,
+        transferResult: action.result,
         transferError: action.message,
       };
     case "delivery.start-failed":
@@ -354,6 +356,7 @@ export default function App({
       type: "delivery.failed",
       preview,
       message: deliveryFailureMessage(event.code),
+      result: event.result,
     });
   }
 

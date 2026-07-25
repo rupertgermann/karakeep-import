@@ -49,6 +49,7 @@ export type DeliveryEvent =
       type: "failed";
       deliveryId: string;
       code: DeliveryFailureCode;
+      result: TransferResult;
     };
 
 export interface TransferApi {
@@ -138,12 +139,17 @@ function deliveryEvent(
           };
     }
 
-    case "failed":
-      return {
-        type: "failed",
-        deliveryId: expectedDeliveryId,
-        code: failureCode(payload.code),
-      };
+    case "failed": {
+      const result = transferResult(payload.result);
+      return result === null
+        ? null
+        : {
+            type: "failed",
+            deliveryId: expectedDeliveryId,
+            code: failureCode(payload.code),
+            result,
+          };
+    }
 
     default:
       return null;
@@ -167,6 +173,7 @@ function transferProgress(value: unknown): TransferProgress | null {
 function transferResult(value: unknown): TransferResult | null {
   if (
     !isRecord(value) ||
+    !isCount(value.delivered) ||
     !isCount(value.created) ||
     !isCount(value.existing) ||
     !isCount(value.retried) ||
@@ -176,6 +183,7 @@ function transferResult(value: unknown): TransferResult | null {
     return null;
   }
   return {
+    delivered: value.delivered,
     created: value.created,
     existing: value.existing,
     retried: value.retried,

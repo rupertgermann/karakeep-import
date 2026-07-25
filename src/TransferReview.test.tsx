@@ -26,6 +26,7 @@ const progress: TransferProgress = {
 };
 
 const result: TransferResult = {
+  delivered: 9,
   created: 7,
   existing: 2,
   retried: 1,
@@ -279,7 +280,7 @@ describe("TransferReview", () => {
     );
 
     expect(screen.getByLabelText("Transfer results")).toHaveTextContent(
-      "Created7Existing2Retried1Failed1Cancelled1",
+      "Delivered9Created7Existing2Retried1Failed1Cancelled1",
     );
   });
 

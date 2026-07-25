@@ -183,6 +183,7 @@ function DeliveryResult({
         className="transfer-review__metrics transfer-review__metrics--results"
         aria-label="Transfer results"
       >
+        <Metric value={result.delivered} label="Delivered" />
         <Metric value={result.created} label="Created" />
         <Metric value={result.existing} label="Existing" />
         <Metric value={result.retried} label="Retried" />

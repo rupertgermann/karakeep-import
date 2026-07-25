@@ -143,6 +143,7 @@ describe("transfer desktop API", () => {
         type: "cancelled",
         deliveryId: "another-delivery",
         result: {
+          delivered: 0,
           created: 0,
           existing: 0,
           retried: 0,
@@ -156,6 +157,7 @@ describe("transfer desktop API", () => {
         type: "cancelled",
         deliveryId: "delivery-filtered",
         result: {
+          delivered: 0,
           created: 0,
           existing: 0,
           retried: 0,
@@ -194,6 +196,7 @@ describe("transfer desktop API", () => {
         type: "completed",
         deliveryId: "delivery-safe",
         result: {
+          delivered: 2,
           created: 1,
           existing: 1,
           retried: 1,
@@ -208,6 +211,15 @@ describe("transfer desktop API", () => {
         type: "failed",
         deliveryId: "delivery-safe",
         code: "network",
+        result: {
+          delivered: 1,
+          created: 1,
+          existing: 0,
+          retried: 1,
+          failed: 1,
+          cancelled: 0,
+          privateNote: "secret",
+        },
         message: "api-key-canary",
       },
     });
@@ -216,6 +228,7 @@ describe("transfer desktop API", () => {
         type: "cancelled",
         deliveryId: "delivery-safe",
         result: {
+          delivered: 1,
           created: 1,
           existing: 0,
           retried: 1,
@@ -244,6 +257,7 @@ describe("transfer desktop API", () => {
         type: "completed",
         deliveryId: "delivery-safe",
         result: {
+          delivered: 2,
           created: 1,
           existing: 1,
           retried: 1,
@@ -255,11 +269,20 @@ describe("transfer desktop API", () => {
         type: "failed",
         deliveryId: "delivery-safe",
         code: "network",
+        result: {
+          delivered: 1,
+          created: 1,
+          existing: 0,
+          retried: 1,
+          failed: 1,
+          cancelled: 0,
+        },
       },
       {
         type: "cancelled",
         deliveryId: "delivery-safe",
         result: {
+          delivered: 1,
           created: 1,
           existing: 0,
           retried: 1,
@@ -270,7 +293,7 @@ describe("transfer desktop API", () => {
     ]);
   });
 
-  it("ignores malformed numeric progress, completion, and cancellation payloads", async () => {
+  it("ignores malformed progress and terminal result payloads", async () => {
     let listener: ((event: { payload: unknown }) => void) | undefined;
     mocks.listen.mockImplementation(async (_name, callback) => {
       listener = callback;
@@ -295,7 +318,8 @@ describe("transfer desktop API", () => {
         type: "completed",
         deliveryId: "delivery-invalid",
         result: {
-          created: "one",
+          delivered: "one",
+          created: 0,
           existing: 0,
           retried: 0,
           failed: 0,
@@ -307,6 +331,13 @@ describe("transfer desktop API", () => {
       payload: {
         type: "cancelled",
         deliveryId: "delivery-invalid",
+      },
+    });
+    listener?.({
+      payload: {
+        type: "failed",
+        deliveryId: "delivery-invalid",
+        code: "network",
       },
     });
 
@@ -331,6 +362,14 @@ describe("transfer desktop API", () => {
         type: "failed",
         deliveryId: "delivery-error",
         code: "raw-backend-error",
+        result: {
+          delivered: 0,
+          created: 0,
+          existing: 0,
+          retried: 0,
+          failed: 0,
+          cancelled: 0,
+        },
         message: "private backend detail",
       },
     });
@@ -339,6 +378,14 @@ describe("transfer desktop API", () => {
       type: "failed",
       deliveryId: "delivery-error",
       code: "unexpected",
+      result: {
+        delivered: 0,
+        created: 0,
+        existing: 0,
+        retried: 0,
+        failed: 0,
+        cancelled: 0,
+      },
     });
   });
 

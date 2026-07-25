@@ -348,6 +348,7 @@ describe("Karakeep Transfer shell", () => {
         type: "completed",
         deliveryId: "delivery-1",
         result: {
+          delivered: 1,
           created: 1,
           existing: 0,
           retried: 0,
@@ -455,6 +456,7 @@ describe("Karakeep Transfer shell", () => {
         type: "cancelled",
         deliveryId: "delivery-cancel",
         result: {
+          delivered: 1,
           created: 1,
           existing: 0,
           retried: 0,
@@ -692,13 +694,25 @@ describe("Karakeep Transfer shell", () => {
         type: "failed",
         deliveryId: "delivery-terminal-failure",
         code: "network",
+        result: {
+          delivered: 0,
+          created: 0,
+          existing: 0,
+          retried: 0,
+          failed: 1,
+          cancelled: 0,
+        },
       });
     });
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Karakeep could not be reached. Check the connection and try again.",
     );
     expect(
-      screen.getByRole("heading", { name: "Review this transfer" }),
+      screen.getByRole("heading", { name: "Delivery finished" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Delivered").nextSibling).toHaveTextContent("0");
+    expect(
+      screen.getByRole("button", { name: "Retry 1 pending" }),
     ).toBeInTheDocument();
   });
 

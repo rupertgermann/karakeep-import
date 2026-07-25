@@ -19,6 +19,7 @@ export interface TransferProgress {
 }
 
 export interface TransferResult {
+  delivered: number;
   created: number;
   existing: number;
   retried: number;
