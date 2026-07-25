@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
-use std::{fmt, sync::Arc, time::Duration};
+use std::{
+    fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 use url::{Host, Url};
 
 mod client;
@@ -138,6 +145,7 @@ pub struct DestinationService<C, V, S> {
     client: C,
     vault: V,
     settings: S,
+    unusable: AtomicBool,
 }
 
 impl<C, V, S> DestinationService<C, V, S>
@@ -151,6 +159,7 @@ where
             client,
             vault,
             settings,
+            unusable: AtomicBool::new(false),
         }
     }
 
@@ -183,21 +192,29 @@ where
         let previous_key = self.vault.load()?;
         self.vault.save(api_key)?;
         if let Err(error) = self.settings.save(&destination) {
-            match previous_key {
-                Some(previous_key) => {
-                    let _ = self.vault.save(&previous_key);
+            let rollback = match previous_key {
+                Some(previous_key) => self.vault.save(&previous_key),
+                None => self.vault.delete(),
+            };
+            if rollback.is_err() {
+                let settings_cleared = self.settings.delete().is_ok();
+                let credential_cleared = self.vault.delete().is_ok();
+                if !settings_cleared && !credential_cleared {
+                    self.unusable.store(true, Ordering::Release);
                 }
-                None => {
-                    let _ = self.vault.delete();
-                }
+                return Err(DestinationError::for_code(DestinationErrorCode::Storage));
             }
             return Err(error);
         }
 
+        self.unusable.store(false, Ordering::Release);
         Ok(destination)
     }
 
     pub fn status(&self) -> Result<Option<DestinationSummary>, DestinationError> {
+        if self.unusable.load(Ordering::Acquire) {
+            return Ok(None);
+        }
         let Some(destination) = self.settings.load()? else {
             return Ok(None);
         };
@@ -209,10 +226,15 @@ where
 
     pub fn forget(&self) -> Result<(), DestinationError> {
         self.vault.delete()?;
-        self.settings.delete()
+        self.settings.delete()?;
+        self.unusable.store(false, Ordering::Release);
+        Ok(())
     }
 
     pub fn delivery_api(&self) -> Result<Arc<dyn KarakeepApi>, DestinationError> {
+        if self.unusable.load(Ordering::Acquire) {
+            return Err(DestinationError::for_code(DestinationErrorCode::Storage));
+        }
         let destination = self.settings.load()?.ok_or_else(|| {
             DestinationError::new(
                 DestinationErrorCode::Authentication,

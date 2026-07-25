@@ -215,8 +215,8 @@ async fn forget_destination(
         let _operation = operation;
         service.forget()
     })
-        .await
-        .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?
+    .await
+    .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?
 }
 
 #[tauri::command]

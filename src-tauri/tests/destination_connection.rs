@@ -207,6 +207,163 @@ fn failed_validation_does_not_replace_a_remembered_connection_or_leak_the_key() 
     );
 }
 
+#[derive(Clone)]
+struct RestoreFailingVault {
+    value: Rc<RefCell<Option<String>>>,
+}
+
+impl CredentialVault for RestoreFailingVault {
+    fn load(&self) -> Result<Option<String>, DestinationError> {
+        Ok(self.value.borrow().clone())
+    }
+
+    fn save(&self, api_key: &str) -> Result<(), DestinationError> {
+        if api_key == "previous-key" {
+            return Err(DestinationError::for_code(DestinationErrorCode::Storage));
+        }
+        self.value.replace(Some(api_key.to_owned()));
+        Ok(())
+    }
+
+    fn delete(&self) -> Result<(), DestinationError> {
+        self.value.replace(None);
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct SaveFailingSettings(Rc<RefCell<Option<DestinationSummary>>>);
+
+impl DestinationSettings for SaveFailingSettings {
+    fn load(&self) -> Result<Option<DestinationSummary>, DestinationError> {
+        Ok(self.0.borrow().clone())
+    }
+
+    fn save(&self, _destination: &DestinationSummary) -> Result<(), DestinationError> {
+        Err(DestinationError::for_code(DestinationErrorCode::Storage))
+    }
+
+    fn delete(&self) -> Result<(), DestinationError> {
+        self.0.replace(None);
+        Ok(())
+    }
+}
+
+#[test]
+fn failed_credential_rollback_clears_the_connection_instead_of_pairing_new_key_with_old_server() {
+    let previous = DestinationSummary {
+        server_url: "https://old.example".to_owned(),
+        user_id: "old-user".to_owned(),
+        display_name: "Previous Destination".to_owned(),
+        email: None,
+        insecure_http: false,
+    };
+    let vault_value = Rc::new(RefCell::new(Some("previous-key".to_owned())));
+    let vault = RestoreFailingVault {
+        value: Rc::clone(&vault_value),
+    };
+    let settings = SaveFailingSettings(Rc::new(RefCell::new(Some(previous))));
+    let service = DestinationService::new(
+        FakeKarakeepClient {
+            result: Ok(compatible_user()),
+            observed_key: RefCell::new(None),
+        },
+        vault,
+        settings,
+    );
+
+    let error = service
+        .connect(ConnectDestinationInput {
+            server: "https://new.example".to_owned(),
+            api_key: "new-key".to_owned(),
+            allow_insecure_http: false,
+        })
+        .expect_err("settings persistence and credential rollback fail");
+
+    assert_eq!(error.code(), DestinationErrorCode::Storage);
+    assert_eq!(service.status().expect("fail-closed status"), None);
+    assert_eq!(*vault_value.borrow(), None);
+}
+
+#[derive(Clone)]
+struct CleanupFailingVault(Rc<RefCell<Option<String>>>);
+
+impl CredentialVault for CleanupFailingVault {
+    fn load(&self) -> Result<Option<String>, DestinationError> {
+        Ok(self.0.borrow().clone())
+    }
+
+    fn save(&self, api_key: &str) -> Result<(), DestinationError> {
+        if api_key == "previous-key" {
+            return Err(DestinationError::for_code(DestinationErrorCode::Storage));
+        }
+        self.0.replace(Some(api_key.to_owned()));
+        Ok(())
+    }
+
+    fn delete(&self) -> Result<(), DestinationError> {
+        Err(DestinationError::for_code(DestinationErrorCode::Storage))
+    }
+}
+
+#[derive(Clone)]
+struct CleanupFailingSettings(Rc<RefCell<Option<DestinationSummary>>>);
+
+impl DestinationSettings for CleanupFailingSettings {
+    fn load(&self) -> Result<Option<DestinationSummary>, DestinationError> {
+        Ok(self.0.borrow().clone())
+    }
+
+    fn save(&self, _destination: &DestinationSummary) -> Result<(), DestinationError> {
+        Err(DestinationError::for_code(DestinationErrorCode::Storage))
+    }
+
+    fn delete(&self) -> Result<(), DestinationError> {
+        Err(DestinationError::for_code(DestinationErrorCode::Storage))
+    }
+}
+
+#[test]
+fn unrecoverable_credential_rollback_poisoning_blocks_status_and_delivery() {
+    let previous = DestinationSummary {
+        server_url: "https://old.example".to_owned(),
+        user_id: "old-user".to_owned(),
+        display_name: "Previous Destination".to_owned(),
+        email: None,
+        insecure_http: false,
+    };
+    let service = DestinationService::new(
+        FakeKarakeepClient {
+            result: Ok(compatible_user()),
+            observed_key: RefCell::new(None),
+        },
+        CleanupFailingVault(Rc::new(RefCell::new(Some("previous-key".to_owned())))),
+        CleanupFailingSettings(Rc::new(RefCell::new(Some(previous)))),
+    );
+
+    let error = service
+        .connect(ConnectDestinationInput {
+            server: "https://new.example".to_owned(),
+            api_key: "new-key".to_owned(),
+            allow_insecure_http: false,
+        })
+        .expect_err("all rollback and cleanup paths fail");
+
+    assert_eq!(error.code(), DestinationErrorCode::Storage);
+    assert_eq!(
+        service.status().expect("poisoned status is fail-closed"),
+        None
+    );
+    assert_eq!(
+        service
+            .delivery_api()
+            .err()
+            .expect("poisoned service blocks delivery")
+            .code(),
+        DestinationErrorCode::Storage
+    );
+}
+
 #[test]
 fn forgetting_a_destination_removes_both_the_vault_entry_and_ready_state() {
     let client = FakeKarakeepClient {
