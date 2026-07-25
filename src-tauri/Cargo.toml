@@ -11,6 +11,7 @@ name = "karakeep_transfer_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
+serde_json = "1.0.151"
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]

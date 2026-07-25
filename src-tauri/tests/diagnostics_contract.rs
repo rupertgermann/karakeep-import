@@ -2,6 +2,7 @@ use karakeep_transfer_lib::{
     diagnostics::{
         ComponentStatus, DiagnosticFailure, DiagnosticsInput, StorageSummary, build_explicit_export,
     },
+    ledger::DeliveryLedger,
     redaction::{DiagnosticSurface, REDACTED, SecretRedactor},
     updates::{GITHUB_RELEASES_URL, manual_update_check},
     versions::ComponentVersions,
@@ -104,6 +105,19 @@ fn diagnostics_report_every_supported_component_version() {
     assert_eq!(versions.node, "22.17.0");
     assert_eq!(versions.schema, "3");
     assert_eq!(versions.karakeep_baseline, "0.32.0");
+}
+
+#[test]
+fn current_versions_come_from_repository_build_inputs() {
+    let versions = ComponentVersions::current();
+    let ledger = DeliveryLedger::open_in_memory().expect("ledger initializes");
+
+    assert_eq!(versions.field_theory, "1.3.22");
+    assert_eq!(versions.node, "22.20.0");
+    assert_eq!(
+        versions.schema,
+        ledger.schema_version().expect("schema version").to_string()
+    );
 }
 
 #[test]

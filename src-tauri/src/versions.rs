@@ -33,9 +33,9 @@ impl ComponentVersions {
     pub fn current() -> Self {
         Self::from_build_metadata(
             env!("CARGO_PKG_VERSION"),
-            option_env!("KARAKEEP_FIELD_THEORY_VERSION"),
-            option_env!("KARAKEEP_NODE_VERSION"),
-            option_env!("KARAKEEP_SCHEMA_VERSION"),
+            Some(env!("KARAKEEP_FIELD_THEORY_VERSION")),
+            Some(env!("KARAKEEP_NODE_VERSION")),
+            Some(env!("KARAKEEP_SCHEMA_VERSION")),
         )
     }
 
