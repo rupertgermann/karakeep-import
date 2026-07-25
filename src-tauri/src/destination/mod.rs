@@ -1,12 +1,15 @@
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::{fmt, sync::Arc, time::Duration};
 use url::{Host, Url};
 
 mod client;
+mod delivery_api;
 mod settings;
 mod vault;
 
+use crate::karakeep::KarakeepApi;
 pub use client::ReqwestKarakeepClient;
+use delivery_api::ReqwestDeliveryApi;
 pub use settings::FileDestinationSettings;
 pub use vault::NativeCredentialVault;
 
@@ -113,6 +116,10 @@ pub trait KarakeepClient {
         destination: &NormalizedDestination,
         api_key: &str,
     ) -> Result<AuthenticatedDestination, DestinationError>;
+
+    fn request_timeout(&self) -> Duration {
+        Duration::from_secs(20)
+    }
 }
 
 pub trait CredentialVault {
@@ -203,6 +210,32 @@ where
     pub fn forget(&self) -> Result<(), DestinationError> {
         self.vault.delete()?;
         self.settings.delete()
+    }
+
+    pub fn delivery_api(&self) -> Result<Arc<dyn KarakeepApi>, DestinationError> {
+        let destination = self.settings.load()?.ok_or_else(|| {
+            DestinationError::new(
+                DestinationErrorCode::Authentication,
+                "Connect a Karakeep destination before starting delivery.",
+            )
+        })?;
+        let api_key = self
+            .vault
+            .load()?
+            .filter(|api_key| !api_key.trim().is_empty())
+            .ok_or_else(|| {
+                DestinationError::new(
+                    DestinationErrorCode::Authentication,
+                    "Reconnect Karakeep before starting delivery.",
+                )
+            })?;
+        let normalized =
+            normalize_destination_url(&destination.server_url, destination.insecure_http)?;
+        Ok(Arc::new(ReqwestDeliveryApi::new(
+            normalized,
+            api_key,
+            self.client.request_timeout(),
+        )?))
     }
 }
 

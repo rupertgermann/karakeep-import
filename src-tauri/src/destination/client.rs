@@ -28,6 +28,10 @@ impl ReqwestKarakeepClient {
         Self::default()
     }
 
+    pub fn with_timeout(timeout: Duration) -> Self {
+        Self { timeout }
+    }
+
     fn http_client(&self, destination: &NormalizedDestination) -> Result<Client, DestinationError> {
         let destination = destination.clone();
         Client::builder()
@@ -144,6 +148,10 @@ impl KarakeepClient for ReqwestKarakeepClient {
             name: user.name,
             email: user.email,
         })
+    }
+
+    fn request_timeout(&self) -> Duration {
+        self.timeout
     }
 }
 
