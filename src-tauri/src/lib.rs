@@ -1,6 +1,8 @@
 use serde::Serialize;
 
+pub mod bookmark;
 pub mod domain;
+pub mod file_source;
 pub mod ledger;
 pub mod private_data;
 
