@@ -594,6 +594,10 @@ fn response_statuses_are_safe_and_retry_aware() {
             ApiErrorKind::Authentication,
         ),
         (
+            PlannedResponse::json(403, r#"{"message":"delivery-vault-canary forbidden"}"#),
+            ApiErrorKind::Compatibility,
+        ),
+        (
             PlannedResponse::json(404, r#"{"message":"delivery-vault-canary missing"}"#),
             ApiErrorKind::Compatibility,
         ),
