@@ -1,10 +1,14 @@
 use serde::Serialize;
 
 pub mod bookmark;
+pub mod diagnostics;
 pub mod domain;
 pub mod file_source;
 pub mod ledger;
 pub mod private_data;
+pub mod redaction;
+pub mod updates;
+pub mod versions;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,8 +27,32 @@ fn health() -> HealthResponse {
     }
 }
 
+#[tauri::command]
+fn version_information() -> versions::ComponentVersions {
+    versions::ComponentVersions::current()
+}
+
+#[tauri::command]
+fn manual_update_check() -> updates::ManualUpdateCheckResult {
+    updates::manual_update_check()
+}
+
+#[tauri::command]
+fn export_diagnostics(
+    state: tauri::State<'_, diagnostics::DiagnosticsStore>,
+) -> Result<diagnostics::DiagnosticsExport, &'static str> {
+    state.explicit_export()
+}
+
 fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
-    builder.invoke_handler(tauri::generate_handler![health])
+    builder
+        .manage(diagnostics::DiagnosticsStore::default())
+        .invoke_handler(tauri::generate_handler![
+            health,
+            version_information,
+            manual_update_check,
+            export_diagnostics
+        ])
 }
 
 pub fn run() {
@@ -35,15 +63,14 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
     use tauri::{
         WebviewWindowBuilder,
         test::{INVOKE_KEY, assert_ipc_response, mock_builder, mock_context, noop_assets},
         webview::InvokeRequest,
     };
 
-    #[test]
-    fn health_response_is_the_typed_desktop_contract() {
+    fn assert_command_response(command: &str, expected: Value) {
         let app = super::configure_builder(mock_builder())
             .build(mock_context(noop_assets()))
             .expect("mock app builds");
@@ -54,7 +81,7 @@ mod tests {
         assert_ipc_response(
             &webview,
             InvokeRequest {
-                cmd: "health".into(),
+                cmd: command.into(),
                 callback: tauri::ipc::CallbackFn(0),
                 error: tauri::ipc::CallbackFn(1),
                 url: if cfg!(any(windows, target_os = "android")) {
@@ -68,11 +95,63 @@ mod tests {
                 headers: Default::default(),
                 invoke_key: INVOKE_KEY.to_string(),
             },
-            Ok::<_, serde_json::Value>(json!({
+            Ok::<_, Value>(expected),
+        );
+    }
+
+    #[test]
+    fn health_response_is_the_typed_desktop_contract() {
+        assert_command_response(
+            "health",
+            json!({
                 "status": "ok",
                 "appName": "Karakeep Transfer",
                 "version": "0.1.0"
-            })),
+            }),
+        );
+    }
+
+    #[test]
+    fn version_information_is_available_through_the_desktop_contract() {
+        let expected = serde_json::to_value(super::versions::ComponentVersions::current())
+            .expect("version information serializes");
+
+        assert_command_response("version_information", expected);
+    }
+
+    #[test]
+    fn update_check_is_an_explicit_release_page_action() {
+        assert_command_response(
+            "manual_update_check",
+            json!({
+                "requestedByUser": true,
+                "releasePage": "https://github.com/rupertgermann/karakeep-import/releases/latest",
+                "downloadsUpdate": false,
+                "executesUpdate": false
+            }),
+        );
+    }
+
+    #[test]
+    fn diagnostics_export_only_runs_through_an_explicit_desktop_command() {
+        let versions = super::versions::ComponentVersions::current();
+
+        assert_command_response(
+            "export_diagnostics",
+            json!({
+                "generatedByUserAction": true,
+                "includesBookmarkContent": false,
+                "telemetryEnabled": false,
+                "versions": versions,
+                "source": "notConfigured",
+                "destination": "notConfigured",
+                "storage": {
+                    "dataDirectory": "not available",
+                    "snapshotBytes": 0,
+                    "ledgerBytes": 0
+                },
+                "lastFailure": null
+            }),
         );
     }
 }
