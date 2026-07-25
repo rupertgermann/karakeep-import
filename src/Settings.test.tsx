@@ -83,11 +83,11 @@ describe("Settings", () => {
     ).toBeInTheDocument();
   });
 
-  it("explains the X source replacement boundary before acting", async () => {
+  it("explains the X Source replacement boundary before acting", async () => {
     render(<Settings api={createSettingsApi()} />);
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Replace X source" }),
+      screen.getByRole("button", { name: "Replace X Source" }),
     );
 
     expect(
@@ -110,7 +110,7 @@ describe("Settings", () => {
   it("cancels source replacement without changing private data", () => {
     render(<Settings api={createSettingsApi()} />);
     fireEvent.click(
-      screen.getByRole("button", { name: "Replace X source" }),
+      screen.getByRole("button", { name: "Replace X Source" }),
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -118,11 +118,11 @@ describe("Settings", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
   });
 
-  it("uses the X source replacement confirmation capability", async () => {
+  it("uses the X Source replacement confirmation capability", async () => {
     const api = createSettingsApi();
     render(<Settings api={api} />);
     fireEvent.click(
-      screen.getByRole("button", { name: "Replace X source" }),
+      screen.getByRole("button", { name: "Replace X Source" }),
     );
 
     fireEvent.click(
@@ -220,12 +220,15 @@ describe("Settings", () => {
 
   it("reports a rejected Settings action without leaking its error", async () => {
     const api = createSettingsApi();
+    const onXSourceReplaced = vi.fn();
     vi.mocked(api.replaceXSource).mockRejectedValue(
       new Error("secret-bearing OS error"),
     );
-    render(<Settings api={api} />);
+    render(
+      <Settings api={api} onXSourceReplaced={onXSourceReplaced} />,
+    );
     fireEvent.click(
-      screen.getByRole("button", { name: "Replace X source" }),
+      screen.getByRole("button", { name: "Replace X Source" }),
     );
 
     fireEvent.click(
@@ -235,6 +238,7 @@ describe("Settings", () => {
     expect(
       await screen.findByText("The Settings action could not be completed."),
     ).toBeInTheDocument();
+    expect(onXSourceReplaced).not.toHaveBeenCalled();
   });
 
   it("does not check for updates automatically", async () => {

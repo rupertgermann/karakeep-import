@@ -40,7 +40,13 @@ describe("Other sources File Source", () => {
       previewFileSource: vi.fn().mockResolvedValue(preview),
     };
 
-    render(<FileSourcePanel api={api} onContinue={vi.fn()} />);
+    render(
+      <FileSourcePanel
+        api={api}
+        onContinue={vi.fn()}
+        onChooseAnotherSource={vi.fn()}
+      />,
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Choose and preview file" }),
     );
@@ -72,7 +78,13 @@ describe("Other sources File Source", () => {
         .mockResolvedValueOnce({ ...preview, bookmarks: [preview.bookmarks[0]] }),
     };
 
-    render(<FileSourcePanel api={api} onContinue={vi.fn()} />);
+    render(
+      <FileSourcePanel
+        api={api}
+        onContinue={vi.fn()}
+        onChooseAnotherSource={vi.fn()}
+      />,
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Choose and preview file" }),
     );
@@ -103,7 +115,13 @@ describe("Other sources File Source", () => {
       previewFileSource: vi.fn(),
     };
 
-    render(<FileSourcePanel api={api} onContinue={vi.fn()} />);
+    render(
+      <FileSourcePanel
+        api={api}
+        onContinue={vi.fn()}
+        onChooseAnotherSource={vi.fn()}
+      />,
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Choose and preview file" }),
     );
@@ -124,7 +142,13 @@ describe("Other sources File Source", () => {
       previewFileSource: vi.fn().mockResolvedValue(oneBookmarkPreview),
     };
 
-    render(<FileSourcePanel api={api} onContinue={onContinue} />);
+    render(
+      <FileSourcePanel
+        api={api}
+        onContinue={onContinue}
+        onChooseAnotherSource={vi.fn()}
+      />,
+    );
     fireEvent.click(
       screen.getByRole("button", { name: "Choose and preview file" }),
     );
@@ -138,5 +162,26 @@ describe("Other sources File Source", () => {
       path: selectedPath,
       preview: oneBookmarkPreview,
     });
+  });
+
+  it("lets the user leave File Source setup before selecting a file", () => {
+    const onChooseAnotherSource = vi.fn();
+    const api: FileSourceApi = {
+      selectFileSource: vi.fn(),
+      previewFileSource: vi.fn(),
+    };
+
+    render(
+      <FileSourcePanel
+        api={api}
+        onContinue={vi.fn()}
+        onChooseAnotherSource={onChooseAnotherSource}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose another source" }),
+    );
+
+    expect(onChooseAnotherSource).toHaveBeenCalledOnce();
   });
 });

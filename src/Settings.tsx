@@ -17,6 +17,7 @@ type Confirmation = "replace-source" | "delete-data" | "forget-connection";
 
 interface SettingsProps {
   api?: SettingsApi;
+  onXSourceReplaced?: () => void;
   onForgetKarakeepConnection?: (
     confirmation: ForgetKarakeepConnectionConfirmation,
   ) => Promise<void>;
@@ -24,6 +25,7 @@ interface SettingsProps {
 
 export default function Settings({
   api = settingsDesktopApi,
+  onXSourceReplaced,
   onForgetKarakeepConnection,
 }: SettingsProps) {
   const [privateData, setPrivateData] = useState<PrivateDataSummary | null>(
@@ -77,7 +79,8 @@ export default function Settings({
     return runAction(async () => {
       await api.replaceXSource(REPLACE_X_SOURCE);
       await refreshPrivateData();
-      setStatus("X source data was removed. Delivery history was preserved.");
+      setStatus("X Source data was removed. Delivery history was preserved.");
+      onXSourceReplaced?.();
     });
   }
 
@@ -163,7 +166,7 @@ export default function Settings({
             disabled={busy}
             onClick={() => setConfirmation("replace-source")}
           >
-            Replace X source
+            Replace X Source
           </button>
           <button
             type="button"
@@ -236,7 +239,7 @@ export default function Settings({
 
       {confirmation === "replace-source" ? (
         <ConfirmationDialog
-          title="Replace X source?"
+          title="Replace X Source?"
           consequence="This removes the local Bookmark Snapshot and acquisition state. Destination delivery history remains."
           confirmLabel="Confirm source replacement"
           busy={busy}

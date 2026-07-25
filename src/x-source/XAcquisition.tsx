@@ -17,6 +17,7 @@ interface XAcquisitionProps {
   createAcquisitionId?: () => string;
   onEvent?: (event: AcquisitionEvent) => void;
   onPreview: (preview: TransferPreview) => void;
+  onRunningChange?: (running: boolean) => void;
 }
 
 type ViewState =
@@ -53,8 +54,12 @@ export default function XAcquisition({
   createAcquisitionId = () => crypto.randomUUID(),
   onEvent,
   onPreview,
+  onRunningChange,
 }: XAcquisitionProps) {
   const [view, setView] = useState<ViewState>({ step: "idle" });
+  const [cancellationError, setCancellationError] = useState<string | null>(
+    null,
+  );
   const unlisten = useRef<(() => void) | null>(null);
   const terminalReceived = useRef(false);
 
@@ -90,18 +95,23 @@ export default function XAcquisition({
         });
         break;
       case "completed":
+        setCancellationError(null);
         terminalReceived.current = true;
         unlisten.current?.();
         unlisten.current = null;
-        void loadPreview();
+        void loadPreview().finally(() => onRunningChange?.(false));
         break;
       case "cancelled":
+        setCancellationError(null);
+        onRunningChange?.(false);
         terminalReceived.current = true;
         unlisten.current?.();
         unlisten.current = null;
         setView({ step: "cancelled" });
         break;
       case "failed":
+        setCancellationError(null);
+        onRunningChange?.(false);
         terminalReceived.current = true;
         unlisten.current?.();
         unlisten.current = null;
@@ -117,6 +127,8 @@ export default function XAcquisition({
   const start = async () => {
     const acquisitionId = createAcquisitionId();
     terminalReceived.current = false;
+    setCancellationError(null);
+    onRunningChange?.(true);
     setView({
       step: "running",
       acquisitionId,
@@ -141,6 +153,7 @@ export default function XAcquisition({
         unlisten.current = stopListening;
       }
     } catch {
+      onRunningChange?.(false);
       setView({
         step: "failed",
         previousSnapshotAvailable: false,
@@ -151,7 +164,16 @@ export default function XAcquisition({
 
   const cancel = async () => {
     if (view.step !== "running") return;
-    await api.cancelXAcquisition(view.acquisitionId);
+    setCancellationError(null);
+    try {
+      await api.cancelXAcquisition(view.acquisitionId);
+    } catch {
+      if (!terminalReceived.current) {
+        setCancellationError(
+          "The cancellation request could not be sent. Acquisition is still running.",
+        );
+      }
+    }
   };
 
   const progress =
@@ -190,6 +212,7 @@ export default function XAcquisition({
           Acquisition cancelled. The previous snapshot is unchanged.
         </p>
       ) : null}
+      {cancellationError ? <p role="alert">{cancellationError}</p> : null}
       {view.step === "failed" ? (
         <div role="alert">
           <p>{view.message}</p>

@@ -72,6 +72,7 @@ export default function App({
   const [transferError, setTransferError] = useState<string | null>(null);
   const [preparingPreview, setPreparingPreview] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [acquisitionActive, setAcquisitionActive] = useState(false);
   const activeDelivery = useRef<{
     id: string;
     unlisten?: () => void;
@@ -117,6 +118,7 @@ export default function App({
     setTransferResult(null);
     setTransferError(null);
     setPreparingPreview(false);
+    setAcquisitionActive(false);
   }
 
   async function prepareFileTransfer(selection: FileSourceSelection) {
@@ -260,7 +262,7 @@ export default function App({
           <button
             type="button"
             className="settings-link"
-            disabled={transferProgress !== null}
+            disabled={transferProgress !== null || acquisitionActive}
             onClick={() => setShowSettings(true)}
           >
             Open Settings
@@ -284,7 +286,7 @@ export default function App({
           </p>
           <div className="source-choice-actions">
             <button type="button" onClick={() => setSourceMode("x")}>
-              Use my X browser session
+              Use my X Source
             </button>
             <button type="button" onClick={() => setSourceMode("file")}>
               Use a bookmark file
@@ -301,6 +303,7 @@ export default function App({
         <XSourceSetup
           api={desktopApi}
           onSelected={(source) => setReadySource({ kind: "x", source })}
+          onChooseAnotherSource={chooseAnotherSource}
         />
       ) : null}
 
@@ -312,6 +315,7 @@ export default function App({
         <FileSourcePanel
           api={desktopApi}
           onContinue={(selection) => void prepareFileTransfer(selection)}
+          onChooseAnotherSource={chooseAnotherSource}
         />
       ) : null}
 
@@ -333,6 +337,7 @@ export default function App({
             setTransferPreview(preview);
             setTransferError(null);
           }}
+          onRunningChange={setAcquisitionActive}
         />
       ) : null}
 
@@ -396,6 +401,10 @@ export default function App({
           </button>
           <Settings
             api={settingsApi}
+            onXSourceReplaced={() => {
+              chooseAnotherSource();
+              setShowSettings(false);
+            }}
             onForgetKarakeepConnection={
               destination
                 ? async () => {

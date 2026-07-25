@@ -130,6 +130,50 @@ describe("X acquisition", () => {
     );
   });
 
+  it("keeps acquisition visible and reports a safe error when cancellation is rejected", async () => {
+    const controlled = controlledApi();
+    vi.mocked(controlled.api.cancelXAcquisition).mockRejectedValue(
+      new Error("private cancellation detail"),
+    );
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-cancel-error"}
+        onPreview={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel acquisition" }));
+
+    expect(
+      await screen.findByRole("alert"),
+    ).toHaveTextContent(
+      "The cancellation request could not be sent. Acquisition is still running.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Cancel acquisition" }),
+    ).toBeInTheDocument();
+    controlled.emit({
+      type: "progress",
+      acquisitionId: "acquire-ui-cancel-error",
+      phase: "bookmarks",
+      completed: 1,
+      total: null,
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Acquisition is still running.",
+    );
+    expect(screen.queryByText("private cancellation detail")).toBeNull();
+  });
+
   it("keeps the previous snapshot available after an X compatibility failure", async () => {
     const controlled = controlledApi();
     const onPreview = vi.fn();

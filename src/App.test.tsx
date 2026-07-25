@@ -196,7 +196,7 @@ describe("Karakeep Transfer shell", () => {
     expect(discoverXSources).not.toHaveBeenCalled();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Use my X browser session" }),
+      screen.getByRole("button", { name: "Use my X Source" }),
     );
 
     expect(
@@ -359,7 +359,7 @@ describe("Karakeep Transfer shell", () => {
     expect(
       screen.getByRole("heading", { name: "Delivery finished" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Created").nextSibling).toHaveTextContent("1");
+    expect(screen.getByText("Delivered").nextSibling).toHaveTextContent("1");
     expect(stopListening).toHaveBeenCalledOnce();
   });
 
@@ -695,7 +695,7 @@ describe("Karakeep Transfer shell", () => {
     ).toBeInTheDocument();
   });
 
-  it("advances a confirmed X source to snapshot acquisition", async () => {
+  it("advances a confirmed X Source to snapshot acquisition", async () => {
     const api = desktopApi(
       vi.fn().mockResolvedValue({
         status: "ok",
@@ -732,7 +732,7 @@ describe("Karakeep Transfer shell", () => {
     );
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Use my X browser session",
+        name: "Use my X Source",
       }),
     );
     fireEvent.click(
@@ -741,7 +741,7 @@ describe("Karakeep Transfer shell", () => {
       }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Use this X source" }),
+      screen.getByRole("button", { name: "Use this X Source" }),
     );
 
     expect(
@@ -749,6 +749,185 @@ describe("Karakeep Transfer shell", () => {
         name: "Retrieve bookmarks from X",
       }),
     ).toBeInTheDocument();
+  });
+
+  it("keeps Settings unavailable while X acquisition is active", async () => {
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        discoverXSources: vi.fn().mockResolvedValue({
+          browsers: [
+            {
+              id: "chrome",
+              name: "Google Chrome",
+              profiles: [{ id: "Default", name: "Personal" }],
+            },
+          ],
+        }),
+        selectXSource: vi.fn().mockResolvedValue({
+          browserId: "chrome",
+          browserName: "Google Chrome",
+          profileId: "Default",
+          profileName: "Personal",
+        }),
+      },
+    );
+    let acquisitionEvent:
+      | Parameters<XAcquisitionApi["startXAcquisition"]>[1]
+      | undefined;
+    let acquisitionId = "";
+    const acquisitionApi: XAcquisitionApi = {
+      startXAcquisition: vi
+        .fn()
+        .mockImplementation(async (request, onEvent) => {
+          acquisitionId = request.acquisitionId;
+          acquisitionEvent = onEvent;
+          return vi.fn();
+        }),
+      cancelXAcquisition: vi.fn(),
+      previewXSnapshot: vi.fn(),
+    };
+
+    render(<App desktopApi={api} xAcquisitionApi={acquisitionApi} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use my X Source" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: /temporarily using my existing authenticated X session/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use this X Source" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(acquisitionApi.startXAcquisition).toHaveBeenCalledOnce(),
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Open Settings" }),
+    ).toBeDisabled();
+
+    act(() => {
+      acquisitionEvent?.({ type: "cancelled", acquisitionId });
+    });
+    expect(
+      screen.getByRole("button", { name: "Open Settings" }),
+    ).toBeEnabled();
+  });
+
+  it("returns to source choice after replacing the retained X Source", async () => {
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        discoverXSources: vi.fn().mockResolvedValue({
+          browsers: [
+            {
+              id: "chrome",
+              name: "Google Chrome",
+              profiles: [{ id: "Default", name: "Personal" }],
+            },
+          ],
+        }),
+        selectXSource: vi.fn().mockResolvedValue({
+          browserId: "chrome",
+          browserName: "Google Chrome",
+          profileId: "Default",
+          profileName: "Personal",
+        }),
+      },
+    );
+    const localSettings = settingsApi();
+    let acquisitionEvent:
+      | Parameters<XAcquisitionApi["startXAcquisition"]>[1]
+      | undefined;
+    let acquisitionId = "";
+    const acquisitionApi: XAcquisitionApi = {
+      startXAcquisition: vi
+        .fn()
+        .mockImplementation(async (request, onEvent) => {
+          acquisitionId = request.acquisitionId;
+          acquisitionEvent = onEvent;
+          return vi.fn();
+        }),
+      cancelXAcquisition: vi.fn(),
+      previewXSnapshot: vi.fn().mockResolvedValue({
+        total: 1,
+        pending: 1,
+        previouslyDelivered: 0,
+        folders: [],
+        destination: {
+          serverUrl: rememberedDestination.serverUrl,
+          userId: rememberedDestination.userId,
+          userName: rememberedDestination.displayName,
+        },
+      }),
+    };
+
+    render(
+      <App
+        desktopApi={api}
+        settingsApi={localSettings}
+        xAcquisitionApi={acquisitionApi}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use my X Source" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: /temporarily using my existing authenticated X session/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use this X Source" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(acquisitionApi.startXAcquisition).toHaveBeenCalledOnce(),
+    );
+    act(() => {
+      acquisitionEvent?.({
+        type: "completed",
+        acquisitionId,
+        total: 1,
+        added: 1,
+        folders: [],
+      });
+    });
+    expect(
+      await screen.findByRole("heading", { name: "Review this transfer" }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Replace X Source" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm source replacement" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Choose a bookmark source" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Review this transfer" }),
+    ).not.toBeInTheDocument();
   });
 
   it("continues an acquired X snapshot into confirmed delivery", async () => {
@@ -816,7 +995,7 @@ describe("Karakeep Transfer shell", () => {
     );
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Use my X browser session",
+        name: "Use my X Source",
       }),
     );
     fireEvent.click(
@@ -825,7 +1004,7 @@ describe("Karakeep Transfer shell", () => {
       }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "Use this X source" }),
+      screen.getByRole("button", { name: "Use this X Source" }),
     );
     fireEvent.click(
       await screen.findByRole("button", { name: "Acquire X bookmarks" }),

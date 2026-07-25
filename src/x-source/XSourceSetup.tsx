@@ -9,11 +9,13 @@ import type {
 interface XSourceSetupProps {
   api: XSourceApi;
   onSelected?(source: SelectedXSource): void;
+  onChooseAnotherSource(): void;
 }
 
 export default function XSourceSetup({
   api,
   onSelected,
+  onChooseAnotherSource,
 }: XSourceSetupProps) {
   const [browsers, setBrowsers] = useState<BrowserSource[] | null>(null);
   const [browserId, setBrowserId] = useState("");
@@ -21,6 +23,7 @@ export default function XSourceSetup({
   const [consent, setConsent] = useState(false);
   const [selected, setSelected] = useState<SelectedXSource | null>(null);
   const [error, setError] = useState("");
+  const [discoveryAttempt, setDiscoveryAttempt] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -44,7 +47,7 @@ export default function XSourceSetup({
     return () => {
       active = false;
     };
-  }, [api]);
+  }, [api, discoveryAttempt]);
 
   const browser = useMemo(
     () => browsers?.find((candidate) => candidate.id === browserId),
@@ -77,7 +80,7 @@ export default function XSourceSetup({
 
   return (
     <section className="source-card" aria-labelledby="x-source-title">
-      <p className="eyebrow">X source</p>
+      <p className="eyebrow">X Source</p>
       <h2 id="x-source-title">Choose where your bookmarks live</h2>
       <p className="source-explanation">
         Karakeep Transfer can temporarily use the authenticated X session in a
@@ -88,10 +91,23 @@ export default function XSourceSetup({
       {browsers === null ? (
         <p role="status">Looking for supported browser profiles…</p>
       ) : browsers.length === 0 ? (
-        <p className="source-empty">
-          No supported browser profiles were found. Install or open Chrome,
-          Edge, Brave, Chromium, or Firefox, sign in to X, and try again.
-        </p>
+        <>
+          <p className="source-empty">
+            No supported browser profiles were found. Install or open Chrome,
+            Edge, Brave, Chromium, or Firefox, sign in to X, and try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setBrowsers(null);
+              setError("");
+              setSelected(null);
+              setDiscoveryAttempt((attempt) => attempt + 1);
+            }}
+          >
+            Try discovery again
+          </button>
+        </>
       ) : (
         <form onSubmit={submit}>
           <div className="source-fields">
@@ -139,7 +155,7 @@ export default function XSourceSetup({
           </label>
 
           <button type="submit" disabled={!consent || !profileId}>
-            Use this X source
+            Use this X Source
           </button>
         </form>
       )}
@@ -148,12 +164,19 @@ export default function XSourceSetup({
         <p
           className="source-result"
           role="status"
-          aria-label={`X source selected: ${selected.browserName}, ${selected.profileName}`}
+          aria-label={`X Source selected: ${selected.browserName}, ${selected.profileName}`}
         >
           Selected: {selected.browserName} · {selected.profileName}
         </p>
       ) : null}
       {error ? <p className="source-error">{error}</p> : null}
+      <button
+        type="button"
+        className="button button--secondary"
+        onClick={onChooseAnotherSource}
+      >
+        Choose another source
+      </button>
       <p className="affiliation-note">
         Unofficial and unaffiliated with X, Karakeep, or Field Theory.
       </p>

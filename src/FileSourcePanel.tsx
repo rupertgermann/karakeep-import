@@ -15,6 +15,7 @@ export interface FileSourceSelection {
 interface FileSourcePanelProps {
   api?: FileSourceApi;
   onContinue(selection: FileSourceSelection): void;
+  onChooseAnotherSource(): void;
 }
 
 function fileName(path: string): string {
@@ -43,6 +44,7 @@ function safeErrorMessage(error: unknown): string {
 export default function FileSourcePanel({
   api = defaultDesktopApi,
   onContinue,
+  onChooseAnotherSource,
 }: FileSourcePanelProps) {
   const [format, setFormat] = useState<FileSourceFormat>("auto");
   const [selection, setSelection] = useState<FileSourceSelection | null>(null);
@@ -78,7 +80,7 @@ export default function FileSourcePanel({
       <h2 id="file-source-title">Preview a bookmark file</h2>
       <p>
         Choose a Field Theory JSONL or Chrome bookmarks file for this transfer.
-        The file stays where it is and does not replace your active X source.
+        The file stays where it is and does not replace your active X Source.
       </p>
 
       <label className="file-source-format">
@@ -135,6 +137,13 @@ export default function FileSourcePanel({
       ) : (
         <p aria-live="polite">No file selected.</p>
       )}
+      <button
+        type="button"
+        className="button button--secondary"
+        onClick={onChooseAnotherSource}
+      >
+        Choose another source
+      </button>
     </section>
   );
 }

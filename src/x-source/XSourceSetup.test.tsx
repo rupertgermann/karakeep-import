@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import XSourceSetup from "./XSourceSetup";
@@ -28,7 +28,13 @@ describe("X Source setup", () => {
     };
 
     const onSelected = vi.fn();
-    render(<XSourceSetup api={api} onSelected={onSelected} />);
+    render(
+      <XSourceSetup
+        api={api}
+        onSelected={onSelected}
+        onChooseAnotherSource={vi.fn()}
+      />,
+    );
 
     expect(
       await screen.findByRole("combobox", { name: "Browser" }),
@@ -37,7 +43,7 @@ describe("X Source setup", () => {
       target: { value: "Profile 2" },
     });
 
-    const confirm = screen.getByRole("button", { name: "Use this X source" });
+    const confirm = screen.getByRole("button", { name: "Use this X Source" });
     expect(confirm).toBeDisabled();
     fireEvent.click(
       screen.getByRole("checkbox", {
@@ -52,7 +58,7 @@ describe("X Source setup", () => {
     });
     expect(
       await screen.findByRole("status", {
-        name: "X source selected: Google Chrome, Research",
+        name: "X Source selected: Google Chrome, Research",
       }),
     ).toBeInTheDocument();
     expect(onSelected).toHaveBeenCalledWith({
@@ -69,13 +75,27 @@ describe("X Source setup", () => {
       selectXSource: vi.fn(),
     };
 
-    render(<XSourceSetup api={api} />);
+    const onChooseAnotherSource = vi.fn();
+    render(
+      <XSourceSetup
+        api={api}
+        onChooseAnotherSource={onChooseAnotherSource}
+      />,
+    );
 
     expect(
       await screen.findByText(
         /No supported browser profiles were found\. Install or open/i,
       ),
     ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Try discovery again" }),
+    );
+    await waitFor(() => expect(api.discoverXSources).toHaveBeenCalledTimes(2));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose another source" }),
+    );
+    expect(onChooseAnotherSource).toHaveBeenCalledOnce();
   });
 
   it("switches browser profiles and reports an unavailable selection", async () => {
@@ -102,7 +122,7 @@ describe("X Source setup", () => {
       selectXSource: vi.fn().mockRejectedValue(new Error("profile moved")),
     };
 
-    render(<XSourceSetup api={api} />);
+    render(<XSourceSetup api={api} onChooseAnotherSource={vi.fn()} />);
 
     fireEvent.change(
       await screen.findByRole("combobox", { name: "Browser" }),
@@ -116,7 +136,7 @@ describe("X Source setup", () => {
         name: /temporarily using my existing authenticated X session/i,
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Use this X source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use this X Source" }));
 
     expect(
       await screen.findByText(
@@ -131,7 +151,7 @@ describe("X Source setup", () => {
       selectXSource: vi.fn(),
     };
 
-    render(<XSourceSetup api={api} />);
+    render(<XSourceSetup api={api} onChooseAnotherSource={vi.fn()} />);
 
     expect(
       await screen.findByText("Browser profile discovery is unavailable."),
