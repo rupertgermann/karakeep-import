@@ -63,11 +63,11 @@ test("acquires a discovered absolute Firefox profile without exposing its path",
           selectedSource,
           discoveryDependencies,
         ),
-      syncBookmarksGraphQL: async (options) => {
+      acquireBookmarks: async (options) => {
         profileDirectories.push(options.firefoxProfileDir);
         return { added: 1, totalBookmarks: 1 };
       },
-      syncBookmarkFolders: async (options) => {
+      acquireBookmarkFolders: async (options) => {
         profileDirectories.push(options.firefoxProfileDir);
         return { folders: [], skippedFolders: [] };
       },
@@ -95,7 +95,7 @@ test("acquires bookmarks and folders through the pinned Field Theory modules", a
         profileId: "Profile 2",
         profileName: "Research",
       }),
-      syncBookmarksGraphQL: async (options) => {
+      acquireBookmarks: async (options) => {
         calls.push({
           operation: "bookmarks",
           browser: options.browser,
@@ -104,7 +104,7 @@ test("acquires bookmarks and folders through the pinned Field Theory modules", a
         });
         return { added: 3, totalBookmarks: 42 };
       },
-      syncBookmarkFolders: async (options) => {
+      acquireBookmarkFolders: async (options) => {
         calls.push({
           operation: "folders",
           browser: options.browser,
@@ -163,7 +163,7 @@ test("emits structured bookmark and folder progress without session material", a
         profileId: "Profile 2",
         profileName: "Research",
       }),
-      syncBookmarksGraphQL: async (options) => {
+      acquireBookmarks: async (options) => {
         options.onProgress({
           page: 2,
           totalFetched: 40,
@@ -172,7 +172,7 @@ test("emits structured bookmark and folder progress without session material", a
         });
         return { added: 3, totalBookmarks: 42 };
       },
-      syncBookmarkFolders: async (options) => {
+      acquireBookmarkFolders: async (options) => {
         options.onProgress({
           phase: "walking",
           folder: { id: "folder-1", name: "Research" },
@@ -219,10 +219,10 @@ test("classifies upstream acquisition failures without exposing password-equival
           profileId: "Profile 2",
           profileName: "Research",
         }),
-        syncBookmarksGraphQL: async () => {
+        acquireBookmarks: async () => {
           throw new Error(`GraphQL operation changed: ${secret}`);
         },
-        syncBookmarkFolders: async () => {
+        acquireBookmarkFolders: async () => {
           throw new Error("must not run");
         },
       },
@@ -254,7 +254,7 @@ test("reports cancellation before folder acquisition begins", async () => {
           profileId: "Profile 2",
           profileName: "Research",
         }),
-        syncBookmarksGraphQL: async () => {
+        acquireBookmarks: async () => {
           controller.abort();
           return {
             added: 0,
@@ -262,7 +262,7 @@ test("reports cancellation before folder acquisition begins", async () => {
             stopReason: "interrupted",
           };
         },
-        syncBookmarkFolders: async () => {
+        acquireBookmarkFolders: async () => {
           folderCalls += 1;
           return { folders: [], skippedFolders: [] };
         },
@@ -287,10 +287,10 @@ test("rejects a moved browser profile before reading any X session", async () =>
         selectSource: async () => {
           throw new Error("profile moved");
         },
-        syncBookmarksGraphQL: async () => {
+        acquireBookmarks: async () => {
           acquisitionCalls += 1;
         },
-        syncBookmarkFolders: async () => {
+        acquireBookmarkFolders: async () => {
           acquisitionCalls += 1;
         },
       },

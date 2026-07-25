@@ -1,6 +1,6 @@
 import {
-  syncBookmarkFolders,
-  syncBookmarksGraphQL,
+  syncBookmarkFolders as acquireBookmarkFolders,
+  syncBookmarksGraphQL as acquireBookmarks,
 } from "fieldtheory/dist/graphql-bookmarks.js";
 import {
   browserUserDataDir,
@@ -25,8 +25,8 @@ export class AcquisitionError extends Error {
 const defaultDependencies = {
   selectSource,
   resolveFirefoxProfileDirectory,
-  syncBookmarksGraphQL,
-  syncBookmarkFolders,
+  acquireBookmarks,
+  acquireBookmarkFolders,
 };
 
 async function sourceOptions(source, dependencies) {
@@ -97,7 +97,7 @@ export async function acquireSnapshot(
       );
     }
     const options = await sourceOptions(source, dependencies);
-    const bookmarks = await dependencies.syncBookmarksGraphQL({
+    const bookmarks = await dependencies.acquireBookmarks({
       ...options,
       signal,
       onProgress: (progress) => onProgress(bookmarkProgress(progress)),
@@ -106,7 +106,7 @@ export async function acquireSnapshot(
       throw cancellation();
     }
 
-    const folders = await dependencies.syncBookmarkFolders({
+    const folders = await dependencies.acquireBookmarkFolders({
       ...options,
       onProgress: (progress) => onProgress(folderProgress(progress)),
     });
