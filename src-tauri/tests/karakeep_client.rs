@@ -59,14 +59,6 @@ fn validation_identifies_the_user_and_checks_delivery_capabilities_without_write
             status: 200,
             body: r#"{"bookmarks":[],"nextCursor":null}"#,
         },
-        Response {
-            status: 400,
-            body: r#"{"message":"invalid bookmark payload"}"#,
-        },
-        Response {
-            status: 404,
-            body: r#"{"message":"bookmark not found"}"#,
-        },
     ]);
     let destination = normalize_destination_url(&server_url, false).expect("loopback URL");
 
@@ -80,23 +72,19 @@ fn validation_identifies_the_user_and_checks_delivery_capabilities_without_write
 
     server.join().unwrap();
     let requests = requests.recv().unwrap();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 2);
     assert!(requests[0].starts_with("GET /api/v1/users/me HTTP/1.1"));
-    assert!(requests[1].starts_with("GET /api/v1/bookmarks?"));
-    assert!(requests[2].starts_with("POST /api/v1/bookmarks HTTP/1.1"));
-    assert!(requests[2].ends_with("\r\n\r\n{}"));
-    assert!(
-        requests[3]
-            .starts_with("POST /api/v1/bookmarks/karakeep-transfer-capability-probe/tags HTTP/1.1")
-    );
-    assert!(requests[3].ends_with("\r\n\r\n{\"tags\":[]}"));
+    assert!(requests[1].starts_with("GET /api/v1/bookmarks?limit=1&includeContent=false HTTP/1.1"));
     assert!(
         requests
             .iter()
             .all(|request| request.contains("authorization: Bearer request-canary-key"))
     );
     assert!(requests.iter().all(|request| {
-        !request.contains("\"type\":\"link\"") && !request.contains("\"url\":")
+        request.starts_with("GET ")
+            && !request.starts_with("POST ")
+            && !request.starts_with("PATCH ")
+            && !request.starts_with("DELETE ")
     }));
 }
 
@@ -118,7 +106,41 @@ fn authentication_failures_are_specific_and_redacted() {
 }
 
 #[test]
-fn absent_bookmark_or_tag_contracts_are_missing_capabilities() {
+fn missing_identity_read_scope_is_a_missing_capability() {
+    let (server_url, _requests, server) = fake_karakeep(vec![Response {
+        status: 403,
+        body: r#"{"message":"API key is missing required scope: users:read"}"#,
+    }]);
+    let destination = normalize_destination_url(&server_url, false).expect("loopback URL");
+
+    let error = ReqwestKarakeepClient::new()
+        .validate(&destination, "identity-limited-key")
+        .expect_err("destination identity is required to scope delivery history");
+
+    server.join().unwrap();
+    assert_eq!(error.code(), DestinationErrorCode::MissingCapability);
+    assert!(error.to_string().contains("user identity"));
+    assert!(!error.to_string().contains("identity-limited-key"));
+}
+
+#[test]
+fn absent_identity_contract_is_an_unsupported_destination() {
+    let (server_url, _requests, server) = fake_karakeep(vec![Response {
+        status: 404,
+        body: r#"{"message":"not found"}"#,
+    }]);
+    let destination = normalize_destination_url(&server_url, false).expect("loopback URL");
+
+    let error = ReqwestKarakeepClient::new()
+        .validate(&destination, "request-canary-key")
+        .expect_err("a server without the Karakeep identity contract is unsupported");
+
+    server.join().unwrap();
+    assert_eq!(error.code(), DestinationErrorCode::UnsupportedDestination);
+}
+
+#[test]
+fn absent_bookmark_contract_is_a_missing_capability() {
     let (server_url, _requests, server) = fake_karakeep(vec![
         Response {
             status: 200,
@@ -141,8 +163,8 @@ fn absent_bookmark_or_tag_contracts_are_missing_capabilities() {
 }
 
 #[test]
-fn a_read_only_key_is_rejected_before_it_can_be_remembered() {
-    let (server_url, _requests, server) = fake_karakeep(vec![
+fn read_only_scope_cannot_be_distinguished_by_non_mutating_validation() {
+    let (server_url, requests, server) = fake_karakeep(vec![
         Response {
             status: 200,
             body: r#"{"id":"user-1","name":"Ada","email":null,"localUser":true}"#,
@@ -150,41 +172,27 @@ fn a_read_only_key_is_rejected_before_it_can_be_remembered() {
         Response {
             status: 200,
             body: r#"{"bookmarks":[],"nextCursor":null}"#,
-        },
-        Response {
-            status: 400,
-            body: r#"{"message":"invalid bookmark payload"}"#,
-        },
-        Response {
-            status: 403,
-            body: r#"{"message":"API key is missing required scope: bookmarks:readwrite"}"#,
         },
     ]);
     let destination = normalize_destination_url(&server_url, false).expect("loopback URL");
 
-    let error = ReqwestKarakeepClient::new()
+    let identity = ReqwestKarakeepClient::new()
         .validate(&destination, "read-only-key")
-        .expect_err("delivery needs bookmark write access");
+        .expect("documented GET endpoints cannot distinguish read from read-write scope");
 
     server.join().unwrap();
-    assert_eq!(error.code(), DestinationErrorCode::MissingCapability);
-    assert!(error.to_string().contains("bookmark and tag delivery"));
+    assert_eq!(identity.user_id, "user-1");
+    let requests = requests.recv().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|request| request.starts_with("GET ")));
 }
 
 #[test]
-fn transient_probe_failures_are_reported_as_recoverable_network_errors() {
+fn transient_capability_failures_are_reported_as_recoverable_network_errors() {
     let (server_url, _requests, server) = fake_karakeep(vec![
         Response {
             status: 200,
             body: r#"{"id":"user-1","name":"Ada","email":null,"localUser":true}"#,
-        },
-        Response {
-            status: 200,
-            body: r#"{"bookmarks":[],"nextCursor":null}"#,
-        },
-        Response {
-            status: 400,
-            body: r#"{"message":"invalid bookmark payload"}"#,
         },
         Response {
             status: 503,

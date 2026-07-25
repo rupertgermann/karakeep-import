@@ -59,7 +59,7 @@ impl ReqwestKarakeepClient {
         client: &Client,
         url: Url,
         api_key: &str,
-        capability: Option<&str>,
+        endpoint: ValidationEndpoint<'_>,
     ) -> Result<T, DestinationError> {
         let response = client
             .get(url)
@@ -76,11 +76,13 @@ impl ReqwestKarakeepClient {
                     DestinationError::for_code(DestinationErrorCode::Network)
                 }
             })?;
-        response_for_capability(response, capability)?
+        response_for_endpoint(response, endpoint)?
             .json()
-            .map_err(|_| match capability {
-                Some(capability) => missing_capability(capability),
-                None => DestinationError::for_code(DestinationErrorCode::UnsupportedDestination),
+            .map_err(|_| match endpoint {
+                ValidationEndpoint::Identity => {
+                    DestinationError::for_code(DestinationErrorCode::UnsupportedDestination)
+                }
+                ValidationEndpoint::Capability(capability) => missing_capability(capability),
             })
     }
 }
@@ -107,7 +109,7 @@ impl KarakeepClient for ReqwestKarakeepClient {
             &client,
             api_base.join("users/me").expect("static relative URL"),
             api_key,
-            None,
+            ValidationEndpoint::Identity,
         )?;
         if user.id.trim().is_empty() {
             return Err(DestinationError::for_code(
@@ -120,28 +122,13 @@ impl KarakeepClient for ReqwestKarakeepClient {
             .query_pairs_mut()
             .append_pair("limit", "1")
             .append_pair("includeContent", "false");
-        let bookmarks: BookmarkListResponse =
-            self.get(&client, bookmarks_url, api_key, Some("bookmarks"))?;
+        let bookmarks: BookmarkListResponse = self.get(
+            &client,
+            bookmarks_url,
+            api_key,
+            ValidationEndpoint::Capability("bookmarks"),
+        )?;
         let _ = bookmarks.bookmarks;
-
-        self.probe(
-            &client,
-            api_base.join("bookmarks").expect("static relative URL"),
-            api_key,
-            serde_json::json!({}),
-            ProbeExpectation::InvalidRequest,
-            "bookmark creation",
-        )?;
-        self.probe(
-            &client,
-            api_base
-                .join("bookmarks/karakeep-transfer-capability-probe/tags")
-                .expect("static relative URL"),
-            api_key,
-            serde_json::json!({ "tags": [] }),
-            ProbeExpectation::MissingBookmark,
-            "bookmark and tag delivery",
-        )?;
 
         Ok(AuthenticatedDestination {
             user_id: user.id,
@@ -155,83 +142,30 @@ impl KarakeepClient for ReqwestKarakeepClient {
     }
 }
 
-impl ReqwestKarakeepClient {
-    fn probe(
-        &self,
-        client: &Client,
-        url: Url,
-        api_key: &str,
-        body: serde_json::Value,
-        expectation: ProbeExpectation,
-        capability: &str,
-    ) -> Result<(), DestinationError> {
-        let response = client
-            .post(url)
-            .header(ACCEPT, "application/json")
-            .bearer_auth(api_key)
-            .json(&body)
-            .send()
-            .map_err(|error| {
-                if error.is_redirect() {
-                    DestinationError::new(
-                        DestinationErrorCode::InsecureDestination,
-                        "Karakeep returned a redirect that could expose the API key.",
-                    )
-                } else {
-                    DestinationError::for_code(DestinationErrorCode::Network)
-                }
-            })?;
-
-        match response.status() {
-            StatusCode::UNAUTHORIZED => Err(DestinationError::for_code(
-                DestinationErrorCode::Authentication,
-            )),
-            StatusCode::FORBIDDEN
-            | StatusCode::METHOD_NOT_ALLOWED
-            | StatusCode::NOT_IMPLEMENTED => Err(missing_capability(capability)),
-            StatusCode::BAD_REQUEST if expectation == ProbeExpectation::InvalidRequest => Ok(()),
-            StatusCode::BAD_REQUEST | StatusCode::NOT_FOUND
-                if expectation == ProbeExpectation::MissingBookmark =>
-            {
-                Ok(())
-            }
-            StatusCode::TOO_MANY_REQUESTS => {
-                Err(DestinationError::for_code(DestinationErrorCode::Network))
-            }
-            status if status.is_server_error() => {
-                Err(DestinationError::for_code(DestinationErrorCode::Network))
-            }
-            _ => Err(missing_capability(capability)),
-        }
-    }
+#[derive(Clone, Copy)]
+enum ValidationEndpoint<'a> {
+    Identity,
+    Capability(&'a str),
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum ProbeExpectation {
-    InvalidRequest,
-    MissingBookmark,
-}
-
-fn response_for_capability(
+fn response_for_endpoint(
     response: Response,
-    capability: Option<&str>,
+    endpoint: ValidationEndpoint<'_>,
 ) -> Result<Response, DestinationError> {
     match response.status() {
         status if status.is_success() => Ok(response),
         StatusCode::UNAUTHORIZED => Err(DestinationError::for_code(
             DestinationErrorCode::Authentication,
         )),
-        StatusCode::FORBIDDEN => match capability {
-            Some(capability) => Err(missing_capability(capability)),
-            None => Err(DestinationError::for_code(
-                DestinationErrorCode::Authentication,
-            )),
+        StatusCode::FORBIDDEN => match endpoint {
+            ValidationEndpoint::Identity => Err(missing_capability("user identity")),
+            ValidationEndpoint::Capability(capability) => Err(missing_capability(capability)),
         },
-        StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED => match capability {
-            Some(capability) => Err(missing_capability(capability)),
-            None => Err(DestinationError::for_code(
+        StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED => match endpoint {
+            ValidationEndpoint::Identity => Err(DestinationError::for_code(
                 DestinationErrorCode::UnsupportedDestination,
             )),
+            ValidationEndpoint::Capability(capability) => Err(missing_capability(capability)),
         },
         _ => Err(DestinationError::for_code(DestinationErrorCode::Network)),
     }
@@ -241,7 +175,7 @@ fn missing_capability(capability: &str) -> DestinationError {
     DestinationError::new(
         DestinationErrorCode::MissingCapability,
         format!(
-            "This Karakeep destination does not provide the required {capability} capability. Use an API key with bookmark read/write access."
+            "This Karakeep destination does not provide the required {capability} capability. Use an API key with users:read and bookmarks:readwrite access, or full access."
         ),
     )
 }

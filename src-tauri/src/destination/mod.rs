@@ -118,6 +118,10 @@ pub struct ConnectDestinationInput {
 }
 
 pub trait KarakeepClient {
+    /// Validates a destination with authenticated, non-mutating requests only.
+    ///
+    /// Karakeep v0.32 does not expose API-key scopes through a read endpoint,
+    /// so bookmark write access can only be proven by the first real delivery.
     fn validate(
         &self,
         destination: &NormalizedDestination,

@@ -131,7 +131,13 @@ flowchart LR
 - v0.32.0 is the first tested baseline.
 - Compatibility is determined by the required authenticated API contract, not
   an exact version string.
-- Connection setup performs non-mutating capability checks.
+- Connection setup performs only authenticated `GET` requests for the current
+  user identity and one bookmark-list page.
+- Granular API keys need `users:read` and `bookmarks:readwrite`; full-access
+  keys also satisfy the contract.
+- Karakeep v0.32 does not expose API-key scopes through a read endpoint, so
+  bookmark creation and tag attachment capability are proven by the first real
+  delivery. A failed write is not recorded as delivered.
 - Compatible newer versions are allowed.
 - Missing capabilities produce a specific unsupported-destination error.
 
