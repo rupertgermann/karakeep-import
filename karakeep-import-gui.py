@@ -43,7 +43,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
     escaped_run_token = html.escape(run_token, quote=True)
     return f"""\
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="quiet-momentum">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -52,117 +52,497 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
   <style>
     :root {{
       color-scheme: light;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
-      color: #17202a;
-      background: #eef2f5;
+      --color-bg: #F3EFE6;
+      --color-surface: #FBF8F1;
+      --color-surface-alt: #E7E3D8;
+      --color-text: #263028;
+      --color-muted: #687067;
+      --color-primary: #526B54;
+      --color-primary-hover: #3E5641;
+      --color-signal: #E4B75D;
+      --color-danger: #A9453D;
+      --color-danger-hover: #8C352F;
+      --color-focus: #B6583F;
+      --color-border: #CEC9BC;
+      --color-border-strong: #7B8178;
+      --color-on-primary: #FBF8F1;
+      --color-console: #202821;
+      --color-console-text: #EEF0E7;
+      --color-console-muted: #AAB2A8;
+      --color-console-status: #E4B75D;
+      --glow-primary: rgb(82 107 84 / 10%);
+      --glow-signal: rgb(228 183 93 / 22%);
+      --font-display: Fraunces, "Iowan Old Style", "Palatino Linotype",
+        Georgia, serif;
+      --font-body: "DM Sans", Avenir, "Segoe UI", sans-serif;
+      --font-mono: "DM Mono", "SFMono-Regular", Consolas, monospace;
+      --radius-sm: 10px;
+      --radius-md: 18px;
+      --shadow-sm: 0 1px 2px rgb(44 53 45 / 7%);
+      --shadow-md: 0 16px 40px rgb(44 53 45 / 10%);
+      --shadow-lg: 0 28px 70px rgb(44 53 45 / 14%);
+      --duration-fast: 150ms;
+      --duration-base: 280ms;
+      --duration-slow: 700ms;
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     }}
-    * {{ box-sizing: border-box; }}
-    body {{ margin: 0; }}
+    *, *::before, *::after {{ box-sizing: border-box; }}
+    html {{
+      min-width: 320px;
+      min-height: 100%;
+      background: var(--color-bg);
+    }}
+    body {{
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      overflow-x: hidden;
+      background:
+        radial-gradient(
+          circle at 94% 5%,
+          var(--glow-signal) 0 8rem,
+          transparent 8.1rem
+        ),
+        radial-gradient(
+          circle at 4% 72%,
+          var(--glow-primary) 0 12rem,
+          transparent 12.1rem
+        ),
+        var(--color-bg);
+      color: var(--color-text);
+      font: 1rem/1.6 var(--font-body);
+      -webkit-font-smoothing: antialiased;
+    }}
     main {{
-      width: min(100% - 2rem, 64rem);
+      width: min(100% - 2rem, 76rem);
       margin: 0 auto;
-      padding: 3rem 0 5rem;
+      padding: clamp(2rem, 6vw, 5.25rem) 0 5rem;
+      animation: quiet-arrive var(--duration-slow) var(--ease-out) both;
     }}
-    h1 {{ margin-bottom: .4rem; font-size: clamp(2rem, 5vw, 3.5rem); }}
-    .intro {{ color: #4b5966; margin: 0 0 2rem; }}
+    .hero {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(15rem, 23rem);
+      align-items: end;
+      gap: 2rem;
+      margin-bottom: clamp(2rem, 5vw, 3.5rem);
+    }}
+    .eyebrow {{
+      display: flex;
+      align-items: center;
+      gap: .65rem;
+      margin: 0 0 .9rem;
+      color: var(--color-primary);
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .16em;
+      line-height: 1.3;
+      text-transform: uppercase;
+    }}
+    .eyebrow::before {{
+      width: 1.9rem;
+      height: 2px;
+      background: var(--color-signal);
+      content: "";
+    }}
+    h1, h2, legend {{
+      font-family: var(--font-display);
+      text-wrap: balance;
+    }}
+    h1 {{
+      max-width: 12ch;
+      margin: 0;
+      font-size: clamp(2.8rem, 7vw, 5.9rem);
+      font-weight: 500;
+      letter-spacing: -.055em;
+      line-height: .91;
+    }}
+    h1 span {{ color: var(--color-primary); }}
+    .intro {{
+      max-width: 58ch;
+      margin: 1.35rem 0 0;
+      color: var(--color-muted);
+      font-size: 1.05rem;
+    }}
+    .safety-note {{
+      position: relative;
+      padding: 1.25rem 1.35rem 1.25rem 1.5rem;
+      overflow: hidden;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-surface);
+      box-shadow: var(--shadow-sm);
+    }}
+    .safety-note::before {{
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 5px;
+      background: var(--color-signal);
+      content: "";
+    }}
+    .safety-label {{
+      display: block;
+      margin-bottom: .35rem;
+      color: var(--color-primary);
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }}
+    .safety-note p {{
+      margin: 0;
+      color: var(--color-muted);
+      font-size: .9rem;
+      line-height: 1.5;
+    }}
+    .workspace {{
+      display: grid;
+      gap: 1.5rem;
+    }}
     form {{ display: grid; gap: 1rem; }}
     fieldset, .run-panel {{
+      min-width: 0;
       margin: 0;
-      padding: 1.25rem;
-      border: 1px solid #cfdae3;
-      border-radius: .9rem;
-      background: #fff;
-      box-shadow: 0 .4rem 1.4rem rgb(30 55 75 / 8%);
+      padding: clamp(1.15rem, 3vw, 1.75rem);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-surface);
+      box-shadow: var(--shadow-sm);
+      transition:
+        border-color var(--duration-base) var(--ease-out),
+        box-shadow var(--duration-base) var(--ease-out),
+        transform var(--duration-base) var(--ease-out);
     }}
-    legend {{ padding: 0 .35rem; font-size: 1.5rem; font-weight: 700; }}
+    fieldset:hover {{
+      border-color: var(--color-border-strong);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }}
+    legend {{
+      padding: 0 .55rem;
+      color: var(--color-text);
+      font-size: 1.5rem;
+      font-weight: 500;
+      letter-spacing: -.025em;
+    }}
+    .section-number {{
+      display: inline-block;
+      margin-right: .55rem;
+      color: var(--color-primary);
+      font: 700 .68rem/1 var(--font-mono);
+      letter-spacing: .08em;
+      vertical-align: .35em;
+    }}
     .field-grid {{
       display: grid;
-      grid-template-columns: minmax(10rem, .7fr) minmax(12rem, 1.3fr);
+      grid-template-columns: minmax(11rem, .7fr) minmax(12rem, 1.3fr);
       align-items: center;
-      gap: .8rem 1rem;
+      gap: .85rem 1.25rem;
     }}
-    label {{ font-weight: 600; }}
-    label:has(input[type="checkbox"]) {{ grid-column: 1 / -1; }}
+    label {{
+      color: var(--color-muted);
+      font-size: .8rem;
+      font-weight: 700;
+      letter-spacing: .025em;
+    }}
+    label:has(input[type="checkbox"]) {{
+      display: flex;
+      grid-column: 1 / -1;
+      align-items: center;
+      min-height: 2.75rem;
+      padding: .65rem .8rem;
+      border-radius: var(--radius-sm);
+      background: var(--color-surface-alt);
+      color: var(--color-text);
+      font-size: .9rem;
+      font-weight: 500;
+      letter-spacing: 0;
+      cursor: pointer;
+    }}
     input, select, textarea, button {{
+      min-width: 0;
       width: 100%;
       min-height: 2.75rem;
-      border: 1px solid #aebdca;
-      border-radius: .55rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
       padding: .65rem .75rem;
       font: inherit;
+    }}
+    input, select, textarea {{
+      background: var(--color-surface);
+      color: var(--color-text);
+      transition:
+        border-color var(--duration-fast) var(--ease-out),
+        box-shadow var(--duration-fast) var(--ease-out);
+    }}
+    input:hover, select:hover, textarea:hover {{
+      border-color: var(--color-border-strong);
+    }}
+    input::placeholder, textarea::placeholder {{
+      color: var(--color-muted);
+      opacity: .8;
+    }}
+    input::file-selector-button {{
+      margin: -.35rem .75rem -.35rem -.35rem;
+      border: 0;
+      border-radius: 7px;
+      padding: .45rem .65rem;
+      background: var(--color-surface-alt);
+      color: var(--color-primary);
+      font: 700 .78rem/1.2 var(--font-body);
+      cursor: pointer;
     }}
     input[type="checkbox"] {{
       width: 1.1rem;
       min-height: auto;
       margin: 0 .45rem 0 0;
-      accent-color: #095fab;
+      accent-color: var(--color-primary);
     }}
     textarea {{ min-height: 5rem; resize: vertical; }}
     .actions {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }}
     button {{
-      border: 0;
-      background: #095fab;
-      color: #fff;
-      font-weight: 750;
+      min-height: 3.25rem;
+      border-color: transparent;
+      background: var(--color-primary);
+      color: var(--color-on-primary);
+      font-weight: 700;
       cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      transition:
+        background var(--duration-fast) var(--ease-out),
+        border-color var(--duration-fast) var(--ease-out),
+        color var(--duration-fast) var(--ease-out),
+        transform var(--duration-fast) var(--ease-out);
     }}
-    button:hover {{ background: #074b86; }}
-    #execute-button {{ background: #a42a2a; }}
-    #execute-button:hover {{ background: #7e2020; }}
-    button:disabled {{ cursor: wait; opacity: .65; }}
+    button:hover {{
+      background: var(--color-primary-hover);
+      transform: translateY(-1px);
+    }}
+    #execute-button {{
+      border-color: var(--color-danger);
+      background: transparent;
+      color: var(--color-danger);
+      box-shadow: none;
+    }}
+    #execute-button:hover {{
+      background: var(--color-danger);
+      color: var(--color-surface);
+    }}
+    button:disabled {{
+      cursor: wait;
+      opacity: .52;
+      transform: none;
+    }}
     input:focus-visible, select:focus-visible, textarea:focus-visible,
     button:focus-visible {{
-      outline: 3px solid #f5a623;
-      outline-offset: 2px;
+      outline: 3px solid var(--color-focus);
+      outline-offset: 3px;
     }}
     dialog {{
       width: min(calc(100% - 2rem), 30rem);
-      border: 0;
-      border-radius: .9rem;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
       padding: 0;
-      color: #17202a;
-      box-shadow: 0 1.5rem 4rem rgb(16 24 32 / 35%);
+      background: var(--color-surface);
+      color: var(--color-text);
+      box-shadow: var(--shadow-lg);
     }}
-    dialog::backdrop {{ background: rgb(16 24 32 / 68%); }}
-    .dialog-content {{ margin: 0; padding: 1.5rem; }}
-    .dialog-content h2 {{ margin: 0 0 .6rem; }}
-    .dialog-content p {{ margin: 0 0 1.25rem; color: #4b5966; }}
+    dialog[open] {{
+      animation: quiet-dialog-arrive var(--duration-base) var(--ease-out) both;
+    }}
+    dialog::backdrop {{
+      background: rgb(23 29 24 / 76%);
+      backdrop-filter: blur(4px);
+    }}
+    .dialog-content {{
+      position: relative;
+      margin: 0;
+      padding: 2rem;
+      text-align: center;
+    }}
+    .dialog-warning {{
+      display: grid;
+      width: 3.25rem;
+      height: 3.25rem;
+      margin: 0 auto 1.25rem;
+      place-items: center;
+      border: 1px solid var(--color-danger);
+      border-radius: 50%;
+      background: var(--color-surface-alt);
+      color: var(--color-danger);
+      font: 600 1.45rem/1 var(--font-display);
+    }}
+    .dialog-kicker {{
+      margin: 0 0 .45rem !important;
+      color: var(--color-danger) !important;
+      font: 700 .68rem/1.3 var(--font-mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }}
+    .dialog-content h2 {{
+      margin: 0 0 .75rem;
+      font-size: 2rem;
+      font-weight: 500;
+      letter-spacing: -.035em;
+      line-height: 1;
+    }}
+    .dialog-content p {{
+      margin: 0 auto 1.5rem;
+      max-width: 34ch;
+      color: var(--color-muted);
+    }}
     .dialog-actions {{
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: .75rem;
     }}
-    #cancel-execute-button {{ background: #e5edf3; color: #17202a; }}
-    #cancel-execute-button:hover {{ background: #d4e0e9; }}
-    #confirm-execute-button {{ background: #a42a2a; }}
-    #confirm-execute-button:hover {{ background: #7e2020; }}
-    .run-panel {{ margin-top: 1rem; background: #101820; color: #edf5fa; }}
-    .run-panel h2 {{ margin-top: 0; }}
-    #run-status {{ color: #9fd3f5; font-weight: 700; }}
+    #cancel-execute-button {{
+      background: var(--color-surface-alt);
+      color: var(--color-text);
+    }}
+    #cancel-execute-button:hover {{ background: var(--color-border); }}
+    #confirm-execute-button {{ background: var(--color-danger); }}
+    #confirm-execute-button:hover {{
+      background: var(--color-danger-hover);
+    }}
+    .run-panel {{
+      align-self: start;
+      border-color: transparent;
+      background: var(--color-console);
+      color: var(--color-console-text);
+      box-shadow: var(--shadow-md);
+    }}
+    .run-panel h2 {{
+      margin: 0;
+      color: var(--color-console-text);
+      font-size: 1.65rem;
+      font-weight: 500;
+      letter-spacing: -.025em;
+    }}
+    .run-kicker {{
+      margin: 0 0 .25rem;
+      color: var(--color-signal);
+      font: 700 .68rem/1.3 var(--font-mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }}
+    #run-status {{
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      margin: 1rem 0 1.25rem;
+      color: var(--color-console-status);
+      font-size: .84rem;
+      font-weight: 700;
+    }}
+    #run-status::before {{
+      width: .5rem;
+      height: .5rem;
+      border-radius: 50%;
+      background: currentColor;
+      content: "";
+      box-shadow: 0 0 0 4px rgb(228 183 93 / 12%);
+    }}
     #output {{
       min-height: 10rem;
       max-height: 28rem;
       margin: 0;
+      padding-top: 1rem;
       overflow: auto;
+      border-top: 1px solid rgb(238 240 231 / 16%);
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      font: .9rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+      color: var(--color-console-muted);
+      font: .82rem/1.65 var(--font-mono);
+    }}
+    @media (min-width: 64rem) {{
+      .workspace {{
+        grid-template-columns: minmax(0, 1.45fr) minmax(19rem, .8fr);
+        align-items: start;
+      }}
+      .run-panel {{
+        position: sticky;
+        top: 1.5rem;
+      }}
     }}
     @media (max-width: 42rem) {{
-      main {{ width: min(100% - 1rem, 64rem); padding-top: 1.5rem; }}
+      main {{ width: min(100% - 1rem, 76rem); padding-top: 1.5rem; }}
+      .hero {{ grid-template-columns: 1fr; gap: 1.25rem; }}
+      h1 {{ font-size: clamp(2.65rem, 15vw, 4.2rem); }}
+      .safety-note {{ padding: 1rem 1rem 1rem 1.25rem; }}
+      fieldset, .run-panel {{ padding: 1rem; }}
       .field-grid {{ grid-template-columns: 1fr; }}
       .actions {{ grid-template-columns: 1fr; }}
       label:has(input[type="checkbox"]) {{ grid-column: auto; }}
+    }}
+    @media (prefers-color-scheme: dark) {{
+      :root {{
+        color-scheme: dark;
+        --color-bg: #171D18;
+        --color-surface: #202821;
+        --color-surface-alt: #2A332B;
+        --color-text: #EEF0E7;
+        --color-muted: #AAB2A8;
+        --color-primary: #A9C2A5;
+        --color-primary-hover: #C0D4BC;
+        --color-signal: #D6AE66;
+        --color-danger: #E18B7F;
+        --color-danger-hover: #F0A197;
+        --color-focus: #E18B7F;
+        --color-border: #424C43;
+        --color-border-strong: #778178;
+        --color-on-primary: #172019;
+        --color-console: #111512;
+        --color-console-text: #EEF0E7;
+        --color-console-muted: #AAB2A8;
+        --color-console-status: #D6AE66;
+        --glow-primary: rgb(169 194 165 / 10%);
+        --glow-signal: rgb(214 174 102 / 12%);
+        --shadow-sm: 0 1px 2px rgb(0 0 0 / 22%);
+        --shadow-md: 0 16px 40px rgb(0 0 0 / 28%);
+        --shadow-lg: 0 28px 70px rgb(0 0 0 / 40%);
+      }}
+    }}
+    @keyframes quiet-arrive {{
+      from {{ opacity: 0; transform: translateY(18px); }}
+      to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    @keyframes quiet-dialog-arrive {{
+      from {{ opacity: 0; transform: translateY(12px) scale(.98); }}
+      to {{ opacity: 1; transform: translateY(0) scale(1); }}
+    }}
+    @media (prefers-reduced-motion: reduce) {{
+      *, *::before, *::after {{
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+      }}
     }}
   </style>
 </head>
 <body>
   <main>
-    <h1>Karakeep Importer</h1>
-    <p class="intro">Preview is always safe: no data is sent to Karakeep.</p>
-    <form id="import-form">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Preview-first bookmark transfer</p>
+        <h1>Karakeep <span>Importer</span></h1>
+        <p class="intro">
+          Bring Field Theory and Chrome bookmarks into Karakeep with a
+          careful, resumable workflow.
+        </p>
+      </div>
+      <aside class="safety-note" aria-label="Preview safety">
+        <span class="safety-label">Safe by default</span>
+        <p>Preview is always safe: no data is sent to Karakeep.</p>
+      </aside>
+    </header>
+    <div class="workspace">
+      <form id="import-form">
       <fieldset>
-        <legend>Bookmark export</legend>
+        <legend>
+          <span class="section-number" aria-hidden="true">01</span>
+          Bookmark export
+        </legend>
         <div class="field-grid">
           <label for="input-file">Choose an export</label>
           <input id="input-file" type="file" accept=".json,.jsonl,.html,.htm">
@@ -178,7 +558,10 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       </fieldset>
 
       <fieldset>
-        <legend>Karakeep</legend>
+        <legend>
+          <span class="section-number" aria-hidden="true">02</span>
+          Karakeep
+        </legend>
         <div class="field-grid">
           <label for="server">Server</label>
           <input id="server" type="url" value="{server}" required>
@@ -190,7 +573,10 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       </fieldset>
 
       <fieldset>
-        <legend>Bookmark metadata</legend>
+        <legend>
+          <span class="section-number" aria-hidden="true">03</span>
+          Bookmark metadata
+        </legend>
         <div class="field-grid">
           <label for="extra-tags">Extra tags, one per line</label>
           <textarea id="extra-tags"></textarea>
@@ -222,7 +608,10 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       </fieldset>
 
       <fieldset>
-        <legend>Execution</legend>
+        <legend>
+          <span class="section-number" aria-hidden="true">04</span>
+          Execution
+        </legend>
         <div class="field-grid">
           <label for="workers">Workers</label>
           <input id="workers" type="number" value="{defaults.workers}" min="1">
@@ -247,13 +636,15 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
         <button id="preview-button" type="submit">Preview import</button>
         <button id="execute-button" type="button">Import live</button>
       </div>
-    </form>
-    <dialog
+      </form>
+      <dialog
       id="execute-dialog"
       aria-labelledby="execute-dialog-title"
       aria-describedby="execute-dialog-description"
     >
       <form class="dialog-content" method="dialog">
+        <div class="dialog-warning" aria-hidden="true">!</div>
+        <p class="dialog-kicker">Live import</p>
         <h2 id="execute-dialog-title">Import bookmarks live?</h2>
         <p id="execute-dialog-description">
           This will send pending bookmarks to Karakeep. Continue?
@@ -272,12 +663,16 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
           >Import live</button>
         </div>
       </form>
-    </dialog>
-    <section class="run-panel" aria-labelledby="output-heading">
-      <h2 id="output-heading">Run output</h2>
-      <p id="run-status" role="status" aria-live="polite">Ready to preview.</p>
-      <pre id="output" role="log" aria-live="polite" tabindex="0"></pre>
-    </section>
+      </dialog>
+      <section class="run-panel" aria-labelledby="output-heading">
+        <p class="run-kicker">Local CLI stream</p>
+        <h2 id="output-heading">Run output</h2>
+        <p id="run-status" role="status" aria-live="polite">
+          Ready to preview.
+        </p>
+        <pre id="output" role="log" aria-live="polite" tabindex="0"></pre>
+      </section>
+    </div>
   </main>
   <script>
     const form = document.getElementById("import-form");
