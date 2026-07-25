@@ -10,7 +10,7 @@ use karakeep_transfer_lib::{
         FailureCode, RunStatus, TimestampMillis,
     },
     ledger::{DeliveryLedger, LedgerError},
-    private_data::{DeleteLocalTransferData, PrivateTransferData},
+    private_data::{DeleteLocalTransferData, PrivateTransferData, ReplaceXSource},
 };
 
 static NEXT_TEMP_DIRECTORY: AtomicU64 = AtomicU64::new(0);
@@ -374,7 +374,7 @@ fn replacing_x_source_clears_only_snapshot_and_acquisition_state() {
 
     fixture
         .private_data
-        .replace_x_source()
+        .replace_x_source(ReplaceXSource::confirmed())
         .expect("source replacement clears source data");
     assert!(!fixture.snapshot_path.exists());
     assert!(!fixture.acquisition_path.exists());

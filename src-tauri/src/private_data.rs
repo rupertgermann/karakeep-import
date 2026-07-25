@@ -22,7 +22,18 @@ pub struct PrivateTransferData {
     acquisition_state_path: PathBuf,
 }
 
-/// Capability created only after the UI's destructive-action confirmation.
+/// Capability created only after the UI's source-replacement confirmation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ReplaceXSource(());
+
+impl ReplaceXSource {
+    pub fn confirmed() -> Self {
+        Self(())
+    }
+}
+
+/// Capability created only after the UI's destructive-deletion confirmation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DeleteLocalTransferData(());
 
 impl DeleteLocalTransferData {
@@ -61,7 +72,7 @@ impl PrivateTransferData {
         })
     }
 
-    pub fn replace_x_source(&self) -> io::Result<()> {
+    pub fn replace_x_source(&self, _confirmation: ReplaceXSource) -> io::Result<()> {
         remove_path(&self.snapshot_path)?;
         remove_path(&self.acquisition_state_path)
     }

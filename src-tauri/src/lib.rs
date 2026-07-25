@@ -14,6 +14,7 @@ pub mod karakeep;
 pub mod ledger;
 pub mod private_data;
 pub mod redaction;
+pub mod settings;
 pub mod updates;
 pub mod versions;
 
@@ -146,6 +147,35 @@ async fn forget_destination(
         .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?
 }
 
+#[tauri::command]
+fn inspect_private_transfer_data(
+    state: tauri::State<'_, settings::SettingsService>,
+) -> Result<settings::SettingsPrivateDataSummary, &'static str> {
+    state
+        .inspect_private_data()
+        .map_err(|_| "private transfer data is unavailable")
+}
+
+#[tauri::command]
+fn replace_x_source(
+    state: tauri::State<'_, settings::SettingsService>,
+    confirmation: settings::ReplaceXSourceConfirmation,
+) -> Result<(), &'static str> {
+    state
+        .replace_x_source(confirmation.capability())
+        .map_err(|_| "X source data could not be replaced")
+}
+
+#[tauri::command]
+fn delete_local_transfer_data(
+    state: tauri::State<'_, settings::SettingsService>,
+    confirmation: settings::DeleteLocalTransferDataConfirmation,
+) -> Result<(), &'static str> {
+    state
+        .delete_local_transfer_data(confirmation.capability())
+        .map_err(|_| "local transfer data could not be deleted")
+}
+
 fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .plugin(tauri_plugin_dialog::init())
@@ -160,6 +190,10 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
                 FileDestinationSettings::new(settings_path),
             );
             app.manage(DestinationState(Arc::new(service)));
+            let app_data_directory = app.path().app_data_dir()?;
+            app.manage(settings::SettingsService::from_app_data_dir(
+                app_data_directory,
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -172,7 +206,10 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
             preview_file_source,
             destination_status,
             connect_destination,
-            forget_destination
+            forget_destination,
+            inspect_private_transfer_data,
+            replace_x_source,
+            delete_local_transfer_data
         ])
 }
 
@@ -184,14 +221,18 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{fs, path::PathBuf};
 
     use serde_json::{Value, json};
     use tauri::{
         WebviewWindowBuilder,
-        test::{INVOKE_KEY, get_ipc_response, mock_builder, mock_context, noop_assets},
+        test::{
+            INVOKE_KEY, assert_ipc_response, get_ipc_response, mock_builder, mock_context,
+            noop_assets,
+        },
         webview::InvokeRequest,
     };
+    use tempfile::tempdir;
 
     fn command_response(command: &str, body: tauri::ipc::InvokeBody) -> Result<Value, Value> {
         let app = super::configure_builder(mock_builder())
@@ -232,6 +273,42 @@ mod tests {
 
     fn assert_command_response(command: &str, expected: Value) {
         assert_command_response_with_body(command, tauri::ipc::InvokeBody::default(), Ok(expected));
+    }
+
+    fn assert_settings_confirmation_command(
+        command: &str,
+        confirmation: &str,
+        directory: &std::path::Path,
+    ) {
+        let app = super::configure_builder(mock_builder())
+            .manage(super::settings::SettingsService::from_app_data_dir(
+                directory,
+            ))
+            .build(mock_context(noop_assets()))
+            .expect("mock app builds");
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview builds");
+
+        assert_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: command.into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: if cfg!(any(windows, target_os = "android")) {
+                    "http://tauri.localhost"
+                } else {
+                    "tauri://localhost"
+                }
+                .parse()
+                .expect("valid IPC origin"),
+                body: json!({ "confirmation": confirmation }).into(),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+            Ok::<_, Value>(Value::Null),
+        );
     }
 
     #[test]
@@ -320,6 +397,90 @@ mod tests {
     }
 
     #[test]
+    fn private_data_summary_is_available_through_the_desktop_contract() {
+        let directory = tempdir().expect("temporary app data");
+        fs::create_dir_all(directory.path().join("field-theory/acquisition"))
+            .expect("acquisition directory");
+        fs::write(
+            directory.path().join("field-theory/bookmarks.jsonl"),
+            b"snapshot",
+        )
+        .expect("snapshot");
+        fs::write(
+            directory.path().join("field-theory/acquisition/cursor"),
+            b"state",
+        )
+        .expect("acquisition state");
+        fs::write(directory.path().join("delivery-ledger.sqlite3"), b"ledger").expect("ledger");
+        let app = super::configure_builder(mock_builder())
+            .manage(super::settings::SettingsService::from_app_data_dir(
+                directory.path(),
+            ))
+            .build(mock_context(noop_assets()))
+            .expect("mock app builds");
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview builds");
+
+        assert_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: "inspect_private_transfer_data".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: if cfg!(any(windows, target_os = "android")) {
+                    "http://tauri.localhost"
+                } else {
+                    "tauri://localhost"
+                }
+                .parse()
+                .expect("valid IPC origin"),
+                body: tauri::ipc::InvokeBody::default(),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+            Ok::<_, Value>(json!({
+                "dataDirectory": directory.path().display().to_string(),
+                "snapshotBytes": 8,
+                "acquisitionStateBytes": 5,
+                "ledgerBytes": 6,
+                "totalBytes": 19
+            })),
+        );
+    }
+
+    #[test]
+    fn source_replacement_confirmation_runs_through_the_desktop_contract() {
+        let directory = tempdir().expect("temporary app data");
+        fs::create_dir_all(directory.path().join("field-theory/acquisition"))
+            .expect("acquisition directory");
+        fs::write(
+            directory.path().join("field-theory/bookmarks.jsonl"),
+            b"snapshot",
+        )
+        .expect("snapshot");
+        fs::write(directory.path().join("delivery-ledger.sqlite3"), b"ledger").expect("ledger");
+
+        assert_settings_confirmation_command(
+            "replace_x_source",
+            "replace-x-source",
+            directory.path(),
+        );
+
+        assert_eq!(
+            (
+                directory
+                    .path()
+                    .join("field-theory/bookmarks.jsonl")
+                    .exists(),
+                directory.path().join("field-theory/acquisition").exists(),
+                directory.path().join("delivery-ledger.sqlite3").exists(),
+            ),
+            (false, false, true)
+        );
+    }
+
+    #[test]
     fn file_source_command_errors_do_not_expose_the_selected_path() {
         let private_path = "/private/selected/bookmarks.jsonl";
         assert_command_response_with_body(
@@ -354,6 +515,37 @@ mod tests {
                 "code": "invalidFileSource",
                 "message": "The selected file is not a valid supported File Source."
             })),
+        );
+    }
+
+    #[test]
+    fn local_deletion_confirmation_runs_through_the_desktop_contract() {
+        let directory = tempdir().expect("temporary app data");
+        fs::create_dir_all(directory.path().join("field-theory/acquisition"))
+            .expect("acquisition directory");
+        fs::write(
+            directory.path().join("field-theory/bookmarks.jsonl"),
+            b"snapshot",
+        )
+        .expect("snapshot");
+        fs::write(directory.path().join("delivery-ledger.sqlite3"), b"ledger").expect("ledger");
+
+        assert_settings_confirmation_command(
+            "delete_local_transfer_data",
+            "delete-local-transfer-data",
+            directory.path(),
+        );
+
+        assert_eq!(
+            (
+                directory
+                    .path()
+                    .join("field-theory/bookmarks.jsonl")
+                    .exists(),
+                directory.path().join("field-theory/acquisition").exists(),
+                directory.path().join("delivery-ledger.sqlite3").exists(),
+            ),
+            (false, false, false)
         );
     }
 }
