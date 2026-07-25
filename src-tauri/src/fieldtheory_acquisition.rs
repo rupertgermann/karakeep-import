@@ -25,6 +25,8 @@ use crate::{
 const SNAPSHOT_FILE: &str = "bookmarks.jsonl";
 const SNAPSHOT_METADATA_FILE: &str = "bookmarks-meta.json";
 const BACKFILL_STATE_FILE: &str = "bookmarks-backfill-state.json";
+const BACKFILL_SNAPSHOT_FILE: &str = "backfill-bookmarks.jsonl";
+const BACKFILL_BINDING_FILE: &str = "backfill-source.json";
 const STAGING_TEMP_DIRECTORY: &str = "tmp";
 const ACQUISITION_STATE_DIRECTORY: &str = "acquisition";
 const SOURCE_BINDING_FILE: &str = "source.json";
@@ -174,10 +176,12 @@ impl SnapshotStore {
     }
 
     pub fn has_snapshot(&self) -> bool {
-        self.snapshot_path().is_file()
+        self.recover().is_ok() && self.snapshot_path().is_file()
     }
 
     pub fn snapshot_bytes(&self) -> std::io::Result<u64> {
+        self.recover()
+            .map_err(|_| std::io::Error::other("private snapshot recovery failed"))?;
         match fs::metadata(self.snapshot_path()) {
             Ok(metadata) => Ok(metadata.len()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
@@ -191,6 +195,18 @@ impl SnapshotStore {
             .join(SOURCE_BINDING_FILE)
     }
 
+    fn state_directory(&self) -> PathBuf {
+        self.root.join(ACQUISITION_STATE_DIRECTORY)
+    }
+
+    fn backfill_snapshot_path(&self) -> PathBuf {
+        self.state_directory().join(BACKFILL_SNAPSHOT_FILE)
+    }
+
+    fn backfill_binding_path(&self) -> PathBuf {
+        self.state_directory().join(BACKFILL_BINDING_FILE)
+    }
+
     fn has_snapshot_for(&self, source: &XSourceReference) -> bool {
         if !self.has_snapshot() {
             return false;
@@ -201,9 +217,18 @@ impl SnapshotStore {
             .is_some_and(|binding| binding.source_fingerprint == source_fingerprint(source))
     }
 
+    fn has_backfill_for(&self, source: &XSourceReference) -> bool {
+        self.backfill_snapshot_path().is_file()
+            && fs::read(self.backfill_binding_path())
+                .ok()
+                .and_then(|binding| serde_json::from_slice::<SnapshotBinding>(&binding).ok())
+                .is_some_and(|binding| binding.source_fingerprint == source_fingerprint(source))
+    }
+
     /// Returns the retained X snapshot through the same parsed delivery seam
     /// used by one-off File Sources. The private storage path stays internal.
     pub fn delivery_source(&self) -> Result<FileSourcePreview, SnapshotPreviewError> {
+        self.recover()?;
         preview_file(&self.snapshot_path(), FileSourceFormat::FieldTheoryJsonl)
             .map_err(|_| SnapshotPreviewError)
     }
@@ -263,22 +288,31 @@ impl SnapshotStore {
         fs::create_dir(&staging).map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
         set_private_directory_permissions(&staging)
             .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
-        if self.has_snapshot_for(source) {
-            let state_directory = self.root.join(ACQUISITION_STATE_DIRECTORY);
-            for filename in [SNAPSHOT_FILE, SNAPSHOT_METADATA_FILE, BACKFILL_STATE_FILE] {
-                let source = if filename == SNAPSHOT_FILE {
-                    self.root.join(filename)
-                } else {
-                    state_directory.join(filename)
-                };
-                copy_if_present(&source, &staging.join(filename))
+        self.recover()
+            .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
+        if self.has_backfill_for(source) {
+            for (from, filename) in [
+                (self.backfill_snapshot_path(), SNAPSHOT_FILE),
+                (
+                    self.state_directory().join(SNAPSHOT_METADATA_FILE),
+                    SNAPSHOT_METADATA_FILE,
+                ),
+                (
+                    self.state_directory().join(BACKFILL_STATE_FILE),
+                    BACKFILL_STATE_FILE,
+                ),
+            ] {
+                copy_if_present(&from, &staging.join(filename))
                     .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
             }
+        } else if self.has_snapshot_for(source) {
+            copy_if_present(&self.snapshot_path(), &staging.join(SNAPSHOT_FILE))
+                .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
         }
         Ok(staging)
     }
 
-    fn promote(
+    fn promote_complete(
         &self,
         staging: &Path,
         source: &XSourceReference,
@@ -292,7 +326,7 @@ impl SnapshotStore {
             .map_err(|_| SnapshotPreviewError)?;
         set_private_file_permissions(&incoming).map_err(|_| SnapshotPreviewError)?;
 
-        let state_directory = self.root.join(ACQUISITION_STATE_DIRECTORY);
+        let state_directory = self.state_directory();
         fs::create_dir_all(&state_directory).map_err(|_| SnapshotPreviewError)?;
         set_private_directory_permissions(&state_directory).map_err(|_| SnapshotPreviewError)?;
         let incoming_binding = staging.join(SOURCE_BINDING_FILE);
@@ -307,32 +341,125 @@ impl SnapshotStore {
         set_private_file_permissions(&incoming_binding).map_err(|_| SnapshotPreviewError)?;
 
         let mut artifacts = vec![
-            PromotionArtifact::required(
+            PromotionArtifact::new(
                 incoming,
                 self.snapshot_path(),
                 state_directory.join("bookmarks.previous.jsonl"),
             ),
-            PromotionArtifact::required(
+            PromotionArtifact::new(
                 incoming_binding,
                 self.source_binding_path(),
                 state_directory.join("source.previous.json"),
             ),
         ];
-        for filename in [SNAPSHOT_METADATA_FILE, BACKFILL_STATE_FILE] {
-            let incoming = staging.join(filename);
-            let metadata = fs::symlink_metadata(&incoming).map_err(|_| SnapshotPreviewError)?;
-            if !metadata.file_type().is_file() {
-                return Err(SnapshotPreviewError);
-            }
-            set_private_file_permissions(&incoming).map_err(|_| SnapshotPreviewError)?;
-            artifacts.push(PromotionArtifact::required(
-                incoming,
-                state_directory.join(filename),
-                state_directory.join(format!("{filename}.previous")),
-            ));
+        promote_artifacts(&mut artifacts)?;
+        self.clear_backfill_state()?;
+        Ok(())
+    }
+
+    fn promote_backfill(
+        &self,
+        staging: &Path,
+        source: &XSourceReference,
+    ) -> Result<(), SnapshotPreviewError> {
+        let snapshot = staging.join(SNAPSHOT_FILE);
+        require_private_regular_file(&snapshot)?;
+        preview_file(&snapshot, FileSourceFormat::FieldTheoryJsonl)
+            .map_err(|_| SnapshotPreviewError)?;
+        let state_directory = self.state_directory();
+        fs::create_dir_all(&state_directory).map_err(|_| SnapshotPreviewError)?;
+        set_private_directory_permissions(&state_directory).map_err(|_| SnapshotPreviewError)?;
+        let incoming_binding = staging.join(BACKFILL_BINDING_FILE);
+        fs::write(
+            &incoming_binding,
+            serde_json::to_vec(&SnapshotBinding {
+                source_fingerprint: source_fingerprint(source),
+            })
+            .map_err(|_| SnapshotPreviewError)?,
+        )
+        .map_err(|_| SnapshotPreviewError)?;
+        set_private_file_permissions(&incoming_binding).map_err(|_| SnapshotPreviewError)?;
+
+        let mut artifacts = Vec::new();
+        for (incoming, destination, backup) in [
+            (
+                staging.join(SNAPSHOT_FILE),
+                self.backfill_snapshot_path(),
+                state_directory.join("backfill-bookmarks.previous.jsonl"),
+            ),
+            (
+                staging.join(SNAPSHOT_METADATA_FILE),
+                state_directory.join(SNAPSHOT_METADATA_FILE),
+                state_directory.join("bookmarks-meta.previous.json"),
+            ),
+            (
+                staging.join(BACKFILL_STATE_FILE),
+                state_directory.join(BACKFILL_STATE_FILE),
+                state_directory.join("bookmarks-backfill-state.previous.json"),
+            ),
+            (
+                incoming_binding,
+                self.backfill_binding_path(),
+                state_directory.join("backfill-source.previous.json"),
+            ),
+        ] {
+            require_private_regular_file(&incoming)?;
+            artifacts.push(PromotionArtifact::new(incoming, destination, backup));
         }
         promote_artifacts(&mut artifacts)?;
         Ok(())
+    }
+
+    fn clear_backfill_state(&self) -> Result<(), SnapshotPreviewError> {
+        for path in [
+            self.backfill_snapshot_path(),
+            self.state_directory().join(SNAPSHOT_METADATA_FILE),
+            self.state_directory().join(BACKFILL_STATE_FILE),
+            self.backfill_binding_path(),
+            self.state_directory()
+                .join("backfill-bookmarks.previous.jsonl"),
+            self.state_directory().join("bookmarks-meta.previous.json"),
+            self.state_directory()
+                .join("bookmarks-backfill-state.previous.json"),
+            self.state_directory().join("backfill-source.previous.json"),
+        ] {
+            if path.exists() {
+                fs::remove_file(path).map_err(|_| SnapshotPreviewError)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn recover(&self) -> Result<(), SnapshotPreviewError> {
+        let state_directory = self.state_directory();
+        recover_transaction(&[
+            TransactionArtifact::new(
+                self.snapshot_path(),
+                state_directory.join("bookmarks.previous.jsonl"),
+            ),
+            TransactionArtifact::new(
+                self.source_binding_path(),
+                state_directory.join("source.previous.json"),
+            ),
+        ])?;
+        recover_transaction(&[
+            TransactionArtifact::new(
+                self.backfill_snapshot_path(),
+                state_directory.join("backfill-bookmarks.previous.jsonl"),
+            ),
+            TransactionArtifact::new(
+                state_directory.join(SNAPSHOT_METADATA_FILE),
+                state_directory.join("bookmarks-meta.previous.json"),
+            ),
+            TransactionArtifact::new(
+                state_directory.join(BACKFILL_STATE_FILE),
+                state_directory.join("bookmarks-backfill-state.previous.json"),
+            ),
+            TransactionArtifact::new(
+                self.backfill_binding_path(),
+                state_directory.join("backfill-source.previous.json"),
+            ),
+        ])
     }
 
     fn cleanup(&self, staging: &Path) {
@@ -344,18 +471,16 @@ struct PromotionArtifact {
     incoming: PathBuf,
     destination: PathBuf,
     backup: PathBuf,
-    included: bool,
     backed_up: bool,
     promoted: bool,
 }
 
 impl PromotionArtifact {
-    fn required(incoming: PathBuf, destination: PathBuf, backup: PathBuf) -> Self {
+    fn new(incoming: PathBuf, destination: PathBuf, backup: PathBuf) -> Self {
         Self {
             incoming,
             destination,
             backup,
-            included: true,
             backed_up: false,
             promoted: false,
         }
@@ -365,9 +490,6 @@ impl PromotionArtifact {
 fn promote_artifacts(artifacts: &mut [PromotionArtifact]) -> Result<(), SnapshotPreviewError> {
     for index in 0..artifacts.len() {
         let artifact = &mut artifacts[index];
-        if !artifact.included {
-            continue;
-        }
         if artifact.backup.exists() && fs::remove_file(&artifact.backup).is_err() {
             restore_artifacts(artifacts);
             return Err(SnapshotPreviewError);
@@ -383,9 +505,6 @@ fn promote_artifacts(artifacts: &mut [PromotionArtifact]) -> Result<(), Snapshot
 
     for index in 0..artifacts.len() {
         let artifact = &mut artifacts[index];
-        if !artifact.included {
-            continue;
-        }
         if fs::rename(&artifact.incoming, &artifact.destination).is_err() {
             restore_artifacts(artifacts);
             return Err(SnapshotPreviewError);
@@ -393,7 +512,7 @@ fn promote_artifacts(artifacts: &mut [PromotionArtifact]) -> Result<(), Snapshot
         artifact.promoted = true;
     }
 
-    for artifact in artifacts.iter().filter(|artifact| artifact.included) {
+    for artifact in artifacts.iter() {
         if artifact.backed_up && artifact.backup.exists() {
             let _ = fs::remove_file(&artifact.backup);
         }
@@ -418,6 +537,58 @@ fn copy_if_present(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
+struct TransactionArtifact {
+    destination: PathBuf,
+    backup: PathBuf,
+}
+
+impl TransactionArtifact {
+    fn new(destination: PathBuf, backup: PathBuf) -> Self {
+        Self {
+            destination,
+            backup,
+        }
+    }
+}
+
+fn recover_transaction(artifacts: &[TransactionArtifact]) -> Result<(), SnapshotPreviewError> {
+    if !artifacts.iter().any(|artifact| artifact.backup.exists()) {
+        return Ok(());
+    }
+    if artifacts
+        .iter()
+        .all(|artifact| artifact.destination.exists())
+    {
+        for artifact in artifacts {
+            if artifact.backup.exists() {
+                fs::remove_file(&artifact.backup).map_err(|_| SnapshotPreviewError)?;
+            }
+        }
+        return Ok(());
+    }
+
+    for artifact in artifacts {
+        if artifact.backup.exists() && artifact.destination.exists() {
+            fs::remove_file(&artifact.destination).map_err(|_| SnapshotPreviewError)?;
+        }
+    }
+    for artifact in artifacts {
+        if artifact.backup.exists() {
+            fs::rename(&artifact.backup, &artifact.destination)
+                .map_err(|_| SnapshotPreviewError)?;
+        }
+    }
+    Ok(())
+}
+
+fn require_private_regular_file(path: &Path) -> Result<(), SnapshotPreviewError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| SnapshotPreviewError)?;
+    if !metadata.file_type().is_file() {
+        return Err(SnapshotPreviewError);
+    }
+    set_private_file_permissions(path).map_err(|_| SnapshotPreviewError)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{PromotionArtifact, promote_artifacts};
@@ -437,12 +608,12 @@ mod tests {
         fs::write(&second_incoming, "next second").expect("second incoming");
 
         let mut artifacts = [
-            PromotionArtifact::required(
+            PromotionArtifact::new(
                 first_incoming,
                 first_destination.clone(),
                 root.join("first.previous"),
             ),
-            PromotionArtifact::required(
+            PromotionArtifact::new(
                 second_incoming,
                 second_destination.clone(),
                 root.join("missing/second.previous"),
@@ -640,9 +811,11 @@ impl AcquisitionSupervisor {
                         let Some(data) = message.data else {
                             break;
                         };
-                        if data.media_downloaded != Some(false)
-                            || store.promote(&staging, &source).is_err()
-                        {
+                        let promotion = match data.resume_reason {
+                            Some(_) => store.promote_backfill(&staging, &source),
+                            None => store.promote_complete(&staging, &source),
+                        };
+                        if data.media_downloaded != Some(false) || promotion.is_err() {
                             break;
                         }
                         terminal = Some(match data.resume_reason {

@@ -211,6 +211,132 @@ fn resumable_acquisition_keeps_the_cursor_and_metadata_with_its_snapshot() {
         ),
         AcquisitionEvent::Completed { .. }
     ));
+    assert_eq!(
+        [
+            "backfill-bookmarks.jsonl",
+            "bookmarks-meta.json",
+            "bookmarks-backfill-state.json",
+            "backfill-source.json",
+        ]
+        .map(|filename| store.root().join("acquisition").join(filename).exists()),
+        [false, false, false, false]
+    );
+}
+
+#[test]
+fn partial_backfill_never_replaces_the_last_complete_snapshot() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let supervisor = AcquisitionSupervisor::default();
+    let runner = BridgeRunner::new(PathBuf::from("node"), fixture());
+    assert!(matches!(
+        run_acquisition(&supervisor, &runner, &store, request("acquire-success")),
+        AcquisitionEvent::Completed { .. }
+    ));
+    let complete_snapshot = fs::read_to_string(store.snapshot_path()).expect("complete snapshot");
+
+    assert!(matches!(
+        run_acquisition(&supervisor, &runner, &store, request("acquire-resumable")),
+        AcquisitionEvent::Resumable { .. }
+    ));
+    let failure = run_acquisition(
+        &supervisor,
+        &runner,
+        &store,
+        request("acquire-compatibility"),
+    );
+
+    assert_eq!(
+        (
+            failure,
+            fs::read_to_string(store.snapshot_path()).expect("complete snapshot remains"),
+            fs::read_to_string(store.root().join("acquisition/backfill-bookmarks.jsonl"))
+                .expect("partial backfill retained"),
+        ),
+        (
+            AcquisitionEvent::Failed {
+                acquisition_id: "acquire-compatibility".to_string(),
+                code: AcquisitionFailureCode::XCompatibility,
+                message: "X bookmark acquisition is temporarily incompatible. A Karakeep Transfer update may be required.".to_string(),
+                previous_snapshot_available: true,
+            },
+            complete_snapshot,
+            "{\"id\":\"partial\",\"tweetId\":\"partial\",\"url\":\"https://x.com/example/status/partial\",\"folderNames\":[]}\n".to_string(),
+        )
+    );
+}
+
+#[test]
+fn snapshot_use_restores_a_complete_prior_promotion_after_interruption() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let state = store.root().join("acquisition");
+    fs::create_dir_all(&state).expect("state directory");
+    fs::write(
+        store.snapshot_path(),
+        "{\"id\":\"new\",\"tweetId\":\"new\",\"url\":\"https://x.com/example/status/new\",\"folderNames\":[]}\n",
+    )
+    .expect("interrupted new snapshot");
+    fs::write(
+        state.join("bookmarks.previous.jsonl"),
+        "{\"id\":\"previous\",\"tweetId\":\"previous\",\"url\":\"https://x.com/example/status/previous\",\"folderNames\":[\"Research\"]}\n",
+    )
+    .expect("previous snapshot backup");
+    fs::write(state.join("source.previous.json"), "{}\n").expect("previous source backup");
+
+    let restored = store.delivery_source().expect("recovered delivery source");
+
+    assert_eq!(
+        (
+            restored.bookmarks[0].source_id.as_str(),
+            store
+                .root()
+                .join("acquisition/bookmarks.previous.jsonl")
+                .exists(),
+            store
+                .root()
+                .join("acquisition/source.previous.json")
+                .exists(),
+        ),
+        ("previous", false, false)
+    );
+}
+
+#[test]
+fn snapshot_use_keeps_a_fully_promoted_snapshot_and_cleans_transaction_backups() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let state = store.root().join("acquisition");
+    fs::create_dir_all(&state).expect("state directory");
+    fs::write(
+        store.snapshot_path(),
+        "{\"id\":\"new\",\"tweetId\":\"new\",\"url\":\"https://x.com/example/status/new\",\"folderNames\":[]}\n",
+    )
+    .expect("promoted snapshot");
+    fs::write(state.join("source.json"), "{}\n").expect("promoted source");
+    fs::write(
+        state.join("bookmarks.previous.jsonl"),
+        "{\"id\":\"previous\",\"tweetId\":\"previous\",\"url\":\"https://x.com/example/status/previous\",\"folderNames\":[]}\n",
+    )
+    .expect("previous snapshot backup");
+    fs::write(state.join("source.previous.json"), "{}\n").expect("previous source backup");
+
+    let retained = store.delivery_source().expect("retained delivery source");
+
+    assert_eq!(
+        (
+            retained.bookmarks[0].source_id.as_str(),
+            store
+                .root()
+                .join("acquisition/bookmarks.previous.jsonl")
+                .exists(),
+            store
+                .root()
+                .join("acquisition/source.previous.json")
+                .exists(),
+        ),
+        ("new", false, false)
+    );
 }
 
 #[test]
