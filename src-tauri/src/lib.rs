@@ -42,8 +42,8 @@ use domain::DestinationIdentity;
 
 use fieldtheory::{
     AcquisitionEvent, AcquisitionFailureCode, BridgeCommand, BridgeRequest, DestinationPreview,
-    DiscoveryResponse, FieldTheoryState, SelectedXSource, XAcquisitionRequest, XSourceSelection,
-    XTransferPreview,
+    DiscoveryResponse, FieldTheoryState, SelectedXSource, XAcquisitionRequest, XSourceReference,
+    XSourceSelection, XTransferPreview,
 };
 use operation_gate::{OperationGate, OperationKind};
 use transfer_source::{
@@ -170,17 +170,55 @@ fn discover_x_sources(
 #[tauri::command]
 fn select_x_source(
     state: tauri::State<'_, FieldTheoryState>,
+    selections: tauri::State<'_, XSelectionState>,
     diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
     request: XSourceSelection,
 ) -> Result<SelectedXSource, String> {
+    let source = request.source.clone();
     let result = state
         .runner()
         .request(&BridgeRequest::select("select-x-source", request))
         .map_err(|error| error.to_string());
+    if result.is_ok() {
+        selections.select(source)?;
+    }
     if result.is_err() {
         let _ = diagnostics.record_source_failure(diagnostics::DiagnosticFailure::BrowserAccess);
     }
     result
+}
+
+#[derive(Default)]
+struct XSelectionState(Mutex<Option<XSourceReference>>);
+
+impl XSelectionState {
+    fn select(&self, source: XSourceReference) -> Result<(), String> {
+        *self
+            .0
+            .lock()
+            .map_err(|_| "X Source selection is unavailable.".to_string())? = Some(source);
+        Ok(())
+    }
+
+    fn authorize(&self, source: &XSourceReference) -> Result<(), String> {
+        let selected = self
+            .0
+            .lock()
+            .map_err(|_| "X Source selection is unavailable.".to_string())?;
+        if selected.as_ref() == Some(source) {
+            Ok(())
+        } else {
+            Err("Select this X Source and confirm consent before acquisition.".to_string())
+        }
+    }
+
+    fn clear(&self) -> Result<(), String> {
+        *self
+            .0
+            .lock()
+            .map_err(|_| "X Source selection is unavailable.".to_string())? = None;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -393,6 +431,7 @@ fn inspect_private_transfer_data(
 #[tauri::command]
 fn replace_x_source(
     state: tauri::State<'_, settings::SettingsService>,
+    selections: tauri::State<'_, XSelectionState>,
     transfers: tauri::State<'_, TransferState>,
     diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
     confirmation: settings::ReplaceXSourceConfirmation,
@@ -405,6 +444,7 @@ fn replace_x_source(
         .replace_x_source(confirmation.capability())
         .map_err(|_| "X source data could not be replaced");
     if result.is_ok() {
+        let _ = selections.clear();
         let _ = diagnostics.set_source_status(diagnostics::ComponentStatus::NotConfigured);
     }
     result
@@ -413,6 +453,7 @@ fn replace_x_source(
 #[tauri::command]
 fn delete_local_transfer_data(
     state: tauri::State<'_, settings::SettingsService>,
+    selections: tauri::State<'_, XSelectionState>,
     transfers: tauri::State<'_, TransferState>,
     diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
     confirmation: settings::DeleteLocalTransferDataConfirmation,
@@ -427,6 +468,7 @@ fn delete_local_transfer_data(
         .delete_local_transfer_data(confirmation.capability())
         .map_err(|_| "local transfer data could not be deleted");
     if result.is_ok() {
+        let _ = selections.clear();
         let _ = diagnostics.set_source_status(diagnostics::ComponentStatus::NotConfigured);
     }
     result
@@ -436,9 +478,11 @@ fn delete_local_transfer_data(
 fn start_x_acquisition<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, FieldTheoryState>,
+    selections: tauri::State<'_, XSelectionState>,
     transfers: tauri::State<'_, TransferState>,
     request: XAcquisitionRequest,
 ) -> Result<(), String> {
+    selections.authorize(&request.source)?;
     let operation = transfers
         .operations
         .reserve(OperationKind::Acquisition)
@@ -466,11 +510,14 @@ fn start_x_acquisition<R: tauri::Runtime>(
                     };
                     let _ = diagnostics.record_source_failure(failure);
                 }
-                AcquisitionEvent::Progress { .. } | AcquisitionEvent::Cancelled { .. } => {}
+                AcquisitionEvent::Progress { .. }
+                | AcquisitionEvent::Cancelled { .. }
+                | AcquisitionEvent::Resumable { .. } => {}
             }
             let terminal = matches!(
                 event,
                 AcquisitionEvent::Completed { .. }
+                    | AcquisitionEvent::Resumable { .. }
                     | AcquisitionEvent::Cancelled { .. }
                     | AcquisitionEvent::Failed { .. }
             );
@@ -862,6 +909,7 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
         .plugin(tauri_plugin_dialog::init())
         .manage(diagnostics::DiagnosticsStore::default())
         .manage(FileSelectionState::default())
+        .manage(XSelectionState::default())
         .setup(|app| {
             let resource_dir = app.path().resource_dir()?;
             let app_data_directory = app.path().app_data_dir()?;
@@ -1994,6 +2042,20 @@ mod tests {
             b"snapshot",
         )
         .expect("snapshot");
+        fs::write(
+            directory
+                .path()
+                .join("fieldtheory/acquisition/bookmarks-backfill-state.json"),
+            b"state",
+        )
+        .expect("backfill state");
+        fs::write(
+            directory
+                .path()
+                .join("fieldtheory/acquisition/bookmarks-meta.json"),
+            b"metadata",
+        )
+        .expect("metadata");
         fs::write(directory.path().join("delivery-ledger.sqlite3"), b"ledger").expect("ledger");
 
         assert_settings_confirmation_command(
@@ -2013,5 +2075,27 @@ mod tests {
             ),
             (false, false, false)
         );
+    }
+
+    #[test]
+    fn x_acquisition_requires_the_exact_source_selected_in_this_session() {
+        let selections = super::XSelectionState::default();
+        let selected = super::XSourceReference {
+            browser_id: "chrome".to_string(),
+            profile_id: "Profile 1".to_string(),
+        };
+        let other_profile = super::XSourceReference {
+            browser_id: "chrome".to_string(),
+            profile_id: "Profile 2".to_string(),
+        };
+
+        assert!(selections.authorize(&selected).is_err());
+        selections
+            .select(selected.clone())
+            .expect("selection stores");
+        assert!(selections.authorize(&selected).is_ok());
+        assert!(selections.authorize(&other_profile).is_err());
+        selections.clear().expect("selection clears");
+        assert!(selections.authorize(&selected).is_err());
     }
 }

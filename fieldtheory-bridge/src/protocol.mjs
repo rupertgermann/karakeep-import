@@ -19,6 +19,7 @@ const COMMAND_FIELDS = {
     "protocolVersion",
     "requestId",
     "command",
+    "consent",
     "source",
   ]),
   cancelAcquisition: new Set([
@@ -140,6 +141,15 @@ function decodeLine(line) {
       ),
     };
   }
+  if (request.command === "acquireSnapshot" && request.consent !== true) {
+    return {
+      error: errorMessage(
+        requestId,
+        "consent_required",
+        "Explicit X-session consent is required.",
+      ),
+    };
+  }
   if (
     request.command === "cancelAcquisition" &&
     safeRequestId(request.acquisitionId) === "unknown"
@@ -209,6 +219,13 @@ export async function handleLine(
 }
 
 function acquisitionError(error) {
+  if (error instanceof AcquisitionError && error.code === "consent_required") {
+    return {
+      type: "error",
+      code: "consent_required",
+      message: "Explicit X-session consent is required.",
+    };
+  }
   if (error instanceof AcquisitionError && error.code === "cancelled") {
     return { type: "cancelled" };
   }
@@ -294,6 +311,7 @@ export function createBridgeSession(
     active = { requestId: request.requestId, controller };
     void Promise.resolve(
       handlers.acquireSnapshot({
+        consent: request.consent,
         source: request.source,
         dataDir: process.env.FT_DATA_DIR,
         signal: controller.signal,

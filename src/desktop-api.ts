@@ -130,6 +130,11 @@ export type AcquisitionEvent =
       folders: string[];
     }
   | {
+      type: "resumable";
+      acquisitionId: string;
+      reason: "rateLimited" | "maxRuntime";
+    }
+  | {
       type: "cancelled";
       acquisitionId: string;
     }

@@ -31,6 +31,7 @@ type ViewState =
       total: number | null;
     }
   | { step: "cancelled" }
+  | { step: "resumable"; reason: "rateLimited" | "maxRuntime" }
   | {
       step: "failed";
       previousSnapshotAvailable: boolean;
@@ -102,6 +103,14 @@ export default function XAcquisition({
         unlisten.current?.();
         unlisten.current = null;
         void loadPreview().finally(() => onRunningChange?.(false));
+        break;
+      case "resumable":
+        setCancellationError(null);
+        onRunningChange?.(false);
+        terminalReceived.current = true;
+        unlisten.current?.();
+        unlisten.current = null;
+        setView({ step: "resumable", reason: event.reason });
         break;
       case "cancelled":
         setCancellationError(null);
@@ -205,13 +214,21 @@ export default function XAcquisition({
         </>
       ) : (
         <button type="button" onClick={() => void start()}>
-          Acquire X bookmarks
+          {view.step === "resumable"
+            ? "Resume acquisition"
+            : "Acquire X bookmarks"}
         </button>
       )}
 
       {view.step === "cancelled" ? (
         <p role="status">
           Acquisition cancelled. The previous snapshot is unchanged.
+        </p>
+      ) : null}
+      {view.step === "resumable" ? (
+        <p role="status">
+          X paused the acquisition. Select Resume acquisition to continue from
+          the saved cursor.
         </p>
       ) : null}
       {cancellationError ? <p role="alert">{cancellationError}</p> : null}

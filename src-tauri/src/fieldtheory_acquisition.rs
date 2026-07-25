@@ -23,6 +23,9 @@ use crate::{
 };
 
 const SNAPSHOT_FILE: &str = "bookmarks.jsonl";
+const SNAPSHOT_METADATA_FILE: &str = "bookmarks-meta.json";
+const BACKFILL_STATE_FILE: &str = "bookmarks-backfill-state.json";
+const STAGING_TEMP_DIRECTORY: &str = "tmp";
 const ACQUISITION_STATE_DIRECTORY: &str = "acquisition";
 const SOURCE_BINDING_FILE: &str = "source.json";
 const COMPATIBILITY_MESSAGE: &str = "X bookmark acquisition is temporarily incompatible. A Karakeep Transfer update may be required.";
@@ -51,6 +54,13 @@ pub enum AcquisitionFailureCode {
     Unexpected,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AcquisitionResumeReason {
+    RateLimited,
+    MaxRuntime,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AcquisitionEvent {
@@ -67,6 +77,11 @@ pub enum AcquisitionEvent {
         total: u64,
         added: u64,
         folders: Vec<String>,
+    },
+    Resumable {
+        #[serde(rename = "acquisitionId")]
+        acquisition_id: String,
+        reason: AcquisitionResumeReason,
     },
     Cancelled {
         #[serde(rename = "acquisitionId")]
@@ -249,8 +264,16 @@ impl SnapshotStore {
         set_private_directory_permissions(&staging)
             .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
         if self.has_snapshot_for(source) {
-            fs::copy(self.snapshot_path(), staging.join(SNAPSHOT_FILE))
-                .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
+            let state_directory = self.root.join(ACQUISITION_STATE_DIRECTORY);
+            for filename in [SNAPSHOT_FILE, SNAPSHOT_METADATA_FILE, BACKFILL_STATE_FILE] {
+                let source = if filename == SNAPSHOT_FILE {
+                    self.root.join(filename)
+                } else {
+                    state_directory.join(filename)
+                };
+                copy_if_present(&source, &staging.join(filename))
+                    .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
+            }
         }
         Ok(staging)
     }
@@ -283,44 +306,160 @@ impl SnapshotStore {
         .map_err(|_| SnapshotPreviewError)?;
         set_private_file_permissions(&incoming_binding).map_err(|_| SnapshotPreviewError)?;
 
-        let snapshot = self.snapshot_path();
-        let source_binding = self.source_binding_path();
-        let snapshot_backup = state_directory.join("bookmarks.previous.jsonl");
-        let source_binding_backup = state_directory.join("source.previous.json");
-        for backup in [&snapshot_backup, &source_binding_backup] {
-            if backup.exists() {
-                fs::remove_file(backup).map_err(|_| SnapshotPreviewError)?;
+        let mut artifacts = vec![
+            PromotionArtifact::required(
+                incoming,
+                self.snapshot_path(),
+                state_directory.join("bookmarks.previous.jsonl"),
+            ),
+            PromotionArtifact::required(
+                incoming_binding,
+                self.source_binding_path(),
+                state_directory.join("source.previous.json"),
+            ),
+        ];
+        for filename in [SNAPSHOT_METADATA_FILE, BACKFILL_STATE_FILE] {
+            let incoming = staging.join(filename);
+            let metadata = fs::symlink_metadata(&incoming).map_err(|_| SnapshotPreviewError)?;
+            if !metadata.file_type().is_file() {
+                return Err(SnapshotPreviewError);
             }
+            set_private_file_permissions(&incoming).map_err(|_| SnapshotPreviewError)?;
+            artifacts.push(PromotionArtifact::required(
+                incoming,
+                state_directory.join(filename),
+                state_directory.join(format!("{filename}.previous")),
+            ));
         }
-        if source_binding.exists() {
-            fs::rename(&source_binding, &source_binding_backup)
-                .map_err(|_| SnapshotPreviewError)?;
-        }
-        if snapshot.exists() && fs::rename(&snapshot, &snapshot_backup).is_err() {
-            restore_file(&source_binding_backup, &source_binding);
-            return Err(SnapshotPreviewError);
-        }
-        if fs::rename(&incoming, &snapshot).is_err() {
-            restore_file(&snapshot_backup, &snapshot);
-            restore_file(&source_binding_backup, &source_binding);
-            return Err(SnapshotPreviewError);
-        }
-        if fs::rename(&incoming_binding, &source_binding).is_err() {
-            let _ = fs::remove_file(&snapshot);
-            restore_file(&snapshot_backup, &snapshot);
-            restore_file(&source_binding_backup, &source_binding);
-            return Err(SnapshotPreviewError);
-        }
-        for backup in [snapshot_backup, source_binding_backup] {
-            if backup.exists() {
-                let _ = fs::remove_file(backup);
-            }
-        }
+        promote_artifacts(&mut artifacts)?;
         Ok(())
     }
 
     fn cleanup(&self, staging: &Path) {
         let _ = fs::remove_dir_all(staging);
+    }
+}
+
+struct PromotionArtifact {
+    incoming: PathBuf,
+    destination: PathBuf,
+    backup: PathBuf,
+    included: bool,
+    backed_up: bool,
+    promoted: bool,
+}
+
+impl PromotionArtifact {
+    fn required(incoming: PathBuf, destination: PathBuf, backup: PathBuf) -> Self {
+        Self {
+            incoming,
+            destination,
+            backup,
+            included: true,
+            backed_up: false,
+            promoted: false,
+        }
+    }
+}
+
+fn promote_artifacts(artifacts: &mut [PromotionArtifact]) -> Result<(), SnapshotPreviewError> {
+    for index in 0..artifacts.len() {
+        let artifact = &mut artifacts[index];
+        if !artifact.included {
+            continue;
+        }
+        if artifact.backup.exists() {
+            if fs::remove_file(&artifact.backup).is_err() {
+                restore_artifacts(artifacts);
+                return Err(SnapshotPreviewError);
+            }
+        }
+        if artifact.destination.exists() {
+            if fs::rename(&artifact.destination, &artifact.backup).is_err() {
+                restore_artifacts(artifacts);
+                return Err(SnapshotPreviewError);
+            }
+            artifact.backed_up = true;
+        }
+    }
+
+    for index in 0..artifacts.len() {
+        let artifact = &mut artifacts[index];
+        if !artifact.included {
+            continue;
+        }
+        if fs::rename(&artifact.incoming, &artifact.destination).is_err() {
+            restore_artifacts(artifacts);
+            return Err(SnapshotPreviewError);
+        }
+        artifact.promoted = true;
+    }
+
+    for artifact in artifacts.iter().filter(|artifact| artifact.included) {
+        if artifact.backed_up && artifact.backup.exists() {
+            let _ = fs::remove_file(&artifact.backup);
+        }
+    }
+    Ok(())
+}
+
+fn restore_artifacts(artifacts: &[PromotionArtifact]) {
+    for artifact in artifacts.iter().filter(|artifact| artifact.promoted) {
+        let _ = fs::remove_file(&artifact.destination);
+    }
+    for artifact in artifacts.iter().filter(|artifact| artifact.backed_up) {
+        restore_file(&artifact.backup, &artifact.destination);
+    }
+}
+
+fn copy_if_present(from: &Path, to: &Path) -> std::io::Result<()> {
+    match fs::copy(from, to) {
+        Ok(_) => set_private_file_permissions(to),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PromotionArtifact, promote_artifacts};
+    use std::fs;
+
+    #[test]
+    fn promotion_restores_earlier_artifacts_when_a_later_backup_fails() {
+        let temporary = tempfile::tempdir().expect("temporary directory");
+        let root = temporary.path();
+        let first_destination = root.join("first");
+        let second_destination = root.join("second");
+        let first_incoming = root.join("first.incoming");
+        let second_incoming = root.join("second.incoming");
+        fs::write(&first_destination, "previous first").expect("first destination");
+        fs::write(&second_destination, "previous second").expect("second destination");
+        fs::write(&first_incoming, "next first").expect("first incoming");
+        fs::write(&second_incoming, "next second").expect("second incoming");
+
+        let mut artifacts = [
+            PromotionArtifact::required(
+                first_incoming,
+                first_destination.clone(),
+                root.join("first.previous"),
+            ),
+            PromotionArtifact::required(
+                second_incoming,
+                second_destination.clone(),
+                root.join("missing/second.previous"),
+            ),
+        ];
+
+        assert!(promote_artifacts(&mut artifacts).is_err());
+        assert_eq!(
+            fs::read_to_string(first_destination).expect("restored first destination"),
+            "previous first"
+        );
+        assert_eq!(
+            fs::read_to_string(second_destination).expect("second destination remains"),
+            "previous second"
+        );
     }
 }
 
@@ -403,6 +542,13 @@ impl AcquisitionSupervisor {
 
         let source = request.source.clone();
         let staging = store.prepare(&request.acquisition_id, &source)?;
+        let temporary_directory = staging.join(STAGING_TEMP_DIRECTORY);
+        fs::create_dir(&temporary_directory)
+            .and_then(|_| set_private_directory_permissions(&temporary_directory))
+            .map_err(|_| {
+                store.cleanup(&staging);
+                AcquisitionStartError::PrivateStorageUnavailable
+            })?;
         let mut command = Command::new(&runner.node_path);
         command
             .arg(&runner.bridge_path)
@@ -411,6 +557,9 @@ impl AcquisitionSupervisor {
         copy_required_process_environment(&mut command);
         let mut child = command
             .env("FT_DATA_DIR", &staging)
+            .env("TMPDIR", &temporary_directory)
+            .env("TMP", &temporary_directory)
+            .env("TEMP", &temporary_directory)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -433,6 +582,7 @@ impl AcquisitionSupervisor {
             protocol_version: PROTOCOL_VERSION,
             request_id: acquisition_id.clone(),
             command: "acquireSnapshot",
+            consent: true,
             source: &request.source,
         };
         if serde_json::to_writer(&mut stdin, &wire_request).is_err()
@@ -497,11 +647,17 @@ impl AcquisitionSupervisor {
                         {
                             break;
                         }
-                        terminal = Some(AcquisitionEvent::Completed {
-                            acquisition_id: acquisition_id.clone(),
-                            total: data.total.unwrap_or(0),
-                            added: data.added.unwrap_or(0),
-                            folders: data.folders.unwrap_or_default(),
+                        terminal = Some(match data.resume_reason {
+                            Some(reason) => AcquisitionEvent::Resumable {
+                                acquisition_id: acquisition_id.clone(),
+                                reason,
+                            },
+                            None => AcquisitionEvent::Completed {
+                                acquisition_id: acquisition_id.clone(),
+                                total: data.total.unwrap_or(0),
+                                added: data.added.unwrap_or(0),
+                                folders: data.folders.unwrap_or_default(),
+                            },
                         });
                         break;
                     }
@@ -595,6 +751,7 @@ struct WireAcquisitionRequest<'a> {
     protocol_version: u8,
     request_id: String,
     command: &'static str,
+    consent: bool,
     source: &'a XSourceReference,
 }
 
@@ -627,6 +784,7 @@ struct WireAcquisitionData {
     added: Option<u64>,
     folders: Option<Vec<String>>,
     media_downloaded: Option<bool>,
+    resume_reason: Option<AcquisitionResumeReason>,
 }
 
 #[derive(Deserialize)]

@@ -91,7 +91,7 @@ pub struct DiscoveryResponse {
     pub browsers: Vec<BrowserSource>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct XSourceReference {
     pub browser_id: String,

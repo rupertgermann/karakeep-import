@@ -52,6 +52,7 @@ fn terminal_event(receiver: &Receiver<AcquisitionEvent>) -> AcquisitionEvent {
         if matches!(
             event,
             AcquisitionEvent::Completed { .. }
+                | AcquisitionEvent::Resumable { .. }
                 | AcquisitionEvent::Cancelled { .. }
                 | AcquisitionEvent::Failed { .. }
         ) {
@@ -161,6 +162,73 @@ fn successful_acquisition_promotes_the_private_snapshot_after_progress() {
             .to_string(),
         )
     );
+}
+
+#[test]
+fn resumable_acquisition_keeps_the_cursor_and_metadata_with_its_snapshot() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let supervisor = AcquisitionSupervisor::default();
+    let runner = BridgeRunner::new(PathBuf::from("node"), fixture());
+
+    let event = run_acquisition(&supervisor, &runner, &store, request("acquire-resumable"));
+
+    assert_eq!(
+        event,
+        AcquisitionEvent::Resumable {
+            acquisition_id: "acquire-resumable".to_string(),
+            reason: karakeep_transfer_lib::fieldtheory::AcquisitionResumeReason::RateLimited,
+        }
+    );
+    assert_eq!(
+        (
+            fs::read_to_string(store.root().join("acquisition/bookmarks-meta.json")).ok(),
+            fs::read_to_string(
+                store
+                    .root()
+                    .join("acquisition/bookmarks-backfill-state.json"),
+            )
+            .ok(),
+        ),
+        (
+            Some("{\"totalBookmarks\":1}\n".to_string()),
+            Some("{\"lastCursor\":\"resume-cursor\"}\n".to_string()),
+        )
+    );
+    assert_eq!(
+        (
+            store.root().join("bookmarks-meta.json").exists(),
+            store.root().join("bookmarks-backfill-state.json").exists(),
+        ),
+        (false, false)
+    );
+    assert!(matches!(
+        run_acquisition(
+            &supervisor,
+            &runner,
+            &store,
+            request("acquire-resumable-retry"),
+        ),
+        AcquisitionEvent::Completed { .. }
+    ));
+}
+
+#[test]
+fn acquisition_child_uses_staging_owned_temporary_storage() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let supervisor = AcquisitionSupervisor::default();
+    let runner = BridgeRunner::new(PathBuf::from("node"), fixture());
+
+    assert!(matches!(
+        run_acquisition(
+            &supervisor,
+            &runner,
+            &store,
+            request("acquire-private-temp")
+        ),
+        AcquisitionEvent::Completed { .. }
+    ));
 }
 
 #[test]

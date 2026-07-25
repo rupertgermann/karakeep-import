@@ -6,6 +6,7 @@ import {
   browserUserDataDir,
   getBrowser,
 } from "fieldtheory/dist/browsers.js";
+import { readFile } from "node:fs/promises";
 import {
   resolveFirefoxProfileDirectory,
   selectSource,
@@ -80,16 +81,41 @@ function cancellation() {
   return new AcquisitionError("cancelled", "Acquisition was cancelled.");
 }
 
+function resumeReason(stopReason) {
+  if (stopReason === "rate limited") return "rateLimited";
+  if (stopReason === "max runtime reached") return "maxRuntime";
+  return null;
+}
+
+async function savedResumeCursor(dataDir) {
+  try {
+    const state = JSON.parse(
+      await readFile(`${dataDir}/bookmarks-backfill-state.json`, "utf8"),
+    );
+    return typeof state.lastCursor === "string" && state.lastCursor.length > 0
+      ? state.lastCursor
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function acquireSnapshot(
-  { source, dataDir, signal, onProgress },
+  { consent, source, dataDir, signal, onProgress },
   dependencies = defaultDependencies,
 ) {
   const previousDataDir = process.env.FT_DATA_DIR;
   process.env.FT_DATA_DIR = dataDir;
 
   try {
+    if (consent !== true) {
+      throw new AcquisitionError(
+        "consent_required",
+        "Explicit X-session consent is required.",
+      );
+    }
     try {
-      await dependencies.selectSource({ consent: true, source });
+      await dependencies.selectSource({ consent, source });
     } catch {
       throw new AcquisitionError(
         "source_unavailable",
@@ -97,13 +123,25 @@ export async function acquireSnapshot(
       );
     }
     const options = await sourceOptions(source, dependencies);
+    const resumeCursor = await savedResumeCursor(dataDir);
     const bookmarks = await dependencies.acquireBookmarks({
       ...options,
+      ...(resumeCursor === undefined ? {} : { resumeCursor }),
       signal,
       onProgress: (progress) => onProgress(bookmarkProgress(progress)),
     });
     if (signal.aborted || bookmarks.stopReason === "interrupted") {
       throw cancellation();
+    }
+    const resumable = resumeReason(bookmarks.stopReason);
+    if (resumable) {
+      return {
+        total: bookmarks.totalBookmarks,
+        added: bookmarks.added,
+        folders: [],
+        mediaDownloaded: false,
+        resumeReason: resumable,
+      };
     }
 
     const folders = await dependencies.acquireBookmarkFolders({

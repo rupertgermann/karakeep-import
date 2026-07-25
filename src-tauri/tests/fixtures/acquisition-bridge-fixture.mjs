@@ -25,6 +25,16 @@ for await (const line of input) {
   }
   if (request.command !== "acquireSnapshot") continue;
 
+  if (request.consent !== true) {
+    send({
+      protocolVersion: 1,
+      requestId: request.requestId,
+      type: "error",
+      error: { code: "consent_required", message: "consent is required" },
+    });
+    continue;
+  }
+
   await mkdir(process.env.FT_DATA_DIR, { recursive: true });
   if (process.env.KARAKEEP_API_KEY) {
     send({
@@ -75,6 +85,71 @@ for await (const line of input) {
   );
   const seededSnapshot = await readFile(snapshotPath, "utf8").catch(() => "");
 
+  if (request.requestId === "acquire-private-temp") {
+    const privateTemp = path.join(process.env.FT_DATA_DIR, "tmp");
+    if (
+      process.env.TMPDIR !== privateTemp ||
+      process.env.TMP !== privateTemp ||
+      process.env.TEMP !== privateTemp
+    ) {
+      send({
+        protocolVersion: 1,
+        requestId: request.requestId,
+        type: "error",
+        error: { code: "temp_not_private", message: "temporary storage escaped" },
+      });
+      continue;
+    }
+  }
+
+  if (request.requestId === "acquire-resumable") {
+    await writeFile(
+      snapshotPath,
+      '{"id":"partial","tweetId":"partial","url":"https://x.com/example/status/partial","folderNames":[]}\n',
+    );
+    await writeFile(
+      path.join(process.env.FT_DATA_DIR, "bookmarks-meta.json"),
+      '{"totalBookmarks":1}\n',
+    );
+    await writeFile(
+      path.join(process.env.FT_DATA_DIR, "bookmarks-backfill-state.json"),
+      '{"lastCursor":"resume-cursor"}\n',
+    );
+    send({
+      protocolVersion: 1,
+      requestId: request.requestId,
+      type: "result",
+      command: "acquireSnapshot",
+      data: {
+        total: 1,
+        added: 1,
+        folders: [],
+        mediaDownloaded: false,
+        resumeReason: "rateLimited",
+      },
+    });
+    continue;
+  }
+
+  if (request.requestId === "acquire-resumable-retry") {
+    const [metadata, state] = await Promise.all([
+      readFile(path.join(process.env.FT_DATA_DIR, "bookmarks-meta.json"), "utf8").catch(() => ""),
+      readFile(path.join(process.env.FT_DATA_DIR, "bookmarks-backfill-state.json"), "utf8").catch(() => ""),
+    ]);
+    if (
+      metadata !== '{"totalBookmarks":1}\n' ||
+      state !== '{"lastCursor":"resume-cursor"}\n'
+    ) {
+      send({
+        protocolVersion: 1,
+        requestId: request.requestId,
+        type: "error",
+        error: { code: "resume_state_missing", message: "resume state was not seeded" },
+      });
+      continue;
+    }
+  }
+
   if (request.requestId === "acquire-cross-source-failure") {
     send({
       protocolVersion: 1,
@@ -121,6 +196,14 @@ for await (const line of input) {
       ].join("\n"),
     );
   }
+  await writeFile(
+    path.join(process.env.FT_DATA_DIR, "bookmarks-meta.json"),
+    '{"totalBookmarks":2}\n',
+  );
+  await writeFile(
+    path.join(process.env.FT_DATA_DIR, "bookmarks-backfill-state.json"),
+    '{"lastCursor":"next-cursor"}\n',
+  );
   send({
     protocolVersion: 1,
     requestId: request.requestId,

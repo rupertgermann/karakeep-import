@@ -196,6 +196,7 @@ test("streams versioned acquisition progress and a secret-free result", async ()
       protocolVersion: 1,
       requestId: "acquire-1",
       command: "acquireSnapshot",
+      consent: true,
       source: { browserId: "chrome", profileId: "Default" },
     }),
   );
@@ -224,6 +225,40 @@ test("streams versioned acquisition progress and a secret-free result", async ()
   ]);
 });
 
+test("rejects a direct acquisition request without explicit consent", async () => {
+  const output = [];
+  const session = createBridgeSession(
+    {
+      acquireSnapshot: async () => {
+        throw new Error("must not acquire without consent");
+      },
+    },
+    (line) => output.push(JSON.parse(line)),
+  );
+
+  session.handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "acquire-without-consent",
+      command: "acquireSnapshot",
+      source: { browserId: "chrome", profileId: "Default" },
+    }),
+  );
+  await new Promise(setImmediate);
+
+  assert.deepEqual(output, [
+    {
+      protocolVersion: 1,
+      requestId: "acquire-without-consent",
+      type: "error",
+      error: {
+        code: "consent_required",
+        message: "Explicit X-session consent is required.",
+      },
+    },
+  ]);
+});
+
 test("allows only one acquisition operation at a time", async () => {
   const output = [];
   const session = createBridgeSession(
@@ -245,6 +280,7 @@ test("allows only one acquisition operation at a time", async () => {
       protocolVersion: 1,
       requestId: "acquire-active",
       command: "acquireSnapshot",
+      consent: true,
       source: { browserId: "chrome", profileId: "Default" },
     }),
   );
@@ -253,6 +289,7 @@ test("allows only one acquisition operation at a time", async () => {
       protocolVersion: 1,
       requestId: "acquire-second",
       command: "acquireSnapshot",
+      consent: true,
       source: { browserId: "chrome", profileId: "Default" },
     }),
   );
@@ -299,6 +336,7 @@ test("cancels the matching acquisition through the versioned protocol", async ()
       protocolVersion: 1,
       requestId: "acquire-cancel",
       command: "acquireSnapshot",
+      consent: true,
       source: { browserId: "firefox", profileId: "Profiles/default" },
     }),
   );

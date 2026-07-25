@@ -51,6 +51,7 @@ test("acquires a discovered absolute Firefox profile without exposing its path",
 
   await acquireSnapshot(
     {
+      consent: true,
       source: discoveredSource,
       dataDir: path.join(fixtureRoot, "staging"),
       signal: new AbortController().signal,
@@ -78,11 +79,76 @@ test("acquires a discovered absolute Firefox profile without exposing its path",
   assert.equal(JSON.stringify(discovered).includes(fixtureRoot), false);
 });
 
+test("returns a resumable result before acquiring folders when X throttles bookmark backfill", async () => {
+  let folderCalls = 0;
+
+  const result = await acquireSnapshot(
+    {
+      consent: true,
+      source,
+      dataDir: "/private/app-data/fieldtheory/staging",
+      signal: new AbortController().signal,
+      onProgress: () => {},
+    },
+    {
+      selectSource: async () => source,
+      acquireBookmarks: async () => ({
+        added: 3,
+        totalBookmarks: 42,
+        stopReason: "rate limited",
+      }),
+      acquireBookmarkFolders: async () => {
+        folderCalls += 1;
+        return { folders: [], skippedFolders: [] };
+      },
+    },
+  );
+
+  assert.deepEqual(result, {
+    total: 42,
+    added: 3,
+    folders: [],
+    mediaDownloaded: false,
+    resumeReason: "rateLimited",
+  });
+  assert.equal(folderCalls, 0);
+});
+
+test("passes the saved cursor into a same-source bookmark backfill", async () => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "karakeep-x-resume-"));
+  await writeFile(
+    path.join(dataDir, "bookmarks-backfill-state.json"),
+    '{"lastCursor":"resume-cursor"}',
+  );
+  let receivedCursor;
+
+  await acquireSnapshot(
+    {
+      consent: true,
+      source,
+      dataDir,
+      signal: new AbortController().signal,
+      onProgress: () => {},
+    },
+    {
+      selectSource: async () => source,
+      acquireBookmarks: async (options) => {
+        receivedCursor = options.resumeCursor;
+        return { added: 1, totalBookmarks: 1 };
+      },
+      acquireBookmarkFolders: async () => ({ folders: [], skippedFolders: [] }),
+    },
+  );
+
+  assert.equal(receivedCursor, "resume-cursor");
+});
+
 test("acquires bookmarks and folders through the pinned Field Theory modules", async () => {
   const calls = [];
 
   const result = await acquireSnapshot(
     {
+      consent: true,
       source,
       dataDir: "/private/app-data/fieldtheory/staging",
       signal: new AbortController().signal,
@@ -151,6 +217,7 @@ test("emits structured bookmark and folder progress without session material", a
 
   await acquireSnapshot(
     {
+      consent: true,
       source,
       dataDir: "/private/app-data/fieldtheory/staging",
       signal: new AbortController().signal,
@@ -207,6 +274,7 @@ test("classifies upstream acquisition failures without exposing password-equival
   await assert.rejects(
     acquireSnapshot(
       {
+        consent: true,
         source,
         dataDir: "/private/app-data/fieldtheory/staging",
         signal: new AbortController().signal,
@@ -242,6 +310,7 @@ test("reports cancellation before folder acquisition begins", async () => {
   await assert.rejects(
     acquireSnapshot(
       {
+        consent: true,
         source,
         dataDir: "/private/app-data/fieldtheory/staging",
         signal: controller.signal,
@@ -278,6 +347,7 @@ test("rejects a moved browser profile before reading any X session", async () =>
   await assert.rejects(
     acquireSnapshot(
       {
+        consent: true,
         source,
         dataDir: "/private/app-data/fieldtheory/staging",
         signal: new AbortController().signal,

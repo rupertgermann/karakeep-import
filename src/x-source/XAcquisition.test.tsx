@@ -121,6 +121,47 @@ describe("X acquisition", () => {
     expect(onChooseAnotherSource).toHaveBeenCalledOnce();
   });
 
+  it("pauses a throttled acquisition without previewing partial data and resumes explicitly", async () => {
+    const controlled = controlledApi();
+    const onPreview = vi.fn();
+    const onRunningChange = vi.fn();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-resume"}
+        onPreview={onPreview}
+        onRunningChange={onRunningChange}
+        onChooseAnotherSource={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalledOnce(),
+    );
+    controlled.emit({
+      type: "resumable",
+      acquisitionId: "acquire-ui-resume",
+      reason: "rateLimited",
+    });
+
+    expect(
+      await screen.findByText(/resume acquisition to continue from the saved cursor/i),
+    ).toBeInTheDocument();
+    expect(onPreview).not.toHaveBeenCalled();
+    expect(onRunningChange).toHaveBeenLastCalledWith(false);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Resume acquisition" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalledTimes(2),
+    );
+  });
+
   it("offers another source after acquisition fails", async () => {
     const controlled = controlledApi();
     const onChooseAnotherSource = vi.fn();
