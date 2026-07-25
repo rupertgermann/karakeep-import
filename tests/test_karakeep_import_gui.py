@@ -241,6 +241,32 @@ class GuiAcceptanceTests(unittest.TestCase):
                 r"legend \{[^}]*font-size: 1\.5rem;",
             )
 
+    def test_page_adapts_quiet_momentum_to_system_preferences(self):
+        gui = load_gui_module()
+        with running(gui.create_server(port=0)) as server:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{server.server_port}/"
+            ) as response:
+                page = response.read().decode("utf-8")
+
+            self.assertIn(
+                '<html lang="en" data-theme="quiet-momentum">',
+                page,
+            )
+            for theme_contract in (
+                "--color-bg: #F3EFE6;",
+                "--color-surface: #FBF8F1;",
+                "--color-primary: #526B54;",
+                "--color-signal: #E4B75D;",
+                '--font-display: Fraunces, "Iowan Old Style",',
+                "@media (prefers-color-scheme: dark)",
+                "--color-bg: #171D18;",
+                "--color-surface: #202821;",
+                "--color-primary: #A9C2A5;",
+                "@media (prefers-reduced-motion: reduce)",
+            ):
+                self.assertIn(theme_contract, page)
+
     def test_preview_streams_the_real_cli_summary_without_contacting_karakeep(
         self,
     ):
