@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 import { desktopApi as defaultDesktopApi } from "./desktop-api";
 import type {
@@ -39,6 +39,190 @@ type SourceMode = "x" | "file" | null;
 type ReadySource =
   | { kind: "x"; source: SelectedXSource }
   | { kind: "file"; selection: FileSourceSelection };
+type WorkflowPhase =
+  | "destination"
+  | "source-choice"
+  | "source-setup"
+  | "acquisition"
+  | "acquisition-running"
+  | "acquisition-cancelled"
+  | "acquisition-failed"
+  | "preview-preparation"
+  | "preview"
+  | "delivery"
+  | "result"
+  | "failure";
+
+interface WorkflowState {
+  phase: WorkflowPhase;
+  destination: DestinationSummary | null;
+  sourceMode: SourceMode;
+  readySource: ReadySource | null;
+  deliverySource: TransferSourceRequest | null;
+  transferPreview: TransferPreview | null;
+  transferProgress: TransferProgress | null;
+  transferResult: TransferResult | null;
+  transferError: string | null;
+}
+
+type WorkflowAction =
+  | { type: "destination.connected"; destination: DestinationSummary }
+  | { type: "destination.forgotten" }
+  | { type: "source.mode-selected"; mode: Exclude<SourceMode, null> }
+  | { type: "source.x-selected"; source: SelectedXSource }
+  | {
+      type: "file.preview-started";
+      selection: FileSourceSelection;
+      source: TransferSourceRequest;
+    }
+  | {
+      type: "preview.ready";
+      preview: TransferPreview;
+      source: TransferSourceRequest;
+    }
+  | { type: "preview.failed"; message: string }
+  | { type: "acquisition.running-changed"; running: boolean }
+  | { type: "acquisition.cancelled" }
+  | { type: "acquisition.failed" }
+  | { type: "delivery.started"; preview: TransferPreview }
+  | { type: "delivery.retry-started"; preview: TransferPreview }
+  | { type: "delivery.progressed"; progress: TransferProgress }
+  | { type: "delivery.completed"; result: TransferResult }
+  | { type: "delivery.cancelled"; result: TransferResult }
+  | {
+      type: "delivery.failed";
+      preview: TransferPreview;
+      message: string;
+    }
+  | { type: "delivery.start-failed"; message: string }
+  | { type: "delivery.cancellation-request-failed"; message: string }
+  | { type: "source.reset" };
+
+const initialWorkflowState: WorkflowState = {
+  phase: "destination",
+  destination: null,
+  sourceMode: null,
+  readySource: null,
+  deliverySource: null,
+  transferPreview: null,
+  transferProgress: null,
+  transferResult: null,
+  transferError: null,
+};
+
+function workflowReducer(
+  state: WorkflowState,
+  action: WorkflowAction,
+): WorkflowState {
+  switch (action.type) {
+    case "destination.connected":
+      return {
+        ...initialWorkflowState,
+        phase: "source-choice",
+        destination: action.destination,
+      };
+    case "destination.forgotten":
+      return initialWorkflowState;
+    case "source.mode-selected":
+      return {
+        ...state,
+        phase: "source-setup",
+        sourceMode: action.mode,
+      };
+    case "source.x-selected":
+      return {
+        ...state,
+        phase: "acquisition",
+        readySource: { kind: "x", source: action.source },
+      };
+    case "file.preview-started":
+      return {
+        ...state,
+        phase: "preview-preparation",
+        readySource: { kind: "file", selection: action.selection },
+        deliverySource: action.source,
+        transferError: null,
+      };
+    case "preview.ready":
+      return {
+        ...state,
+        phase: "preview",
+        deliverySource: action.source,
+        transferPreview: action.preview,
+        transferProgress: null,
+        transferResult: null,
+        transferError: null,
+      };
+    case "preview.failed":
+      return {
+        ...state,
+        phase: "failure",
+        transferError: action.message,
+      };
+    case "acquisition.running-changed":
+      if (action.running) {
+        return { ...state, phase: "acquisition-running" };
+      }
+      return state.phase === "acquisition-running"
+        ? { ...state, phase: "acquisition" }
+        : state;
+    case "acquisition.cancelled":
+      return { ...state, phase: "acquisition-cancelled" };
+    case "acquisition.failed":
+      return { ...state, phase: "acquisition-failed" };
+    case "delivery.started":
+    case "delivery.retry-started":
+      return {
+        ...state,
+        phase: "delivery",
+        transferProgress: {
+          completed: 0,
+          total: action.preview.pending,
+        },
+        transferResult: null,
+        transferError: null,
+      };
+    case "delivery.progressed":
+      return {
+        ...state,
+        transferProgress: action.progress,
+      };
+    case "delivery.completed":
+    case "delivery.cancelled":
+      return {
+        ...state,
+        phase: "result",
+        transferProgress: null,
+        transferResult: action.result,
+      };
+    case "delivery.failed":
+      return {
+        ...state,
+        phase: "failure",
+        transferPreview: action.preview,
+        transferProgress: null,
+        transferError: action.message,
+      };
+    case "delivery.start-failed":
+      return {
+        ...state,
+        phase: "failure",
+        transferProgress: null,
+        transferError: action.message,
+      };
+    case "delivery.cancellation-request-failed":
+      return {
+        ...state,
+        transferError: action.message,
+      };
+    case "source.reset":
+      return {
+        ...initialWorkflowState,
+        phase: state.destination ? "source-choice" : "destination",
+        destination: state.destination,
+      };
+  }
+}
 
 interface AppProps {
   desktopApi?: AppDesktopApi;
@@ -57,22 +241,23 @@ export default function App({
 }: AppProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthFailed, setHealthFailed] = useState(false);
-  const [destination, setDestination] =
-    useState<DestinationSummary | null>(null);
-  const [sourceMode, setSourceMode] = useState<SourceMode>(null);
-  const [readySource, setReadySource] = useState<ReadySource | null>(null);
-  const [transferPreview, setTransferPreview] =
-    useState<TransferPreview | null>(null);
-  const [deliverySource, setDeliverySource] =
-    useState<TransferSourceRequest | null>(null);
-  const [transferProgress, setTransferProgress] =
-    useState<TransferProgress | null>(null);
-  const [transferResult, setTransferResult] =
-    useState<TransferResult | null>(null);
-  const [transferError, setTransferError] = useState<string | null>(null);
-  const [preparingPreview, setPreparingPreview] = useState(false);
+  const [workflow, dispatch] = useReducer(
+    workflowReducer,
+    initialWorkflowState,
+  );
   const [showSettings, setShowSettings] = useState(false);
-  const [acquisitionActive, setAcquisitionActive] = useState(false);
+  const {
+    destination,
+    sourceMode,
+    readySource,
+    transferPreview,
+    deliverySource,
+    transferProgress,
+    transferResult,
+    transferError,
+  } = workflow;
+  const preparingPreview = workflow.phase === "preview-preparation";
+  const acquisitionActive = workflow.phase === "acquisition-running";
   const activeDelivery = useRef<{
     id: string;
     unlisten?: () => void;
@@ -110,15 +295,7 @@ export default function App({
   function chooseAnotherSource() {
     activeDelivery.current?.unlisten?.();
     activeDelivery.current = null;
-    setSourceMode(null);
-    setReadySource(null);
-    setDeliverySource(null);
-    setTransferPreview(null);
-    setTransferProgress(null);
-    setTransferResult(null);
-    setTransferError(null);
-    setPreparingPreview(false);
-    setAcquisitionActive(false);
+    dispatch({ type: "source.reset" });
   }
 
   async function prepareFileTransfer(selection: FileSourceSelection) {
@@ -127,18 +304,19 @@ export default function App({
       path: selection.path,
       format: selection.preview.format,
     };
-    setReadySource({ kind: "file", selection });
-    setDeliverySource(source);
-    setPreparingPreview(true);
-    setTransferError(null);
+    dispatch({ type: "file.preview-started", selection, source });
     try {
-      setTransferPreview(await transferApi.previewTransfer(source));
+      dispatch({
+        type: "preview.ready",
+        preview: await transferApi.previewTransfer(source),
+        source,
+      });
     } catch {
-      setTransferError(
-        "The transfer preview could not be prepared. Choose the file again.",
-      );
-    } finally {
-      setPreparingPreview(false);
+      dispatch({
+        type: "preview.failed",
+        message:
+          "The transfer preview could not be prepared. Choose the file again.",
+      });
     }
   }
 
@@ -149,7 +327,7 @@ export default function App({
   ) {
     if (event.deliveryId !== deliveryId) return;
     if (event.type === "progress") {
-      setTransferProgress(event.progress);
+      dispatch({ type: "delivery.progressed", progress: event.progress });
       return;
     }
 
@@ -163,23 +341,30 @@ export default function App({
       terminalDeliveries.current.add(deliveryId);
     }
     activeDelivery.current = null;
-    setTransferProgress(null);
-    if (event.type === "completed" || event.type === "cancelled") {
-      setTransferResult(event.result);
+    if (event.type === "completed") {
+      dispatch({ type: "delivery.completed", result: event.result });
+      return;
+    }
+    if (event.type === "cancelled") {
+      dispatch({ type: "delivery.cancelled", result: event.result });
       return;
     }
 
-    setTransferPreview(preview);
-    setTransferError(deliveryFailureMessage(event.code));
+    dispatch({
+      type: "delivery.failed",
+      preview,
+      message: deliveryFailureMessage(event.code),
+    });
   }
 
-  async function startDelivery() {
+  async function startDelivery(retry = false) {
     if (!deliverySource || !transferPreview || activeDelivery.current) return;
     const deliveryId = createDeliveryId();
     const preview = transferPreview;
-    setTransferError(null);
-    setTransferResult(null);
-    setTransferProgress({ completed: 0, total: preview.pending });
+    dispatch({
+      type: retry ? "delivery.retry-started" : "delivery.started",
+      preview,
+    });
     activeDelivery.current = { id: deliveryId };
     try {
       const unlisten = await transferApi.startDelivery(
@@ -201,10 +386,11 @@ export default function App({
       }
     } catch {
       activeDelivery.current = null;
-      setTransferProgress(null);
-      setTransferError(
-        "Delivery could not be started. Check the connection and try again.",
-      );
+      dispatch({
+        type: "delivery.start-failed",
+        message:
+          "Delivery could not be started. Check the connection and try again.",
+      });
     }
   }
 
@@ -214,9 +400,11 @@ export default function App({
     try {
       await transferApi.cancelDelivery(deliveryId);
     } catch {
-      setTransferError(
-        "The cancellation request could not be sent. Delivery will stop as soon as possible.",
-      );
+      dispatch({
+        type: "delivery.cancellation-request-failed",
+        message:
+          "The cancellation request could not be sent. Delivery will stop as soon as possible.",
+      });
     }
   }
 
@@ -271,7 +459,12 @@ export default function App({
         {health && !showSettings && !destination ? (
           <DestinationSetup
             desktopApi={desktopApi}
-            onReady={setDestination}
+            onReady={(nextDestination) =>
+              dispatch({
+                type: "destination.connected",
+                destination: nextDestination,
+              })
+            }
           />
         ) : null}
       </section>
@@ -285,10 +478,20 @@ export default function App({
             {destination.serverUrl}. Choose the source for this transfer.
           </p>
           <div className="source-choice-actions">
-            <button type="button" onClick={() => setSourceMode("x")}>
+            <button
+              type="button"
+              onClick={() =>
+                dispatch({ type: "source.mode-selected", mode: "x" })
+              }
+            >
               Use my X Source
             </button>
-            <button type="button" onClick={() => setSourceMode("file")}>
+            <button
+              type="button"
+              onClick={() =>
+                dispatch({ type: "source.mode-selected", mode: "file" })
+              }
+            >
               Use a bookmark file
             </button>
           </div>
@@ -302,7 +505,9 @@ export default function App({
       !readySource ? (
         <XSourceSetup
           api={desktopApi}
-          onSelected={(source) => setReadySource({ kind: "x", source })}
+          onSelected={(source) =>
+            dispatch({ type: "source.x-selected", source })
+          }
           onChooseAnotherSource={chooseAnotherSource}
         />
       ) : null}
@@ -333,11 +538,22 @@ export default function App({
             userName: destination.displayName,
           }}
           onPreview={(preview) => {
-            setDeliverySource({ kind: "x" });
-            setTransferPreview(preview);
-            setTransferError(null);
+            dispatch({
+              type: "preview.ready",
+              preview,
+              source: { kind: "x" },
+            });
           }}
-          onRunningChange={setAcquisitionActive}
+          onEvent={(event) => {
+            if (event.type === "cancelled") {
+              dispatch({ type: "acquisition.cancelled" });
+            } else if (event.type === "failed") {
+              dispatch({ type: "acquisition.failed" });
+            }
+          }}
+          onRunningChange={(running) =>
+            dispatch({ type: "acquisition.running-changed", running })
+          }
           onChooseAnotherSource={chooseAnotherSource}
         />
       ) : null}
@@ -366,7 +582,7 @@ export default function App({
         <TransferReview
           phase="result"
           result={transferResult}
-          onRetryPending={() => void startDelivery()}
+          onRetryPending={() => void startDelivery(true)}
           onChooseAnotherSource={chooseAnotherSource}
         />
       ) : health &&
@@ -410,13 +626,7 @@ export default function App({
               destination
                 ? async () => {
                     await desktopApi.forgetDestination();
-                    setDestination(null);
-                    setSourceMode(null);
-                    setReadySource(null);
-                    setDeliverySource(null);
-                    setTransferPreview(null);
-                    setTransferProgress(null);
-                    setTransferResult(null);
+                    dispatch({ type: "destination.forgotten" });
                     setShowSettings(false);
                   }
                 : undefined
