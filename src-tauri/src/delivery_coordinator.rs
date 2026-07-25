@@ -110,9 +110,10 @@ pub struct DeliveryProgressSummary {
     pub total: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryResult {
+    pub delivered: usize,
     pub created: usize,
     pub existing: usize,
     pub retried: usize,
@@ -123,6 +124,7 @@ pub struct DeliveryResult {
 impl From<&DeliveryTotals> for DeliveryResult {
     fn from(totals: &DeliveryTotals) -> Self {
         Self {
+            delivered: totals.delivered,
             created: totals.created,
             existing: totals.existing,
             retried: totals.retried,
@@ -168,6 +170,7 @@ pub enum DeliveryTerminalEvent {
         #[serde(rename = "deliveryId")]
         delivery_id: DeliveryId,
         code: DeliveryFailureCode,
+        result: DeliveryResult,
     },
 }
 
@@ -347,6 +350,7 @@ impl DeliveryRun {
                     DeliveryTerminalEvent::Failed {
                         delivery_id: self.delivery_id.clone(),
                         code: DeliveryFailureCode::DeliveryFailed,
+                        result: DeliveryResult::default(),
                     },
                 );
             }
@@ -366,6 +370,7 @@ impl DeliveryRun {
                     DeliveryTerminalEvent::Failed {
                         delivery_id: self.delivery_id.clone(),
                         code: DeliveryFailureCode::Unexpected,
+                        result: DeliveryResult::default(),
                     },
                 );
             }
@@ -385,6 +390,7 @@ impl DeliveryRun {
                     DeliveryTerminalEvent::Failed {
                         delivery_id: self.delivery_id.clone(),
                         code: failure_code(error),
+                        result: DeliveryResult::default(),
                     },
                 );
             }
@@ -397,17 +403,18 @@ impl DeliveryRun {
         } else {
             RunStatus::Completed
         };
+        let result = DeliveryResult::from(&report.totals);
         if adapter.finish_run(run_status).is_err() {
             return publish_terminal(
                 self.events.as_ref(),
                 DeliveryTerminalEvent::Failed {
                     delivery_id: self.delivery_id.clone(),
                     code: DeliveryFailureCode::DeliveryFailed,
+                    result,
                 },
             );
         }
 
-        let result = DeliveryResult::from(&report.totals);
         let terminal = if report.totals.cancelled > 0 {
             DeliveryTerminalEvent::Cancelled {
                 delivery_id: self.delivery_id.clone(),
@@ -417,6 +424,7 @@ impl DeliveryRun {
             DeliveryTerminalEvent::Failed {
                 delivery_id: self.delivery_id.clone(),
                 code,
+                result,
             }
         } else {
             DeliveryTerminalEvent::Completed {

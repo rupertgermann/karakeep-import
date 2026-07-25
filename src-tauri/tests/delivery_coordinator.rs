@@ -302,13 +302,14 @@ fn progress_and_completion_events_expose_only_aggregate_safe_totals() {
     assert_eq!(delivery_id.as_str(), "delivery-complete");
     assert_eq!(
         (
+            result.delivered,
             result.created,
             result.existing,
             result.retried,
             result.failed,
             result.cancelled,
         ),
-        (1, 0, 0, 0, 0)
+        (1, 1, 0, 0, 0, 0)
     );
     assert_eq!(api.ensure_calls.load(Ordering::SeqCst), 1);
 
@@ -325,6 +326,7 @@ fn progress_and_completion_events_expose_only_aggregate_safe_totals() {
                 "type": "completed",
                 "deliveryId": "delivery-complete",
                 "result": {
+                    "delivered": 1,
                     "created": 1,
                     "existing": 0,
                     "retried": 0,
@@ -472,6 +474,14 @@ fn delivery_http_failure_classes_reach_the_frontend_terminal_contract() {
             DeliveryTerminalEvent::Failed {
                 delivery_id: id,
                 code,
+                result: delivery_coordinator::DeliveryResult {
+                    delivered: 0,
+                    created: 0,
+                    existing: 0,
+                    retried: 0,
+                    failed: 1,
+                    cancelled: 0,
+                },
             }
         );
         let serialized = serde_json::to_string(&events.events()).expect("events serialize");
@@ -539,6 +549,7 @@ fn a_ledger_failure_emits_only_the_typed_failed_contract() {
         DeliveryTerminalEvent::Failed {
             delivery_id: delivery_id("delivery-failure"),
             code: DeliveryFailureCode::DeliveryFailed,
+            result: delivery_coordinator::DeliveryResult::default(),
         }
     );
     assert_eq!(
@@ -546,7 +557,15 @@ fn a_ledger_failure_emits_only_the_typed_failed_contract() {
         serde_json::json!([{
             "type": "failed",
             "deliveryId": "delivery-failure",
-            "code": "delivery-failed"
+            "code": "delivery-failed",
+            "result": {
+                "delivered": 0,
+                "created": 0,
+                "existing": 0,
+                "retried": 0,
+                "failed": 0,
+                "cancelled": 0
+            }
         }])
     );
 }
@@ -598,13 +617,14 @@ fn a_later_run_resumes_pending_records_without_exposing_failure_details() {
     };
     assert_eq!(
         (
+            result.delivered,
             result.created,
             result.existing,
             result.retried,
             result.failed,
             result.cancelled,
         ),
-        (1, 0, 1, 0, 0)
+        (1, 1, 0, 1, 0, 0)
     );
     assert_eq!(
         coordinator
