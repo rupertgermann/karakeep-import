@@ -252,6 +252,25 @@ async function validateBridgeSources(resources) {
   }
 }
 
+async function validateNoBridgeCliShims(resources) {
+  const shims = path.join(
+    resources,
+    "fieldtheory",
+    "bridge",
+    "node_modules",
+    ".bin",
+  );
+  try {
+    await stat(shims);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  throw new Error(`Packaged Field Theory CLI shims are forbidden: ${shims}`);
+}
+
 function isPlaceholderCredential(value) {
   return /^(?:<[^>]+>|\$\{[^}]+\}|(?:replace|example|sample|dummy|fake|test|canary|your|redacted|not-a-real)(?:[-_ ].*)?)$/i.test(
     value.trim(),
@@ -545,6 +564,7 @@ async function validateInputs(
     }
   }
   await requireNonempty(path.join(root, "dist", "index.html"), "frontend build");
+  await validateNoBridgeCliShims(resources);
   await validateBridgeSources(resources);
   await validateNoReleaseWorkflows(root);
 

@@ -485,6 +485,39 @@ test("runtime download code in packaged bridge sources is rejected", async () =>
   assert.match(result.stderr, /Undeclared runtime download code/);
 });
 
+test("prepared Field Theory CLI shims are rejected from packaged resources", async () => {
+  const root = await createRepositoryFixture();
+  await mkdir(
+    path.join(
+      root,
+      "src-tauri",
+      "resources",
+      "fieldtheory",
+      "bridge",
+      "node_modules",
+      ".bin",
+    ),
+    { recursive: true },
+  );
+  await writeFile(
+    path.join(
+      root,
+      "src-tauri",
+      "resources",
+      "fieldtheory",
+      "bridge",
+      "node_modules",
+      ".bin",
+      "fieldtheory",
+    ),
+    "../fieldtheory/bin/ft.mjs\n",
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.match(result.stderr, /Packaged Field Theory CLI shims are forbidden/);
+});
+
 test("a modified prepared Field Theory package is rejected", async () => {
   const root = await createRepositoryFixture();
   await writeFile(

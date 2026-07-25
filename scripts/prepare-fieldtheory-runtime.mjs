@@ -213,6 +213,10 @@ async function prepareBridge() {
     ],
     path.join(destination, "bridge"),
   );
+  await rm(path.join(destination, "bridge", "node_modules", ".bin"), {
+    recursive: true,
+    force: true,
+  });
 }
 
 const manifest = await readBundleManifest(repositoryRoot);
