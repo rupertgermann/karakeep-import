@@ -1,5 +1,9 @@
 use serde::Serialize;
 
+pub mod domain;
+pub mod ledger;
+pub mod private_data;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HealthResponse {
