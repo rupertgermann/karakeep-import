@@ -279,7 +279,7 @@ describe("TransferReview", () => {
     );
 
     expect(screen.getByLabelText("Transfer results")).toHaveTextContent(
-      "Delivered7Existing2Retried1Failed1Cancelled1",
+      "Created7Existing2Retried1Failed1Cancelled1",
     );
   });
 
