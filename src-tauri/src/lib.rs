@@ -15,6 +15,7 @@ pub mod ledger;
 pub mod private_data;
 pub mod redaction;
 pub mod settings;
+pub mod transfer;
 pub mod updates;
 pub mod versions;
 

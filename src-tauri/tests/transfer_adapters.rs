@@ -1,9 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-pub use karakeep_transfer_lib::{delivery, domain, file_source, karakeep, ledger};
-
-#[path = "../src/transfer.rs"]
-mod transfer;
+use karakeep_transfer_lib::{delivery, domain, file_source, karakeep, ledger, transfer};
 
 use delivery::{
     DeliveryLedger as DeliveryLedgerContract, DeliverySource, LedgerStatus, PendingDelivery,
