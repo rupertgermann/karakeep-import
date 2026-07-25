@@ -102,6 +102,12 @@ npm run tauri build
 
 macOS and Windows installers are built locally on their respective operating
 systems. This project does not use GitHub Actions for desktop builds.
+Before packaging, generate and inspect the deterministic platform staging
+inputs described in
+[`docs/local-release-inputs.md`](./docs/local-release-inputs.md). The staging
+gate checks the pinned runtimes and dependency inventory, rejects missing
+resources, runtime-download code, and secret-like values, and emits release
+metadata, notices, and SHA-256 checksums.
 
 ## Use the graphical interface
 
