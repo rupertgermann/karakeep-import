@@ -4,11 +4,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::private_data::{DeleteLocalTransferData, PrivateTransferData, ReplaceXSource};
+use crate::{
+    fieldtheory::X_SOURCE_DATA_DIRECTORY,
+    private_data::{DeleteLocalTransferData, PrivateTransferData, ReplaceXSource},
+};
 
 const LEDGER_FILE: &str = "delivery-ledger.sqlite3";
-const SNAPSHOT_FILE: &str = "field-theory/bookmarks.jsonl";
-const ACQUISITION_STATE_DIRECTORY: &str = "field-theory/acquisition";
+const SNAPSHOT_FILE: &str = "bookmarks.jsonl";
+const ACQUISITION_STATE_DIRECTORY: &str = "acquisition";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 pub enum ReplaceXSourceConfirmation {
@@ -56,8 +59,12 @@ impl SettingsService {
             &data_directory,
             PrivateTransferData::new(
                 data_directory.join(LEDGER_FILE),
-                data_directory.join(SNAPSHOT_FILE),
-                data_directory.join(ACQUISITION_STATE_DIRECTORY),
+                data_directory
+                    .join(X_SOURCE_DATA_DIRECTORY)
+                    .join(SNAPSHOT_FILE),
+                data_directory
+                    .join(X_SOURCE_DATA_DIRECTORY)
+                    .join(ACQUISITION_STATE_DIRECTORY),
             ),
         )
     }

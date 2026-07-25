@@ -1,7 +1,7 @@
 use std::fs;
 
 use karakeep_transfer_lib::{
-    private_data::{DeleteLocalTransferData, PrivateTransferData, ReplaceXSource},
+    private_data::{DeleteLocalTransferData, ReplaceXSource},
     settings::SettingsService,
 };
 use tempfile::tempdir;
@@ -9,15 +9,14 @@ use tempfile::tempdir;
 fn populated_service() -> (tempfile::TempDir, SettingsService) {
     let directory = tempdir().expect("temporary directory");
     let ledger = directory.path().join("delivery-ledger.sqlite3");
-    let snapshot = directory.path().join("field-theory/bookmarks.jsonl");
-    let acquisition = directory.path().join("field-theory/acquisition");
+    let snapshot = directory.path().join("fieldtheory/bookmarks.jsonl");
+    let acquisition = directory.path().join("fieldtheory/acquisition");
     fs::create_dir_all(&acquisition).expect("acquisition directory");
     fs::write(&ledger, b"ledger").expect("ledger");
     fs::write(&snapshot, b"snapshot").expect("snapshot");
     fs::write(acquisition.join("cursor"), b"state").expect("acquisition state");
 
-    let private_data = PrivateTransferData::new(&ledger, &snapshot, &acquisition);
-    let service = SettingsService::new(directory.path(), private_data);
+    let service = SettingsService::from_app_data_dir(directory.path());
     (directory, service)
 }
 
@@ -53,9 +52,9 @@ fn replacing_x_source_removes_only_snapshot_and_acquisition_state() {
         (
             directory
                 .path()
-                .join("field-theory/bookmarks.jsonl")
+                .join("fieldtheory/bookmarks.jsonl")
                 .exists(),
-            directory.path().join("field-theory/acquisition").exists(),
+            directory.path().join("fieldtheory/acquisition").exists(),
             directory.path().join("delivery-ledger.sqlite3").exists(),
         ),
         (false, false, true)
@@ -74,9 +73,9 @@ fn confirmed_local_data_deletion_removes_snapshot_state_and_ledger() {
         (
             directory
                 .path()
-                .join("field-theory/bookmarks.jsonl")
+                .join("fieldtheory/bookmarks.jsonl")
                 .exists(),
-            directory.path().join("field-theory/acquisition").exists(),
+            directory.path().join("fieldtheory/acquisition").exists(),
             directory.path().join("delivery-ledger.sqlite3").exists(),
         ),
         (false, false, false)

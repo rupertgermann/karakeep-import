@@ -1453,15 +1453,15 @@ mod tests {
     #[test]
     fn private_data_summary_is_available_through_the_desktop_contract() {
         let directory = tempdir().expect("temporary app data");
-        fs::create_dir_all(directory.path().join("field-theory/acquisition"))
+        fs::create_dir_all(directory.path().join("fieldtheory/acquisition"))
             .expect("acquisition directory");
         fs::write(
-            directory.path().join("field-theory/bookmarks.jsonl"),
+            directory.path().join("fieldtheory/bookmarks.jsonl"),
             b"snapshot",
         )
         .expect("snapshot");
         fs::write(
-            directory.path().join("field-theory/acquisition/cursor"),
+            directory.path().join("fieldtheory/acquisition/cursor"),
             b"state",
         )
         .expect("acquisition state");
@@ -1506,10 +1506,10 @@ mod tests {
     #[test]
     fn source_replacement_confirmation_runs_through_the_desktop_contract() {
         let directory = tempdir().expect("temporary app data");
-        fs::create_dir_all(directory.path().join("field-theory/acquisition"))
+        fs::create_dir_all(directory.path().join("fieldtheory/acquisition"))
             .expect("acquisition directory");
         fs::write(
-            directory.path().join("field-theory/bookmarks.jsonl"),
+            directory.path().join("fieldtheory/bookmarks.jsonl"),
             b"snapshot",
         )
         .expect("snapshot");
@@ -1525,9 +1525,9 @@ mod tests {
             (
                 directory
                     .path()
-                    .join("field-theory/bookmarks.jsonl")
+                    .join("fieldtheory/bookmarks.jsonl")
                     .exists(),
-                directory.path().join("field-theory/acquisition").exists(),
+                directory.path().join("fieldtheory/acquisition").exists(),
                 directory.path().join("delivery-ledger.sqlite3").exists(),
             ),
             (false, false, true)
@@ -1786,10 +1786,10 @@ mod tests {
     #[test]
     fn local_deletion_confirmation_runs_through_the_desktop_contract() {
         let directory = tempdir().expect("temporary app data");
-        fs::create_dir_all(directory.path().join("field-theory/acquisition"))
+        fs::create_dir_all(directory.path().join("fieldtheory/acquisition"))
             .expect("acquisition directory");
         fs::write(
-            directory.path().join("field-theory/bookmarks.jsonl"),
+            directory.path().join("fieldtheory/bookmarks.jsonl"),
             b"snapshot",
         )
         .expect("snapshot");
@@ -1805,9 +1805,9 @@ mod tests {
             (
                 directory
                     .path()
-                    .join("field-theory/bookmarks.jsonl")
+                    .join("fieldtheory/bookmarks.jsonl")
                     .exists(),
-                directory.path().join("field-theory/acquisition").exists(),
+                directory.path().join("fieldtheory/acquisition").exists(),
                 directory.path().join("delivery-ledger.sqlite3").exists(),
             ),
             (false, false, false)

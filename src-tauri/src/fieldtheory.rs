@@ -16,6 +16,7 @@ pub use acquisition::*;
 
 const PROTOCOL_VERSION: u8 = 1;
 const GENERIC_FAILURE: &str = "The Field Theory bridge could not complete the request.";
+pub const X_SOURCE_DATA_DIRECTORY: &str = "fieldtheory";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,7 +158,7 @@ impl FieldTheoryState {
         Self {
             runner: BridgeRunner::bundled(resource_dir),
             acquisitions: AcquisitionSupervisor::default(),
-            snapshots: SnapshotStore::new(app_data_dir.join("fieldtheory")),
+            snapshots: SnapshotStore::new(app_data_dir.join(X_SOURCE_DATA_DIRECTORY)),
             ledger_path: app_data_dir.join("delivery-ledger.sqlite3"),
         }
     }
