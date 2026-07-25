@@ -3,9 +3,17 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::Mutex,
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+
+use crate::{domain::DestinationIdentity, ledger::DeliveryLedger};
+
+#[path = "fieldtheory_acquisition.rs"]
+mod acquisition;
+
+pub use acquisition::*;
 
 const PROTOCOL_VERSION: u8 = 1;
 const GENERIC_FAILURE: &str = "The Field Theory bridge could not complete the request.";
@@ -140,17 +148,59 @@ pub struct BridgeRunner {
 
 pub struct FieldTheoryState {
     runner: BridgeRunner,
+    acquisitions: AcquisitionSupervisor,
+    snapshots: SnapshotStore,
+    ledger_path: PathBuf,
+    ledger: Mutex<Option<DeliveryLedger>>,
 }
 
 impl FieldTheoryState {
-    pub fn bundled(resource_dir: &Path) -> Self {
+    pub fn bundled(resource_dir: &Path, app_data_dir: &Path) -> Self {
         Self {
             runner: BridgeRunner::bundled(resource_dir),
+            acquisitions: AcquisitionSupervisor::default(),
+            snapshots: SnapshotStore::new(app_data_dir.join("fieldtheory")),
+            ledger_path: app_data_dir.join("delivery-ledger.sqlite3"),
+            ledger: Mutex::new(None),
         }
     }
 
     pub fn runner(&self) -> &BridgeRunner {
         &self.runner
+    }
+
+    pub fn start_acquisition<F>(
+        &self,
+        request: XAcquisitionRequest,
+        emit: F,
+    ) -> Result<(), AcquisitionStartError>
+    where
+        F: Fn(AcquisitionEvent) + Send + Sync + 'static,
+    {
+        self.acquisitions
+            .start(&self.runner, request, self.snapshots.clone(), emit)
+    }
+
+    pub fn cancel_acquisition(&self, acquisition_id: &str) -> Result<(), AcquisitionStartError> {
+        self.acquisitions.cancel(acquisition_id)
+    }
+
+    pub fn preview(
+        &self,
+        destination: DestinationPreview,
+    ) -> Result<XTransferPreview, SnapshotPreviewError> {
+        let identity = DestinationIdentity::new(&destination.server_url, &destination.user_id)
+            .map_err(|_| SnapshotPreviewError)?;
+        let mut ledger = self.ledger.lock().map_err(|_| SnapshotPreviewError)?;
+        if ledger.is_none() {
+            *ledger =
+                Some(DeliveryLedger::open(&self.ledger_path).map_err(|_| SnapshotPreviewError)?);
+        }
+        self.snapshots.preview(
+            ledger.as_ref().ok_or(SnapshotPreviewError)?,
+            &identity,
+            destination,
+        )
     }
 }
 

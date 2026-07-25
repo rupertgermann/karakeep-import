@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+
+import type {
+  DestinationSummary as TransferDestinationSummary,
+  TransferPreview,
+} from "./workflow";
 
 export interface HealthResponse {
   status: "ok";
@@ -101,6 +107,52 @@ export interface DestinationApi {
   forgetDestination(): Promise<void>;
 }
 
+export interface XAcquisitionRequest {
+  acquisitionId: string;
+  source: {
+    browserId: string;
+    profileId: string;
+  };
+}
+
+export type AcquisitionEvent =
+  | {
+      type: "progress";
+      acquisitionId: string;
+      phase: "bookmarks" | "folders";
+      completed: number;
+      total: number | null;
+    }
+  | {
+      type: "completed";
+      acquisitionId: string;
+      total: number;
+      added: number;
+      folders: string[];
+    }
+  | {
+      type: "cancelled";
+      acquisitionId: string;
+    }
+  | {
+      type: "failed";
+      acquisitionId: string;
+      code: "xCompatibility" | "sourceUnavailable" | "unexpected";
+      message: string;
+      previousSnapshotAvailable: boolean;
+    };
+
+export interface XAcquisitionApi {
+  startXAcquisition(
+    request: XAcquisitionRequest,
+    onEvent: (event: AcquisitionEvent) => void,
+  ): Promise<UnlistenFn>;
+  cancelXAcquisition(acquisitionId: string): Promise<void>;
+  previewXSnapshot(
+    destination: TransferDestinationSummary,
+  ): Promise<TransferPreview>;
+}
+
 export interface DesktopApi extends DestinationApi, XSourceApi {
   health(): Promise<HealthResponse>;
 }
@@ -131,4 +183,28 @@ export const desktopApi: DesktopApi & FileSourceApi = {
   connectDestination: (input) =>
     invoke<DestinationSummary>("connect_destination", { input }),
   forgetDestination: () => invoke<void>("forget_destination"),
+};
+
+export const xAcquisitionApi: XAcquisitionApi = {
+  startXAcquisition: async (request, onEvent) => {
+    const unlisten = await listen<AcquisitionEvent>(
+      "x-acquisition",
+      ({ payload }) => {
+        if (payload.acquisitionId === request.acquisitionId) {
+          onEvent(payload);
+        }
+      },
+    );
+    try {
+      await invoke<void>("start_x_acquisition", { request });
+      return unlisten;
+    } catch (error) {
+      unlisten();
+      throw error;
+    }
+  },
+  cancelXAcquisition: (acquisitionId) =>
+    invoke<void>("cancel_x_acquisition", { acquisitionId }),
+  previewXSnapshot: (destination) =>
+    invoke<TransferPreview>("preview_x_snapshot", { destination }),
 };

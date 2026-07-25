@@ -167,11 +167,12 @@ fn map_field_theory(
     url: String,
 ) -> BookmarkPreview {
     let exported_tags = string_array(record, "tags");
+    let folder_names = string_array(record, "folderNames");
     let folders = deduplicate_tags(
         exported_tags
-            .iter()
-            .filter(|tag| !tag.eq_ignore_ascii_case("fieldtheory"))
-            .cloned(),
+            .into_iter()
+            .chain(folder_names)
+            .filter(|tag| !tag.eq_ignore_ascii_case("fieldtheory")),
     );
     let tags =
         deduplicate_tags(std::iter::once("twitter".to_string()).chain(folders.iter().cloned()));

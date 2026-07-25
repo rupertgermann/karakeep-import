@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 
 use serde::Serialize;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub mod bookmark;
 pub mod delivery;
@@ -24,8 +24,8 @@ use destination::{
 };
 
 use fieldtheory::{
-    BridgeCommand, BridgeRequest, DiscoveryResponse, FieldTheoryState, SelectedXSource,
-    XSourceSelection,
+    BridgeCommand, BridgeRequest, DestinationPreview, DiscoveryResponse, FieldTheoryState,
+    SelectedXSource, XAcquisitionRequest, XSourceSelection, XTransferPreview,
 };
 
 #[derive(Debug, Serialize)]
@@ -176,13 +176,50 @@ fn delete_local_transfer_data(
         .map_err(|_| "local transfer data could not be deleted")
 }
 
+#[tauri::command]
+fn start_x_acquisition<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, FieldTheoryState>,
+    request: XAcquisitionRequest,
+) -> Result<(), String> {
+    state
+        .start_acquisition(request, move |event| {
+            let _ = app.emit("x-acquisition", event);
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cancel_x_acquisition(
+    state: tauri::State<'_, FieldTheoryState>,
+    acquisition_id: String,
+) -> Result<(), String> {
+    state
+        .cancel_acquisition(&acquisition_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn preview_x_snapshot(
+    state: tauri::State<'_, FieldTheoryState>,
+    destination: DestinationPreview,
+) -> Result<XTransferPreview, String> {
+    state
+        .preview(destination)
+        .map_err(|error| error.to_string())
+}
+
 fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .plugin(tauri_plugin_dialog::init())
         .manage(diagnostics::DiagnosticsStore::default())
         .setup(|app| {
             let resource_dir = app.path().resource_dir()?;
-            app.manage(FieldTheoryState::bundled(&resource_dir));
+            let app_data_directory = app.path().app_data_dir()?;
+            app.manage(FieldTheoryState::bundled(
+                &resource_dir,
+                &app_data_directory,
+            ));
             let settings_path = app.path().app_config_dir()?.join("destination.json");
             let service = DestinationService::new(
                 ReqwestKarakeepClient::new(),
@@ -190,7 +227,6 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
                 FileDestinationSettings::new(settings_path),
             );
             app.manage(DestinationState(Arc::new(service)));
-            let app_data_directory = app.path().app_data_dir()?;
             app.manage(settings::SettingsService::from_app_data_dir(
                 app_data_directory,
             ));
@@ -209,7 +245,10 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
             forget_destination,
             inspect_private_transfer_data,
             replace_x_source,
-            delete_local_transfer_data
+            delete_local_transfer_data,
+            start_x_acquisition,
+            cancel_x_acquisition,
+            preview_x_snapshot
         ])
 }
 

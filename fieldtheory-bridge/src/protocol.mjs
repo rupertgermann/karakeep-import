@@ -1,4 +1,8 @@
 import { discoverSources, selectSource } from "./source-discovery.mjs";
+import {
+  AcquisitionError,
+  acquireSnapshot,
+} from "./acquisition.mjs";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -11,6 +15,18 @@ const COMMAND_FIELDS = {
     "consent",
     "source",
   ]),
+  acquireSnapshot: new Set([
+    "protocolVersion",
+    "requestId",
+    "command",
+    "source",
+  ]),
+  cancelAcquisition: new Set([
+    "protocolVersion",
+    "requestId",
+    "command",
+    "acquisitionId",
+  ]),
 };
 
 const safeRequestId = (value) =>
@@ -19,12 +35,16 @@ const safeRequestId = (value) =>
     : "unknown";
 
 function errorResponse(requestId, code, message) {
-  return JSON.stringify({
+  return JSON.stringify(errorMessage(requestId, code, message));
+}
+
+function errorMessage(requestId, code, message) {
+  return {
     protocolVersion: PROTOCOL_VERSION,
     requestId,
     type: "error",
     error: { code, message },
-  });
+  };
 }
 
 function hasOnlyFields(value, fields) {
@@ -45,61 +65,112 @@ function validSource(value) {
   );
 }
 
-export async function handleLine(
-  line,
-  handlers = { discoverSources, selectSource },
-) {
+function decodeLine(line) {
   let request;
   try {
     request = JSON.parse(line);
   } catch {
-    return errorResponse("unknown", "invalid_json", "Request is not valid JSON.");
+    return {
+      error: errorMessage(
+        "unknown",
+        "invalid_json",
+        "Request is not valid JSON.",
+      ),
+    };
   }
 
   if (request === null || typeof request !== "object" || Array.isArray(request)) {
-    return errorResponse(
-      "unknown",
-      "invalid_request",
-      "Request must be a JSON object.",
-    );
+    return {
+      error: errorMessage(
+        "unknown",
+        "invalid_request",
+        "Request must be a JSON object.",
+      ),
+    };
   }
 
   const requestId = safeRequestId(request.requestId);
   if (request.protocolVersion !== PROTOCOL_VERSION) {
-    return errorResponse(
-      requestId,
-      "unsupported_protocol",
-      "Unsupported bridge protocol version.",
-    );
+    return {
+      error: errorMessage(
+        requestId,
+        "unsupported_protocol",
+        "Unsupported bridge protocol version.",
+      ),
+    };
   }
   if (requestId === "unknown") {
-    return errorResponse(
-      requestId,
-      "invalid_request",
-      "Request identifier is invalid.",
-    );
+    return {
+      error: errorMessage(
+        requestId,
+        "invalid_request",
+        "Request identifier is invalid.",
+      ),
+    };
   }
 
   const allowedFields = COMMAND_FIELDS[request.command];
   if (!allowedFields) {
-    return errorResponse(
-      requestId,
-      "unsupported_command",
-      "Unsupported bridge command.",
-    );
+    return {
+      error: errorMessage(
+        requestId,
+        "unsupported_command",
+        "Unsupported bridge command.",
+      ),
+    };
   }
   if (!hasOnlyFields(request, allowedFields)) {
-    return errorResponse(
-      requestId,
-      "invalid_request",
-      "Request contains unsupported fields.",
-    );
+    return {
+      error: errorMessage(
+        requestId,
+        "invalid_request",
+        "Request contains unsupported fields.",
+      ),
+    };
   }
-  if (request.command === "selectSource" && !validSource(request.source)) {
+  if (
+    ["selectSource", "acquireSnapshot"].includes(request.command) &&
+    !validSource(request.source)
+  ) {
+    return {
+      error: errorMessage(
+        requestId,
+        "invalid_request",
+        "Source selection is invalid.",
+      ),
+    };
+  }
+  if (
+    request.command === "cancelAcquisition" &&
+    safeRequestId(request.acquisitionId) === "unknown"
+  ) {
+    return {
+      error: errorMessage(
+        requestId,
+        "invalid_request",
+        "Acquisition identifier is invalid.",
+      ),
+    };
+  }
+
+  return { request };
+}
+
+export async function handleLine(
+  line,
+  handlers = { discoverSources, selectSource },
+) {
+  const decoded = decodeLine(line);
+  if (decoded.error) {
+    return JSON.stringify(decoded.error);
+  }
+  const { request } = decoded;
+  const requestId = request.requestId;
+  if (!["discoverSources", "selectSource"].includes(request.command)) {
     return errorResponse(
       requestId,
-      "invalid_request",
-      "Source selection is invalid.",
+      "session_required",
+      "This command requires a bridge session.",
     );
   }
 
@@ -135,4 +206,136 @@ export async function handleLine(
           : "bridge_error";
     return errorResponse(requestId, code, message);
   }
+}
+
+function acquisitionError(error) {
+  if (error instanceof AcquisitionError && error.code === "cancelled") {
+    return { type: "cancelled" };
+  }
+  if (error instanceof AcquisitionError && error.code === "x_compatibility") {
+    return {
+      type: "error",
+      code: "x_compatibility",
+      message:
+        "X bookmark acquisition is temporarily incompatible. A Karakeep Transfer update may be required.",
+    };
+  }
+  if (
+    error instanceof AcquisitionError &&
+    error.code === "source_unavailable"
+  ) {
+    return {
+      type: "error",
+      code: "source_unavailable",
+      message: "The selected browser profile is no longer available.",
+    };
+  }
+  return {
+    type: "error",
+    code: "bridge_error",
+    message: "The Field Theory bridge could not complete the request.",
+  };
+}
+
+export function createBridgeSession(
+  handlers = { acquireSnapshot },
+  emit = (line) => process.stdout.write(`${line}\n`),
+) {
+  let active;
+  const send = (message) => emit(JSON.stringify(message));
+
+  const handleSessionLine = (line) => {
+    const decoded = decodeLine(line);
+    if (decoded.error) {
+      send(decoded.error);
+      return;
+    }
+    const { request } = decoded;
+
+    if (["discoverSources", "selectSource"].includes(request.command)) {
+      void handleLine(line).then(emit);
+      return;
+    }
+
+    if (request.command === "cancelAcquisition") {
+      if (!active || active.requestId !== request.acquisitionId) {
+        send(
+          errorMessage(
+            request.requestId,
+            "operation_not_active",
+            "The requested acquisition is not running.",
+          ),
+        );
+        return;
+      }
+      active.controller.abort();
+      send({
+        protocolVersion: PROTOCOL_VERSION,
+        requestId: request.requestId,
+        type: "result",
+        command: "cancelAcquisition",
+        data: { acquisitionId: request.acquisitionId },
+      });
+      return;
+    }
+
+    if (active) {
+      send(
+        errorMessage(
+          request.requestId,
+          "operation_active",
+          "Another acquisition is already running.",
+        ),
+      );
+      return;
+    }
+
+    const controller = new AbortController();
+    active = { requestId: request.requestId, controller };
+    void Promise.resolve(
+      handlers.acquireSnapshot({
+        source: request.source,
+        dataDir: process.env.FT_DATA_DIR,
+        signal: controller.signal,
+        onProgress: (data) =>
+          send({
+            protocolVersion: PROTOCOL_VERSION,
+            requestId: request.requestId,
+            type: "progress",
+            command: "acquireSnapshot",
+            data,
+          }),
+      }),
+    )
+      .then((data) =>
+        send({
+          protocolVersion: PROTOCOL_VERSION,
+          requestId: request.requestId,
+          type: "result",
+          command: "acquireSnapshot",
+          data,
+        }),
+      )
+      .catch((error) => {
+        const safe = acquisitionError(error);
+        if (safe.type === "cancelled") {
+          send({
+            protocolVersion: PROTOCOL_VERSION,
+            requestId: request.requestId,
+            type: "cancelled",
+            command: "acquireSnapshot",
+            data: { acquisitionId: request.requestId },
+          });
+          return;
+        }
+        send(errorMessage(request.requestId, safe.code, safe.message));
+      })
+      .finally(() => {
+        if (active?.requestId === request.requestId) {
+          active = undefined;
+        }
+      });
+  };
+
+  return { handleLine: handleSessionLine };
 }

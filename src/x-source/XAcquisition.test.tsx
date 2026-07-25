@@ -1,0 +1,260 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import XAcquisition from "./XAcquisition";
+import type {
+  AcquisitionEvent,
+  XAcquisitionApi,
+} from "../desktop-api";
+
+const source = {
+  browserId: "chrome",
+  browserName: "Google Chrome",
+  profileId: "Default",
+  profileName: "Personal",
+};
+
+const destination = {
+  serverUrl: "https://keep.example",
+  userId: "user-7",
+  userName: "Reader",
+};
+
+function controlledApi() {
+  let emit: ((event: AcquisitionEvent) => void) | undefined;
+  const api: XAcquisitionApi = {
+    startXAcquisition: vi.fn(async (_request, onEvent) => {
+      emit = onEvent;
+      return () => {};
+    }),
+    cancelXAcquisition: vi.fn().mockResolvedValue(undefined),
+    previewXSnapshot: vi.fn().mockResolvedValue({
+      total: 2,
+      pending: 1,
+      previouslyDelivered: 1,
+      folders: ["Research"],
+      destination,
+    }),
+  };
+  return {
+    api,
+    emit: (event: AcquisitionEvent) => {
+      if (!emit) throw new Error("acquisition listener not installed");
+      emit(event);
+    },
+  };
+}
+
+describe("X acquisition", () => {
+  it("reports structured progress and yields a read-only Transfer Preview", async () => {
+    const controlled = controlledApi();
+    const onPreview = vi.fn();
+    const onEvent = vi.fn();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-1"}
+        onEvent={onEvent}
+        onPreview={onPreview}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalled(),
+    );
+    controlled.emit({
+      type: "progress",
+      acquisitionId: "acquire-ui-1",
+      phase: "bookmarks",
+      completed: 40,
+      total: null,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "Retrieved 40 bookmark records",
+      ),
+    );
+    controlled.emit({
+      type: "completed",
+      acquisitionId: "acquire-ui-1",
+      total: 42,
+      added: 2,
+      folders: ["Research"],
+    });
+
+    await waitFor(() =>
+      expect(onPreview).toHaveBeenCalledWith({
+        total: 2,
+        pending: 1,
+        previouslyDelivered: 1,
+        folders: ["Research"],
+        destination,
+      }),
+    );
+    expect(onEvent).toHaveBeenLastCalledWith({
+      type: "completed",
+      acquisitionId: "acquire-ui-1",
+      total: 42,
+      added: 2,
+      folders: ["Research"],
+    });
+  });
+
+  it("lets the user cancel the active acquisition", async () => {
+    const controlled = controlledApi();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-cancel"}
+        onPreview={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Cancel acquisition" }));
+
+    expect(controlled.api.cancelXAcquisition).toHaveBeenCalledWith(
+      "acquire-ui-cancel",
+    );
+  });
+
+  it("keeps the previous snapshot available after an X compatibility failure", async () => {
+    const controlled = controlledApi();
+    const onPreview = vi.fn();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-failure"}
+        onPreview={onPreview}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalled(),
+    );
+    controlled.emit({
+      type: "failed",
+      acquisitionId: "acquire-ui-failure",
+      code: "xCompatibility",
+      message: "GraphQL failed with auth-token-canary-acquisition-8472",
+      previousSnapshotAvailable: true,
+    });
+
+    expect(
+      await screen.findByText(/an app update may be required/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/auth-token-canary-acquisition-8472/)).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use previous snapshot" }),
+    );
+
+    await waitFor(() => expect(onPreview).toHaveBeenCalled());
+  });
+
+  it("confirms that cancellation leaves the prior snapshot unchanged", async () => {
+    const controlled = controlledApi();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-cancelled"}
+        onPreview={() => {}}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalled(),
+    );
+
+    controlled.emit({
+      type: "cancelled",
+      acquisitionId: "acquire-ui-cancelled",
+    });
+
+    expect(
+      await screen.findByText(
+        "Acquisition cancelled. The previous snapshot is unchanged.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("reports a safe error when the retained snapshot cannot be previewed", async () => {
+    const controlled = controlledApi();
+    vi.mocked(controlled.api.previewXSnapshot).mockRejectedValue(
+      new Error("private path details"),
+    );
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-preview-error"}
+        onPreview={() => {}}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalled(),
+    );
+
+    controlled.emit({
+      type: "completed",
+      acquisitionId: "acquire-ui-preview-error",
+      total: 2,
+      added: 1,
+      folders: [],
+    });
+
+    expect(
+      await screen.findByText(
+        "The private X Bookmark Snapshot could not be previewed.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("reports a safe error when acquisition cannot start", async () => {
+    const controlled = controlledApi();
+    vi.mocked(controlled.api.startXAcquisition).mockRejectedValue(
+      new Error("auth-token-canary-acquisition-8472"),
+    );
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-start-error"}
+        onPreview={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+
+    expect(
+      await screen.findByText("X bookmark acquisition could not be started."),
+    ).toBeInTheDocument();
+  });
+});

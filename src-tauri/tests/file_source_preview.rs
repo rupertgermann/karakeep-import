@@ -60,6 +60,25 @@ fn multiple_field_theory_records_are_previewed_in_file_order() {
 }
 
 #[test]
+fn field_theory_folder_names_from_x_acquisition_become_folder_tags() {
+    let input = r#"{"id":"folder-record","url":"https://x.com/example/status/9","folderNames":["Research","research"],"tags":["fieldtheory"]}"#;
+
+    let preview = preview_text("bookmarks.jsonl", input, FileSourceFormat::FieldTheoryJsonl)
+        .expect("valid acquired Field Theory snapshot");
+
+    assert_eq!(
+        (
+            preview.bookmarks[0].folders.clone(),
+            preview.bookmarks[0].tags.clone(),
+        ),
+        (
+            vec!["Research".to_string()],
+            vec!["twitter".to_string(), "Research".to_string()],
+        )
+    );
+}
+
+#[test]
 fn chrome_netscape_header_is_auto_detected_and_mapped() {
     let preview = preview_text("bookmarks-export", CHROME_BOOKMARKS, FileSourceFormat::Auto)
         .expect("valid Chrome preview");

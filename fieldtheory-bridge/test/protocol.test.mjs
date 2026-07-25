@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { handleLine } from "../src/protocol.mjs";
+import {
+  createBridgeSession,
+  handleLine,
+} from "../src/protocol.mjs";
+import { AcquisitionError } from "../src/acquisition.mjs";
 
 test("returns a versioned structured discovery result", async () => {
   const output = await handleLine(
@@ -168,4 +172,160 @@ test("redacts unexpected bridge failures", async () => {
 
   assert.doesNotMatch(output, new RegExp(secret));
   assert.equal(JSON.parse(output).error.code, "bridge_error");
+});
+
+test("streams versioned acquisition progress and a secret-free result", async () => {
+  const output = [];
+  const session = createBridgeSession(
+    {
+      acquireSnapshot: async ({ onProgress }) => {
+        onProgress({ phase: "bookmarks", completed: 20, total: null });
+        return {
+          total: 21,
+          added: 1,
+          folders: ["Research"],
+          mediaDownloaded: false,
+        };
+      },
+    },
+    (line) => output.push(JSON.parse(line)),
+  );
+
+  session.handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "acquire-1",
+      command: "acquireSnapshot",
+      source: { browserId: "chrome", profileId: "Default" },
+    }),
+  );
+  await new Promise(setImmediate);
+
+  assert.deepEqual(output, [
+    {
+      protocolVersion: 1,
+      requestId: "acquire-1",
+      type: "progress",
+      command: "acquireSnapshot",
+      data: { phase: "bookmarks", completed: 20, total: null },
+    },
+    {
+      protocolVersion: 1,
+      requestId: "acquire-1",
+      type: "result",
+      command: "acquireSnapshot",
+      data: {
+        total: 21,
+        added: 1,
+        folders: ["Research"],
+        mediaDownloaded: false,
+      },
+    },
+  ]);
+});
+
+test("allows only one acquisition operation at a time", async () => {
+  const output = [];
+  const session = createBridgeSession(
+    {
+      acquireSnapshot: ({ signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(
+              new AcquisitionError("cancelled", "Acquisition was cancelled."),
+            ),
+          );
+        }),
+    },
+    (line) => output.push(JSON.parse(line)),
+  );
+
+  session.handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "acquire-active",
+      command: "acquireSnapshot",
+      source: { browserId: "chrome", profileId: "Default" },
+    }),
+  );
+  session.handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "acquire-second",
+      command: "acquireSnapshot",
+      source: { browserId: "chrome", profileId: "Default" },
+    }),
+  );
+  await new Promise(setImmediate);
+
+  assert.deepEqual(output[0], {
+    protocolVersion: 1,
+    requestId: "acquire-second",
+    type: "error",
+    error: {
+      code: "operation_active",
+      message: "Another acquisition is already running.",
+    },
+  });
+
+  session.handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "cancel-active",
+      command: "cancelAcquisition",
+      acquisitionId: "acquire-active",
+    }),
+  );
+});
+
+test("cancels the matching acquisition through the versioned protocol", async () => {
+  const output = [];
+  const session = createBridgeSession(
+    {
+      acquireSnapshot: ({ signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(
+              new AcquisitionError("cancelled", "Acquisition was cancelled."),
+            ),
+          );
+        }),
+    },
+    (line) => output.push(JSON.parse(line)),
+  );
+
+  session.handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "acquire-cancel",
+      command: "acquireSnapshot",
+      source: { browserId: "firefox", profileId: "Profiles/default" },
+    }),
+  );
+  session.handleLine(
+    JSON.stringify({
+      protocolVersion: 1,
+      requestId: "cancel-1",
+      command: "cancelAcquisition",
+      acquisitionId: "acquire-cancel",
+    }),
+  );
+  await new Promise(setImmediate);
+
+  assert.deepEqual(output, [
+    {
+      protocolVersion: 1,
+      requestId: "cancel-1",
+      type: "result",
+      command: "cancelAcquisition",
+      data: { acquisitionId: "acquire-cancel" },
+    },
+    {
+      protocolVersion: 1,
+      requestId: "acquire-cancel",
+      type: "cancelled",
+      command: "acquireSnapshot",
+      data: { acquisitionId: "acquire-cancel" },
+    },
+  ]);
 });
