@@ -463,6 +463,7 @@ struct TransferState {
 #[derive(Clone)]
 struct ApprovedFileSource {
     approval_id: String,
+    destination: DestinationIdentity,
     preview: file_source::FileSourcePreview,
     source: TransferSourceRequest,
 }
@@ -496,6 +497,7 @@ impl TransferState {
         &self,
         source: &TransferSourceRequest,
         preview: &file_source::FileSourcePreview,
+        destination: &DestinationIdentity,
     ) -> Result<Option<String>, TransferCommandError> {
         if !matches!(source, TransferSourceRequest::File { .. }) {
             return Ok(None);
@@ -508,6 +510,7 @@ impl TransferState {
             TransferCommandError::for_code(TransferCommandErrorCode::DeliveryFailed)
         })? = Some(ApprovedFileSource {
             approval_id: approval_id.clone(),
+            destination: destination.clone(),
             preview: preview.clone(),
             source: source.clone(),
         });
@@ -518,6 +521,7 @@ impl TransferState {
         &self,
         approval_id: Option<&str>,
         source: &TransferSourceRequest,
+        destination: &DestinationIdentity,
     ) -> Result<file_source::FileSourcePreview, TransferCommandError> {
         let approved = self.approved_file_source.lock().map_err(|_| {
             TransferCommandError::for_code(TransferCommandErrorCode::DeliveryFailed)
@@ -525,7 +529,9 @@ impl TransferState {
         approved
             .as_ref()
             .filter(|approved| {
-                Some(approved.approval_id.as_str()) == approval_id && &approved.source == source
+                Some(approved.approval_id.as_str()) == approval_id
+                    && &approved.source == source
+                    && &approved.destination == destination
             })
             .map(|approved| approved.preview.clone())
             .ok_or_else(|| {
@@ -678,7 +684,7 @@ fn preview_transfer(
         .coordinator()?
         .preview(&preview, &destination_identity)
         .map_err(map_coordinator_error)?;
-    let approval_id = transfers.approve_file_source(&source, &preview)?;
+    let approval_id = transfers.approve_file_source(&source, &preview, &destination_identity)?;
     Ok(TransferPreview {
         approval_id,
         total: counts.total,
@@ -714,9 +720,11 @@ fn start_delivery<R: tauri::Runtime>(
     let preview = match &request.source {
         TransferSourceRequest::X => resolve_transfer_source(&request.source, &field_theory)
             .map_err(map_transfer_source_error)?,
-        TransferSourceRequest::File { .. } => {
-            transfers.approved_file_preview(request.approval_id.as_deref(), &request.source)?
-        }
+        TransferSourceRequest::File { .. } => transfers.approved_file_preview(
+            request.approval_id.as_deref(),
+            &request.source,
+            &destination_identity,
+        )?,
     };
     let sink: Arc<dyn DeliveryEventSink> = Arc::new(TauriDeliveryEventSink(app));
     let coordinator = transfers.coordinator()?;
@@ -1450,6 +1458,40 @@ mod tests {
 
         assert!(weak.upgrade().is_none());
         fs::remove_file(ledger_path).expect("closed ledger can be deleted");
+    }
+
+    #[test]
+    fn reviewed_file_approval_is_bound_to_the_reviewed_destination() {
+        let transfers = test_transfer_state();
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl");
+        let source = super::TransferSourceRequest::File {
+            path: path.clone(),
+            format: super::file_source::FileSourceFormat::FieldTheoryJsonl,
+        };
+        let preview = super::file_source::preview_file(
+            &path,
+            super::file_source::FileSourceFormat::FieldTheoryJsonl,
+        )
+        .expect("reviewed file preview");
+        let reviewed_destination =
+            super::DestinationIdentity::new("https://keep.example", "user-a")
+                .expect("reviewed destination");
+        let other_destination = super::DestinationIdentity::new("https://other.example", "user-b")
+            .expect("different destination");
+        let approval = transfers
+            .approve_file_source(&source, &preview, &reviewed_destination)
+            .expect("file approval")
+            .expect("opaque approval ID");
+
+        let error = transfers
+            .approved_file_preview(Some(&approval), &source, &other_destination)
+            .expect_err("approval cannot be reused for another destination");
+
+        assert_eq!(
+            error.code,
+            super::TransferCommandErrorCode::SourceUnavailable
+        );
     }
 
     #[test]

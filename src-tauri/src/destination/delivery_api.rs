@@ -292,12 +292,10 @@ fn status_error(status: StatusCode, headers: &reqwest::header::HeaderMap) -> Api
         StatusCode::FORBIDDEN
         | StatusCode::NOT_FOUND
         | StatusCode::METHOD_NOT_ALLOWED
-        | StatusCode::NOT_IMPLEMENTED => {
-            ApiError::new(
-                ApiErrorKind::Compatibility,
-                "Karakeep is missing a required delivery capability.",
-            )
-        }
+        | StatusCode::NOT_IMPLEMENTED => ApiError::new(
+            ApiErrorKind::Compatibility,
+            "Karakeep is missing a required delivery capability.",
+        ),
         _ => ApiError::new(
             ApiErrorKind::Permanent,
             format!("Karakeep rejected the request with HTTP {status}."),
