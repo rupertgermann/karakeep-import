@@ -69,6 +69,10 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       --color-console: #202821;
       --color-console-text: #EEF0E7;
       --color-console-muted: #AAB2A8;
+      --color-console-ready: #E4B75D;
+      --color-console-running: #A9C2A5;
+      --color-console-success: #A9C2A5;
+      --color-console-failure: #E18B7F;
       --glow-primary: rgb(82 107 84 / 10%);
       --glow-signal: rgb(228 183 93 / 22%);
       --font-display: Fraunces, "Iowan Old Style", "Palatino Linotype",
@@ -441,10 +445,18 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       content: "";
       box-shadow: 0 0 0 4px rgb(228 183 93 / 12%);
     }}
-    #run-status[data-state="ready"] {{ color: var(--color-signal); }}
-    #run-status[data-state="running"] {{ color: var(--color-primary); }}
-    #run-status[data-state="success"] {{ color: var(--color-primary); }}
-    #run-status[data-state="failure"] {{ color: var(--color-danger); }}
+    #run-status[data-state="ready"] {{
+      color: var(--color-console-ready);
+    }}
+    #run-status[data-state="running"] {{
+      color: var(--color-console-running);
+    }}
+    #run-status[data-state="success"] {{
+      color: var(--color-console-success);
+    }}
+    #run-status[data-state="failure"] {{
+      color: var(--color-console-failure);
+    }}
     #run-status[data-state="running"]::before {{
       animation: quiet-pulse 1.35s ease-in-out infinite;
     }}
@@ -500,6 +512,10 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
         --color-console: #111512;
         --color-console-text: #EEF0E7;
         --color-console-muted: #AAB2A8;
+        --color-console-ready: #D6AE66;
+        --color-console-running: #A9C2A5;
+        --color-console-success: #A9C2A5;
+        --color-console-failure: #E18B7F;
         --glow-primary: rgb(169 194 165 / 10%);
         --glow-signal: rgb(214 174 102 / 12%);
         --shadow-sm: 0 1px 2px rgb(0 0 0 / 22%);
@@ -716,7 +732,6 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       for (const control of form.elements) {{
         control.disabled = busy;
       }}
-      form.setAttribute("aria-busy", String(busy));
       previewButton.textContent = busy && !execute
         ? "Previewing…"
         : "Preview import";

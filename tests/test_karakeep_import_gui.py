@@ -132,6 +132,42 @@ def output_text(events) -> str:
     return "".join(event["text"] for event in events if event["type"] == "output")
 
 
+def css_hex_variables(block: str) -> dict[str, str]:
+    return dict(
+        re.findall(
+            r"(--[a-z0-9-]+):\s*(#[0-9a-f]{6});",
+            block,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def relative_luminance(hex_color: str) -> float:
+    channels = [
+        int(hex_color[index : index + 2], 16) / 255
+        for index in (1, 3, 5)
+    ]
+    linear_channels = [
+        channel / 12.92
+        if channel <= 0.04045
+        else ((channel + 0.055) / 1.055) ** 2.4
+        for channel in channels
+    ]
+    return (
+        0.2126 * linear_channels[0]
+        + 0.7152 * linear_channels[1]
+        + 0.0722 * linear_channels[2]
+    )
+
+
+def contrast_ratio(first: str, second: str) -> float:
+    luminances = sorted(
+        (relative_luminance(first), relative_luminance(second)),
+        reverse=True,
+    )
+    return (luminances[0] + 0.05) / (luminances[1] + 0.05)
+
+
 class ReflectingKarakeepHandler(BaseHTTPRequestHandler):
     fail_preflight = False
 
@@ -241,7 +277,7 @@ class GuiAcceptanceTests(unittest.TestCase):
                 r"legend \{[^}]*font-size: 1\.5rem;",
             )
 
-    def test_page_adapts_quiet_momentum_to_system_preferences(self):
+    def test_page_identifies_quiet_momentum_without_external_assets(self):
         gui = load_gui_module()
         with running(gui.create_server(port=0)) as server:
             with urllib.request.urlopen(
@@ -253,19 +289,8 @@ class GuiAcceptanceTests(unittest.TestCase):
                 '<html lang="en" data-theme="quiet-momentum">',
                 page,
             )
-            for theme_contract in (
-                "--color-bg: #F3EFE6;",
-                "--color-surface: #FBF8F1;",
-                "--color-primary: #526B54;",
-                "--color-signal: #E4B75D;",
-                '--font-display: Fraunces, "Iowan Old Style",',
-                "@media (prefers-color-scheme: dark)",
-                "--color-bg: #171D18;",
-                "--color-surface: #202821;",
-                "--color-primary: #A9C2A5;",
-                "@media (prefers-reduced-motion: reduce)",
-            ):
-                self.assertIn(theme_contract, page)
+            self.assertNotIn("fonts.googleapis.com", page)
+            self.assertNotIn("<link rel=\"stylesheet\"", page)
 
     def test_preview_streams_the_real_cli_summary_without_contacting_karakeep(
         self,
@@ -392,7 +417,7 @@ class GuiAcceptanceTests(unittest.TestCase):
             self.assertIn("executeDialog.showModal()", page)
             self.assertNotIn("window.confirm", page)
 
-    def test_live_import_flow_exposes_distinct_visual_states(self):
+    def test_live_import_flow_starts_ready_with_deliberate_warning(self):
         gui = load_gui_module()
         with running(gui.create_server(port=0)) as server:
             with urllib.request.urlopen(
@@ -406,12 +431,45 @@ class GuiAcceptanceTests(unittest.TestCase):
                 'data-state="ready"',
                 page,
             )
-            for state in ("ready", "running", "success", "failure"):
-                self.assertIn(
-                    f'#run-status[data-state="{state}"]',
-                    page,
-                )
-            self.assertIn("status.dataset.state = state", page)
+
+    def test_run_status_colors_meet_text_contrast_in_both_themes(self):
+        gui = load_gui_module()
+        with running(gui.create_server(port=0)) as server:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{server.server_port}/"
+            ) as response:
+                page = response.read().decode("utf-8")
+
+            root_blocks = re.findall(
+                r":root \{(.*?)\n\s*\}",
+                page,
+                flags=re.DOTALL,
+            )
+            self.assertGreaterEqual(len(root_blocks), 2)
+            light_variables = css_hex_variables(root_blocks[0])
+            dark_variables = {
+                **light_variables,
+                **css_hex_variables(root_blocks[1]),
+            }
+            for theme_name, variables in (
+                ("light", light_variables),
+                ("dark", dark_variables),
+            ):
+                console = variables["--color-console"]
+                for state in ("ready", "running", "success", "failure"):
+                    match = re.search(
+                        rf'#run-status\[data-state="{state}"\]\s*\{{'
+                        rf"\s*color:\s*var\((--[a-z0-9-]+)\);",
+                        page,
+                        flags=re.IGNORECASE,
+                    )
+                    self.assertIsNotNone(match)
+                    color = variables[match.group(1)]
+                    self.assertGreaterEqual(
+                        contrast_ratio(color, console),
+                        4.5,
+                        f"{theme_name} {state} status lacks text contrast",
+                    )
 
     def test_live_import_uses_child_environment_and_streams_completion(self):
         gui = load_gui_module()
