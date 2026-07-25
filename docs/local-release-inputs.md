@@ -21,19 +21,24 @@ The remaining authoritative inputs are:
 - `src-tauri/Cargo.lock`, including exact Rust versions and crate checksums;
 - `release/rust-dependencies.json`, the lock-matched Rust license inventory;
 - `vendor/fieldtheory/manifest.json`, including the exact Field Theory commit,
-  source and package SHA-256 values, and private Node archive SHA-256 values;
+  source and package SHA-256 values, private Node archive and executable
+  SHA-256 values, and the Windows SQLite archive SHA-256, official SHA3-256,
+  and executable SHA-256 values;
 - the prepared `src-tauri/resources` tree, containing the unchanged Field
   Theory package, production bridge dependencies and license files, and the
-  private Node executable for the native target.
+  private Node executable for the native target. Windows x64 resources also
+  contain only the pinned `sqlite3.exe` helper required by Field Theory's
+  Chromium-cookie reader.
 
 The release-input command performs no downloads. It reopens each pinned Node
-archive left in the preparation cache, verifies the archive SHA-256, extracts
-the declared executable into a temporary directory, and compares that
-executable with the prepared runtime byte for byte. It fails if the current
-toolchains differ from the pinned versions, a lock or license inventory is
-incomplete, the prepared resources are missing or modified, Field Theory
-checksums disagree, packaged bridge code attempts to download a runtime, or
-the complete packaged resource tree (including production `node_modules`)
+or SQLite archive left in the preparation cache, verifies its archive digest,
+extracts the declared executable into a temporary directory, and verifies both
+the independently pinned executable digest and the prepared runtime byte. It
+fails if the current toolchains differ from the pinned versions, a lock or
+license inventory is incomplete, the prepared resources are missing or
+modified, Field Theory checksums disagree, packaged bridge code attempts to
+download a runtime, or either the complete source resource tree or staged
+resource tree (including production `node_modules` and NUL-containing files)
 contains a password-equivalent value. Explicit placeholders in dependency
 documentation, such as `replace-me`, are not treated as credentials.
 
@@ -76,10 +81,14 @@ npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis
 ```
 
 The output is `release-inputs/windows-x64`. It contains only the Windows x64
-private Node runtime and the same deterministic metadata, notices, and
-checksum files. Its `NATIVE-BUILD-COMMAND.txt` contains the exact Windows
-command shown above; run it from the checkout root on the controlled Windows
-release machine.
+private Node runtime, the pinned `sqlite3.exe` helper, and the same
+deterministic metadata, notices, and checksum files. The packaged bridge puts
+the private SQLite directory first on its Windows-only `PATH`; no separately
+installed SQLite command is required. Its `NATIVE-BUILD-COMMAND.txt` contains
+the exact Windows command shown above; run it from the checkout root on the
+controlled Windows release machine. The later issue #17 Authenticode gate must
+verify every shipped executable, including this helper, as well as the app and
+installer.
 
 Do not prepare a Windows release from macOS or a macOS release from Windows.
 Each target proceeds from this staging gate into its native, local signing and
