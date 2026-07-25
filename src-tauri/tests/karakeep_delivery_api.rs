@@ -360,7 +360,9 @@ fn create_or_existing_uses_the_vault_credential_and_preserves_returned_human_tag
                 "url": "https://x.com/example/status/123",
                 "title": "A useful post",
                 "note": "Post text and context",
-                "createdAt": "2024-07-24T12:34:56Z"
+                "createdAt": "2024-07-24T12:34:56Z",
+                "crawlPriority": "low",
+                "source": "import"
             })
         );
     }

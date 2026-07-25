@@ -115,6 +115,8 @@ impl KarakeepApi for ReqwestDeliveryApi {
     ) -> Result<EnsuredBookmark, ApiError> {
         let request = CreateBookmarkRequest {
             bookmark_type: "link",
+            crawl_priority: "low",
+            source: "import",
             url: &draft.url,
             title: draft.title.as_deref(),
             note: draft.note.as_deref(),
@@ -208,6 +210,8 @@ impl KarakeepApi for ReqwestDeliveryApi {
 struct CreateBookmarkRequest<'a> {
     #[serde(rename = "type")]
     bookmark_type: &'static str,
+    crawl_priority: &'static str,
+    source: &'static str,
     url: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     title: Option<&'a str>,
