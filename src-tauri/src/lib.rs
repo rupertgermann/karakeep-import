@@ -861,14 +861,14 @@ mod tests {
 
     use serde_json::{Value, json};
     use tauri::{
-        Listener, Manager, WebviewWindowBuilder,
+        App, Listener, Manager, WebviewWindow, WebviewWindowBuilder,
         test::{
-            INVOKE_KEY, assert_ipc_response, get_ipc_response, mock_builder, mock_context,
-            noop_assets,
+            INVOKE_KEY, MockRuntime, assert_ipc_response, get_ipc_response, mock_builder,
+            mock_context, noop_assets,
         },
         webview::InvokeRequest,
     };
-    use tempfile::tempdir;
+    use tempfile::{TempDir, tempdir};
 
     struct DisconnectedDestination;
 
@@ -1009,6 +1009,168 @@ mod tests {
             },
         )
         .map(|response| response.deserialize::<Value>().expect("response is JSON"))
+    }
+
+    struct FileDeliveryHarness {
+        _directory: TempDir,
+        api: Arc<SuccessfulDeliveryApi>,
+        app: App<MockRuntime>,
+        approval_id: String,
+        approved_contents: String,
+        delivered: mpsc::Receiver<String>,
+        request_body: Value,
+        reviewed_preview: Value,
+        source: PathBuf,
+        webview: WebviewWindow<MockRuntime>,
+    }
+
+    impl FileDeliveryHarness {
+        fn new() -> Self {
+            let directory = tempdir().expect("temporary app state");
+            let source = directory.path().join("selected-bookmarks.jsonl");
+            let approved_contents = fs::read_to_string(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/field-theory-one.jsonl"),
+            )
+            .expect("approved fixture");
+            fs::write(&source, &approved_contents).expect("selected source");
+            let api = Arc::new(SuccessfulDeliveryApi::default());
+            let app = super::configure_builder(mock_builder())
+                .manage(super::FieldTheoryState::bundled(
+                    directory.path(),
+                    directory.path(),
+                ))
+                .manage(super::DestinationState(Arc::new(ConnectedDestination(
+                    api.clone(),
+                ))))
+                .manage(test_transfer_state())
+                .build(mock_context(noop_assets()))
+                .expect("mock app builds");
+            let (events, delivered) = mpsc::channel();
+            app.listen("delivery", move |event| {
+                let _ = events.send(event.payload().to_owned());
+            });
+            let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+                .build()
+                .expect("mock webview builds");
+            let request_body = json!({
+                "source": {
+                    "kind": "file",
+                    "path": source,
+                    "format": "fieldTheoryJsonl"
+                }
+            });
+            let reviewed_preview =
+                Self::invoke(&webview, "preview_transfer", request_body.clone().into())
+                    .expect("preview succeeds");
+            let approval_id = reviewed_preview["approvalId"]
+                .as_str()
+                .expect("opaque approval ID")
+                .to_owned();
+
+            Self {
+                _directory: directory,
+                api,
+                app,
+                approval_id,
+                approved_contents,
+                delivered,
+                request_body,
+                reviewed_preview,
+                source,
+                webview,
+            }
+        }
+
+        fn invoke(
+            webview: &WebviewWindow<MockRuntime>,
+            command: &str,
+            body: tauri::ipc::InvokeBody,
+        ) -> Result<Value, Value> {
+            get_ipc_response(
+                webview,
+                InvokeRequest {
+                    cmd: command.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().expect("valid IPC origin"),
+                    body,
+                    headers: Default::default(),
+                    invoke_key: INVOKE_KEY.to_string(),
+                },
+            )
+            .map(|response| response.deserialize::<Value>().expect("response is JSON"))
+        }
+
+        fn start(&self, delivery_id: &str, approval_id: &str) -> Result<Value, Value> {
+            Self::invoke(
+                &self.webview,
+                "start_delivery",
+                json!({
+                    "request": {
+                        "approvalId": approval_id,
+                        "deliveryId": delivery_id,
+                        "source": self.request_body["source"].clone()
+                    }
+                })
+                .into(),
+            )
+        }
+
+        fn preview_again(&self) -> Result<Value, Value> {
+            Self::invoke(
+                &self.webview,
+                "preview_transfer",
+                self.request_body.clone().into(),
+            )
+        }
+
+        fn change_source_after_review(&self) {
+            fs::write(
+                &self.source,
+                self.approved_contents
+                    .replace("A useful post", "Changed after review"),
+            )
+            .expect("source changes after preview");
+        }
+
+        fn wait_for_terminal(&self, delivery_id: &str) -> Value {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                let remaining = deadline
+                    .checked_duration_since(Instant::now())
+                    .expect("delivery terminal event before timeout");
+                let payload = self
+                    .delivered
+                    .recv_timeout(remaining)
+                    .expect("delivery event");
+                let value: Value = serde_json::from_str(&payload).expect("event JSON");
+                if value["deliveryId"] == delivery_id
+                    && matches!(
+                        value["type"].as_str(),
+                        Some("completed" | "cancelled" | "failed")
+                    )
+                {
+                    return value;
+                }
+            }
+        }
+
+        fn wait_for_operation_release(&self) {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while self
+                .app
+                .state::<super::TransferState>()
+                .operations
+                .is_active()
+            {
+                assert!(
+                    Instant::now() < deadline,
+                    "completed delivery releases the operation"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
     }
 
     fn assert_command_response_with_body(
@@ -1495,224 +1657,129 @@ mod tests {
     }
 
     #[test]
-    fn file_delivery_uses_the_reviewed_snapshot_for_retries_and_rejects_stale_approval() {
-        let directory = tempdir().expect("temporary app state");
-        let source = directory.path().join("selected-bookmarks.jsonl");
-        let approved_contents = fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl"),
-        )
-        .expect("approved fixture");
-        fs::write(&source, &approved_contents).expect("selected source");
-        let api = Arc::new(SuccessfulDeliveryApi::default());
-        let app = super::configure_builder(mock_builder())
-            .manage(super::FieldTheoryState::bundled(
-                directory.path(),
-                directory.path(),
-            ))
-            .manage(super::DestinationState(Arc::new(ConnectedDestination(
-                api.clone(),
-            ))))
-            .manage(test_transfer_state())
-            .build(mock_context(noop_assets()))
-            .expect("mock app builds");
-        let (events, delivered) = mpsc::channel();
-        app.listen("delivery", move |event| {
-            let _ = events.send(event.payload().to_owned());
-        });
-        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .expect("mock webview builds");
-
-        let request_body = json!({
-            "source": {
-                "kind": "file",
-                "path": source,
-                "format": "fieldTheoryJsonl"
-            }
-        });
-        let preview = get_ipc_response(
-            &webview,
-            InvokeRequest {
-                cmd: "preview_transfer".into(),
-                callback: tauri::ipc::CallbackFn(0),
-                error: tauri::ipc::CallbackFn(1),
-                url: "tauri://localhost".parse().expect("valid IPC origin"),
-                body: request_body.clone().into(),
-                headers: Default::default(),
-                invoke_key: INVOKE_KEY.to_string(),
-            },
-        )
-        .expect("preview succeeds")
-        .deserialize::<Value>()
-        .expect("preview JSON");
-        let approval_id = preview["approvalId"].clone();
-        let approval_text = approval_id.as_str().expect("opaque approval ID");
-        assert!(!approval_text.contains("selected-bookmarks"));
-        assert!(!approval_text.contains(&directory.path().display().to_string()));
-        assert!(!approval_text.contains("A useful post"));
-        let mut preview_summary = preview;
-        preview_summary
+    fn file_preview_returns_an_opaque_approval_and_safe_summary() {
+        let harness = FileDeliveryHarness::new();
+        let serialized = harness.reviewed_preview.to_string();
+        let mut summary = harness.reviewed_preview.clone();
+        summary
             .as_object_mut()
             .expect("preview object")
             .remove("approvalId");
-        assert_eq!(
-            preview_summary,
-            json!({
-                "total": 1,
-                "pending": 1,
-                "previouslyDelivered": 0,
-                "folders": ["Reading"],
-                "destination": {
-                    "serverUrl": "https://keep.example",
-                    "userId": "user-1",
-                    "userName": "Test Reader"
-                }
-            })
-        );
-        fs::write(
-            &source,
-            approved_contents.replace("A useful post", "Changed after review"),
-        )
-        .expect("source changes after preview");
 
-        assert_ipc_response(
-            &webview,
-            InvokeRequest {
-                cmd: "start_delivery".into(),
-                callback: tauri::ipc::CallbackFn(2),
-                error: tauri::ipc::CallbackFn(3),
-                url: "tauri://localhost".parse().expect("valid IPC origin"),
-                body: json!({
-                    "request": {
-                        "approvalId": approval_id.clone(),
-                        "deliveryId": "delivery-ipc",
-                        "source": request_body["source"].clone()
+        assert_eq!(
+            (
+                harness.approval_id.is_empty(),
+                serialized.contains("selected-bookmarks"),
+                serialized.contains(&harness.source.display().to_string()),
+                serialized.contains("A useful post"),
+                summary,
+            ),
+            (
+                false,
+                false,
+                false,
+                false,
+                json!({
+                    "total": 1,
+                    "pending": 1,
+                    "previouslyDelivered": 0,
+                    "folders": ["Reading"],
+                    "destination": {
+                        "serverUrl": "https://keep.example",
+                        "userId": "user-1",
+                        "userName": "Test Reader"
                     }
-                })
-                .into(),
-                headers: Default::default(),
-                invoke_key: INVOKE_KEY.to_string(),
-            },
-            Ok::<_, Value>(Value::Null),
+                }),
+            )
         );
+    }
 
-        let terminal = (0..2)
-            .find_map(|_| {
-                let payload = delivered
-                    .recv_timeout(Duration::from_secs(2))
-                    .expect("delivery event");
-                let value: Value = serde_json::from_str(&payload).expect("event JSON");
-                (value["type"] == "completed").then_some(value)
-            })
-            .expect("completed event");
+    #[test]
+    fn file_delivery_uses_the_reviewed_snapshot_when_the_file_changes() {
+        let harness = FileDeliveryHarness::new();
+        harness.change_source_after_review();
+
         assert_eq!(
-            terminal,
-            json!({
-                "type": "completed",
-                "deliveryId": "delivery-ipc",
-                "result": {
-                    "created": 1,
-                    "existing": 0,
-                    "retried": 0,
-                    "failed": 0,
-                    "cancelled": 0
-                }
-            })
+            harness.start("delivery-reviewed", &harness.approval_id),
+            Ok(Value::Null)
         );
-        assert_eq!(api.creates.load(Ordering::SeqCst), 1);
-        let notes = api.notes.lock().expect("captured notes");
+        let terminal = harness.wait_for_terminal("delivery-reviewed");
+        let notes = harness.api.notes.lock().expect("captured notes");
         let delivered_note = notes[0].as_deref().expect("delivered note");
-        assert!(delivered_note.contains("A useful post"));
-        assert!(!delivered_note.contains("Changed after review"));
-        drop(notes);
 
-        let operation_timeout = Instant::now() + Duration::from_secs(2);
-        while app.state::<super::TransferState>().operations.is_active()
-            && Instant::now() < operation_timeout
-        {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        assert!(
-            !app.state::<super::TransferState>().operations.is_active(),
-            "completed delivery releases the operation"
+        assert_eq!(
+            (
+                terminal["type"].as_str(),
+                delivered_note.contains("A useful post"),
+                delivered_note.contains("Changed after review"),
+            ),
+            (Some("completed"), true, false)
         );
-        assert_ipc_response(
-            &webview,
-            InvokeRequest {
-                cmd: "start_delivery".into(),
-                callback: tauri::ipc::CallbackFn(4),
-                error: tauri::ipc::CallbackFn(5),
-                url: "tauri://localhost".parse().expect("valid IPC origin"),
-                body: json!({
-                    "request": {
-                        "approvalId": approval_id.clone(),
-                        "deliveryId": "delivery-retry",
-                        "source": request_body["source"].clone()
-                    }
-                })
-                .into(),
-                headers: Default::default(),
-                invoke_key: INVOKE_KEY.to_string(),
-            },
-            Ok::<_, Value>(Value::Null),
-        );
-        let retry_terminal = (0..2)
-            .find_map(|_| {
-                let payload = delivered
-                    .recv_timeout(Duration::from_secs(2))
-                    .expect("retry delivery event");
-                let value: Value = serde_json::from_str(&payload).expect("retry event JSON");
-                (value["type"] == "completed").then_some(value)
-            })
-            .expect("retry completed event");
-        assert_eq!(retry_terminal["deliveryId"], "delivery-retry");
-        assert_eq!(api.creates.load(Ordering::SeqCst), 1);
+    }
 
-        let after = get_ipc_response(
-            &webview,
-            InvokeRequest {
-                cmd: "preview_transfer".into(),
-                callback: tauri::ipc::CallbackFn(6),
-                error: tauri::ipc::CallbackFn(7),
-                url: "tauri://localhost".parse().expect("valid IPC origin"),
-                body: request_body.clone().into(),
-                headers: Default::default(),
-                invoke_key: INVOKE_KEY.to_string(),
-            },
-        )
-        .expect("preview after delivery succeeds")
-        .deserialize::<Value>()
-        .expect("preview JSON");
+    #[test]
+    fn reviewed_file_approval_remains_available_for_a_safe_retry() {
+        let harness = FileDeliveryHarness::new();
+        assert_eq!(
+            harness.start("delivery-first", &harness.approval_id),
+            Ok(Value::Null)
+        );
+        harness.wait_for_terminal("delivery-first");
+        harness.wait_for_operation_release();
+
+        assert_eq!(
+            harness.start("delivery-retry", &harness.approval_id),
+            Ok(Value::Null)
+        );
+        let retry = harness.wait_for_terminal("delivery-retry");
+
+        assert_eq!(
+            (
+                retry["type"].as_str(),
+                retry["deliveryId"].as_str(),
+                harness.api.creates.load(Ordering::SeqCst),
+            ),
+            (Some("completed"), Some("delivery-retry"), 1)
+        );
+    }
+
+    #[test]
+    fn a_new_file_preview_makes_the_previous_approval_stale() {
+        let harness = FileDeliveryHarness::new();
+        let stale_approval = harness.approval_id.clone();
+        let next_preview = harness.preview_again().expect("next preview");
+        let next_approval = next_preview["approvalId"]
+            .as_str()
+            .expect("next approval ID");
+        assert_ne!(next_approval, stale_approval);
+
+        assert_eq!(
+            harness.start("delivery-stale-approval", &stale_approval),
+            Err(json!({
+                "code": "source-unavailable",
+                "message": "The selected bookmark source is unavailable."
+            }))
+        );
+    }
+
+    #[test]
+    fn file_preview_counts_reflect_the_completed_delivery() {
+        let harness = FileDeliveryHarness::new();
+        assert_eq!(
+            harness.start("delivery-counts", &harness.approval_id),
+            Ok(Value::Null)
+        );
+        harness.wait_for_terminal("delivery-counts");
+        harness.wait_for_operation_release();
+
+        let after = harness.preview_again().expect("preview after delivery");
+
         assert_eq!(
             (
                 after["pending"].as_u64(),
                 after["previouslyDelivered"].as_u64(),
             ),
             (Some(0), Some(1))
-        );
-
-        assert_ipc_response(
-            &webview,
-            InvokeRequest {
-                cmd: "start_delivery".into(),
-                callback: tauri::ipc::CallbackFn(8),
-                error: tauri::ipc::CallbackFn(9),
-                url: "tauri://localhost".parse().expect("valid IPC origin"),
-                body: json!({
-                    "request": {
-                        "approvalId": approval_id,
-                        "deliveryId": "delivery-stale-approval",
-                        "source": request_body["source"].clone()
-                    }
-                })
-                .into(),
-                headers: Default::default(),
-                invoke_key: INVOKE_KEY.to_string(),
-            },
-            Err(json!({
-                "code": "source-unavailable",
-                "message": "The selected bookmark source is unavailable."
-            })),
         );
     }
 
