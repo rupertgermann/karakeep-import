@@ -5,6 +5,7 @@ import App from "./App";
 import type {
   DesktopApi,
   FileSourceApi,
+  XAcquisitionApi,
 } from "./desktop-api";
 import type { SettingsApi } from "./settings-api";
 
@@ -57,6 +58,14 @@ function settingsApi(): SettingsApi {
       karakeepBaseline: "0.32.0",
     }),
     manualUpdateCheck: vi.fn(),
+  };
+}
+
+function xAcquisitionApi(): XAcquisitionApi {
+  return {
+    startXAcquisition: vi.fn(),
+    cancelXAcquisition: vi.fn(),
+    previewXSnapshot: vi.fn(),
   };
 }
 
@@ -208,6 +217,62 @@ describe("Karakeep Transfer shell", () => {
 
     expect(
       screen.getByRole("heading", { name: "Preview a bookmark file" }),
+    ).toBeInTheDocument();
+  });
+
+  it("advances a confirmed X source to snapshot acquisition", async () => {
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi
+          .fn()
+          .mockResolvedValue(rememberedDestination),
+        discoverXSources: vi.fn().mockResolvedValue({
+          browsers: [
+            {
+              id: "chrome",
+              name: "Google Chrome",
+              profiles: [{ id: "Default", name: "Personal" }],
+            },
+          ],
+        }),
+        selectXSource: vi.fn().mockResolvedValue({
+          browserId: "chrome",
+          browserName: "Google Chrome",
+          profileId: "Default",
+          profileName: "Personal",
+        }),
+      },
+    );
+
+    render(
+      <App
+        desktopApi={api}
+        xAcquisitionApi={xAcquisitionApi()}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Use my X browser session",
+      }),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: /temporarily using my existing authenticated X session/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use this X source" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Retrieve bookmarks from X",
+      }),
     ).toBeInTheDocument();
   });
 

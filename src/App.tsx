@@ -7,7 +7,9 @@ import type {
   FileSourceApi,
   HealthResponse,
   SelectedXSource,
+  XAcquisitionApi,
 } from "./desktop-api";
+import { xAcquisitionApi as defaultXAcquisitionApi } from "./desktop-api";
 import FileSourcePanel from "./FileSourcePanel";
 import type { FileSourceSelection } from "./FileSourcePanel";
 import Settings from "./Settings";
@@ -16,7 +18,9 @@ import {
   type SettingsApi,
 } from "./settings-api";
 import XSourceSetup from "./x-source/XSourceSetup";
+import XAcquisition from "./x-source/XAcquisition";
 import DestinationSetup from "./DestinationSetup";
+import type { TransferPreview } from "./workflow";
 
 type AppDesktopApi = DesktopApi & FileSourceApi;
 type SourceMode = "x" | "file" | null;
@@ -27,11 +31,13 @@ type ReadySource =
 interface AppProps {
   desktopApi?: AppDesktopApi;
   settingsApi?: SettingsApi;
+  xAcquisitionApi?: XAcquisitionApi;
 }
 
 export default function App({
   desktopApi = defaultDesktopApi,
   settingsApi = defaultSettingsApi,
+  xAcquisitionApi = defaultXAcquisitionApi,
 }: AppProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthFailed, setHealthFailed] = useState(false);
@@ -39,6 +45,8 @@ export default function App({
     useState<DestinationSummary | null>(null);
   const [sourceMode, setSourceMode] = useState<SourceMode>(null);
   const [readySource, setReadySource] = useState<ReadySource | null>(null);
+  const [transferPreview, setTransferPreview] =
+    useState<TransferPreview | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
@@ -160,18 +168,33 @@ export default function App({
         />
       ) : null}
 
-      {health && destination && !showSettings && readySource ? (
+      {health &&
+      destination &&
+      !showSettings &&
+      readySource?.kind === "x" &&
+      !transferPreview ? (
+        <XAcquisition
+          api={xAcquisitionApi}
+          source={readySource.source}
+          destination={{
+            serverUrl: destination.serverUrl,
+            userId: destination.userId,
+            userName: destination.displayName,
+          }}
+          onPreview={setTransferPreview}
+        />
+      ) : null}
+
+      {health &&
+      destination &&
+      !showSettings &&
+      readySource?.kind === "file" ? (
         <section className="source-card" aria-labelledby="source-ready-title">
           <p className="eyebrow">Step 3 · Preview</p>
-          <h2 id="source-ready-title">
-            {readySource.kind === "x"
-              ? "X source ready"
-              : "Bookmark file ready"}
-          </h2>
+          <h2 id="source-ready-title">Bookmark file ready</h2>
           <p className="source-explanation">
-            {readySource.kind === "x"
-              ? `${readySource.source.browserName} · ${readySource.source.profileName}`
-              : `${readySource.selection.preview.bookmarks.length} bookmarks are ready to preview.`}
+            {readySource.selection.preview.bookmarks.length} bookmarks are
+            ready to preview.
           </p>
           <button
             type="button"
@@ -179,10 +202,23 @@ export default function App({
             onClick={() => {
               setReadySource(null);
               setSourceMode(null);
+              setTransferPreview(null);
             }}
           >
             Choose another source
           </button>
+        </section>
+      ) : null}
+
+      {health && destination && !showSettings && transferPreview ? (
+        <section className="source-card" aria-labelledby="transfer-preview-title">
+          <p className="eyebrow">Step 4 · Confirm</p>
+          <h2 id="transfer-preview-title">Review this transfer</h2>
+          <p className="source-explanation">
+            {transferPreview.pending} of {transferPreview.total} bookmarks are
+            pending for {transferPreview.destination.userName}.{" "}
+            {transferPreview.previouslyDelivered} were delivered previously.
+          </p>
         </section>
       ) : null}
 
@@ -204,6 +240,7 @@ export default function App({
                     setDestination(null);
                     setSourceMode(null);
                     setReadySource(null);
+                    setTransferPreview(null);
                     setShowSettings(false);
                   }
                 : undefined
