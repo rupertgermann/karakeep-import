@@ -31,11 +31,15 @@ fn fixture() -> PathBuf {
 }
 
 fn request(acquisition_id: &str) -> XAcquisitionRequest {
+    request_for_profile(acquisition_id, "Default")
+}
+
+fn request_for_profile(acquisition_id: &str, profile_id: &str) -> XAcquisitionRequest {
     XAcquisitionRequest {
         acquisition_id: acquisition_id.to_string(),
         source: XSourceReference {
             browser_id: "chrome".to_string(),
-            profile_id: "Default".to_string(),
+            profile_id: profile_id.to_string(),
         },
     }
 }
@@ -54,6 +58,35 @@ fn terminal_event(receiver: &Receiver<AcquisitionEvent>) -> AcquisitionEvent {
             return event;
         }
     }
+}
+
+fn run_acquisition(
+    supervisor: &AcquisitionSupervisor,
+    runner: &BridgeRunner,
+    store: &SnapshotStore,
+    request: XAcquisitionRequest,
+) -> AcquisitionEvent {
+    let (sender, receiver) = mpsc::channel();
+    supervisor
+        .start(runner, request, store.clone(), move |event| {
+            sender.send(event).expect("event receiver remains open");
+        })
+        .expect("acquisition starts");
+    terminal_event(&receiver)
+}
+
+fn persisted_text(path: &std::path::Path) -> String {
+    fs::read_dir(path)
+        .expect("private data directory")
+        .map(|entry| entry.expect("private data entry").path())
+        .map(|path| {
+            if path.is_dir() {
+                persisted_text(&path)
+            } else {
+                fs::read_to_string(path).expect("private text file")
+            }
+        })
+        .collect()
 }
 
 struct ScopedEnvironment {
@@ -134,23 +167,19 @@ fn successful_acquisition_promotes_the_private_snapshot_after_progress() {
 fn compatibility_failure_preserves_the_previous_snapshot_and_redacts_session_values() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
-    fs::create_dir_all(store.root()).expect("snapshot directory");
-    fs::write(store.snapshot_path(), "previous snapshot\n").expect("previous snapshot");
     let supervisor = AcquisitionSupervisor::default();
     let runner = BridgeRunner::new(PathBuf::from("node"), fixture());
-    let (sender, receiver) = mpsc::channel();
-
-    supervisor
-        .start(
-            &runner,
-            request("acquire-compatibility"),
-            store.clone(),
-            move |event| {
-                sender.send(event).expect("event receiver remains open");
-            },
-        )
-        .expect("acquisition starts");
-    let event = terminal_event(&receiver);
+    assert!(matches!(
+        run_acquisition(&supervisor, &runner, &store, request("acquire-success")),
+        AcquisitionEvent::Completed { .. }
+    ));
+    let previous_snapshot = fs::read_to_string(store.snapshot_path()).expect("previous snapshot");
+    let event = run_acquisition(
+        &supervisor,
+        &runner,
+        &store,
+        request("acquire-compatibility"),
+    );
 
     assert_eq!(
         (
@@ -164,9 +193,114 @@ fn compatibility_failure_preserves_the_previous_snapshot_and_redacts_session_val
                 message: "X bookmark acquisition is temporarily incompatible. A Karakeep Transfer update may be required.".to_string(),
                 previous_snapshot_available: true,
             },
-            "previous snapshot\n".to_string(),
+            previous_snapshot,
         )
     );
+}
+
+#[test]
+fn failed_acquisition_for_another_source_neither_seeds_nor_offers_the_retained_snapshot() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let supervisor = AcquisitionSupervisor::default();
+    let runner = BridgeRunner::new(PathBuf::from("node"), fixture());
+    assert!(matches!(
+        run_acquisition(
+            &supervisor,
+            &runner,
+            &store,
+            request_for_profile("acquire-profile-a", "Profile A"),
+        ),
+        AcquisitionEvent::Completed { .. }
+    ));
+    let profile_a_snapshot = fs::read_to_string(store.snapshot_path()).expect("profile A snapshot");
+    let event = run_acquisition(
+        &supervisor,
+        &runner,
+        &store,
+        request_for_profile("acquire-cross-source-failure", "Profile B"),
+    );
+
+    assert_eq!(
+        (
+            event,
+            fs::read_to_string(store.snapshot_path()).expect("profile A snapshot remains"),
+        ),
+        (
+            AcquisitionEvent::Failed {
+                acquisition_id: "acquire-cross-source-failure".to_string(),
+                code: AcquisitionFailureCode::SourceUnavailable,
+                message: "The selected browser profile is no longer available.".to_string(),
+                previous_snapshot_available: false,
+            },
+            profile_a_snapshot,
+        )
+    );
+}
+
+#[test]
+fn successful_acquisition_for_another_source_replaces_and_binds_the_snapshot() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let supervisor = AcquisitionSupervisor::default();
+    let runner = BridgeRunner::new(PathBuf::from("node"), fixture());
+    assert!(matches!(
+        run_acquisition(
+            &supervisor,
+            &runner,
+            &store,
+            request_for_profile("acquire-profile-a", "Profile A"),
+        ),
+        AcquisitionEvent::Completed { .. }
+    ));
+    assert!(matches!(
+        run_acquisition(
+            &supervisor,
+            &runner,
+            &store,
+            request_for_profile("acquire-profile-b", "Profile B"),
+        ),
+        AcquisitionEvent::Completed { .. }
+    ));
+    assert_eq!(
+        fs::read_to_string(store.snapshot_path()).expect("profile B snapshot"),
+        "{\"id\":\"profile-b\",\"tweetId\":\"profile-b\",\"url\":\"https://x.com/example/status/profile-b\",\"folderNames\":[]}\n"
+    );
+
+    assert_eq!(
+        run_acquisition(
+            &supervisor,
+            &runner,
+            &store,
+            request_for_profile("acquire-same-source-failure", "Profile B"),
+        ),
+        AcquisitionEvent::Failed {
+            acquisition_id: "acquire-same-source-failure".to_string(),
+            code: AcquisitionFailureCode::XCompatibility,
+            message: "X bookmark acquisition is temporarily incompatible. A Karakeep Transfer update may be required.".to_string(),
+            previous_snapshot_available: true,
+        }
+    );
+}
+
+#[test]
+fn source_binding_does_not_persist_the_browser_profile_path() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let supervisor = AcquisitionSupervisor::default();
+    let runner = BridgeRunner::new(PathBuf::from("node"), fixture());
+    let profile_path = "Profiles/private-profile-path-canary";
+    assert!(matches!(
+        run_acquisition(
+            &supervisor,
+            &runner,
+            &store,
+            request_for_profile("acquire-private-profile", profile_path),
+        ),
+        AcquisitionEvent::Completed { .. }
+    ));
+
+    assert!(!persisted_text(store.root()).contains(profile_path));
 }
 
 #[test]

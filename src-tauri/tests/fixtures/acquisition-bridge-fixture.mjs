@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline";
 
@@ -69,14 +69,58 @@ for await (const line of input) {
     continue;
   }
 
-  await writeFile(
-    path.join(process.env.FT_DATA_DIR, "bookmarks.jsonl"),
-    [
-      '{"id":"one","tweetId":"1","url":"https://x.com/example/status/1","folderNames":["Research"]}',
-      '{"id":"two","tweetId":"2","url":"https://x.com/example/status/2","folderNames":[]}',
-      "",
-    ].join("\n"),
+  const snapshotPath = path.join(
+    process.env.FT_DATA_DIR,
+    "bookmarks.jsonl",
   );
+  const seededSnapshot = await readFile(snapshotPath, "utf8").catch(() => "");
+
+  if (request.requestId === "acquire-cross-source-failure") {
+    send({
+      protocolVersion: 1,
+      requestId: request.requestId,
+      type: "error",
+      error: {
+        code: seededSnapshot ? "wrong_source_seeded" : "source_unavailable",
+        message: "Profile B is unavailable.",
+      },
+    });
+    continue;
+  }
+
+  if (request.requestId === "acquire-same-source-failure") {
+    send({
+      protocolVersion: 1,
+      requestId: request.requestId,
+      type: "error",
+      error: {
+        code: seededSnapshot ? "x_compatibility" : "expected_snapshot_missing",
+        message: "X acquisition is unavailable.",
+      },
+    });
+    continue;
+  }
+
+  if (request.source.profileId === "Profile A") {
+    await writeFile(
+      snapshotPath,
+      '{"id":"profile-a","tweetId":"profile-a","url":"https://x.com/example/status/profile-a","folderNames":[]}\n',
+    );
+  } else if (request.source.profileId === "Profile B") {
+    await writeFile(
+      snapshotPath,
+      `${seededSnapshot}{"id":"profile-b","tweetId":"profile-b","url":"https://x.com/example/status/profile-b","folderNames":[]}\n`,
+    );
+  } else {
+    await writeFile(
+      snapshotPath,
+      [
+        '{"id":"one","tweetId":"1","url":"https://x.com/example/status/1","folderNames":["Research"]}',
+        '{"id":"two","tweetId":"2","url":"https://x.com/example/status/2","folderNames":[]}',
+        "",
+      ].join("\n"),
+    );
+  }
   send({
     protocolVersion: 1,
     requestId: request.requestId,

@@ -12,6 +12,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::{BridgeRunner, PROTOCOL_VERSION, XSourceReference};
 use crate::{
@@ -22,6 +23,8 @@ use crate::{
 };
 
 const SNAPSHOT_FILE: &str = "bookmarks.jsonl";
+const ACQUISITION_STATE_DIRECTORY: &str = "acquisition";
+const SOURCE_BINDING_FILE: &str = "source.json";
 const COMPATIBILITY_MESSAGE: &str = "X bookmark acquisition is temporarily incompatible. A Karakeep Transfer update may be required.";
 const GENERIC_ACQUISITION_MESSAGE: &str = "X bookmark acquisition could not be completed.";
 const MAX_WIRE_LINE_BYTES: usize = 1_048_576;
@@ -136,6 +139,12 @@ pub struct SnapshotStore {
     root: PathBuf,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotBinding {
+    source_fingerprint: String,
+}
+
 impl SnapshotStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
@@ -159,6 +168,22 @@ impl SnapshotStore {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
             Err(error) => Err(error),
         }
+    }
+
+    fn source_binding_path(&self) -> PathBuf {
+        self.root
+            .join(ACQUISITION_STATE_DIRECTORY)
+            .join(SOURCE_BINDING_FILE)
+    }
+
+    fn has_snapshot_for(&self, source: &XSourceReference) -> bool {
+        if !self.has_snapshot() {
+            return false;
+        }
+        fs::read(self.source_binding_path())
+            .ok()
+            .and_then(|binding| serde_json::from_slice::<SnapshotBinding>(&binding).ok())
+            .is_some_and(|binding| binding.source_fingerprint == source_fingerprint(source))
     }
 
     /// Returns the retained X snapshot through the same parsed delivery seam
@@ -206,7 +231,11 @@ impl SnapshotStore {
         })
     }
 
-    fn prepare(&self, acquisition_id: &str) -> Result<PathBuf, AcquisitionStartError> {
+    fn prepare(
+        &self,
+        acquisition_id: &str,
+        source: &XSourceReference,
+    ) -> Result<PathBuf, AcquisitionStartError> {
         fs::create_dir_all(&self.root)
             .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
         set_private_directory_permissions(&self.root)
@@ -219,14 +248,18 @@ impl SnapshotStore {
         fs::create_dir(&staging).map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
         set_private_directory_permissions(&staging)
             .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
-        if self.has_snapshot() {
+        if self.has_snapshot_for(source) {
             fs::copy(self.snapshot_path(), staging.join(SNAPSHOT_FILE))
                 .map_err(|_| AcquisitionStartError::PrivateStorageUnavailable)?;
         }
         Ok(staging)
     }
 
-    fn promote(&self, staging: &Path) -> Result<(), SnapshotPreviewError> {
+    fn promote(
+        &self,
+        staging: &Path,
+        source: &XSourceReference,
+    ) -> Result<(), SnapshotPreviewError> {
         let incoming = staging.join(SNAPSHOT_FILE);
         let metadata = fs::symlink_metadata(&incoming).map_err(|_| SnapshotPreviewError)?;
         if !metadata.file_type().is_file() {
@@ -235,29 +268,75 @@ impl SnapshotStore {
         preview_file(&incoming, FileSourceFormat::FieldTheoryJsonl)
             .map_err(|_| SnapshotPreviewError)?;
 
+        let state_directory = self.root.join(ACQUISITION_STATE_DIRECTORY);
+        fs::create_dir_all(&state_directory).map_err(|_| SnapshotPreviewError)?;
+        set_private_directory_permissions(&state_directory).map_err(|_| SnapshotPreviewError)?;
+        let incoming_binding = staging.join(SOURCE_BINDING_FILE);
+        fs::write(
+            &incoming_binding,
+            serde_json::to_vec(&SnapshotBinding {
+                source_fingerprint: source_fingerprint(source),
+            })
+            .map_err(|_| SnapshotPreviewError)?,
+        )
+        .map_err(|_| SnapshotPreviewError)?;
+        set_private_file_permissions(&incoming_binding).map_err(|_| SnapshotPreviewError)?;
+
         let snapshot = self.snapshot_path();
-        let backup = self.root.join(".bookmarks.previous.jsonl");
-        if backup.exists() {
-            fs::remove_file(&backup).map_err(|_| SnapshotPreviewError)?;
-        }
-        if snapshot.exists() {
-            fs::rename(&snapshot, &backup).map_err(|_| SnapshotPreviewError)?;
-        }
-        if fs::rename(&incoming, &snapshot).is_err() {
+        let source_binding = self.source_binding_path();
+        let snapshot_backup = state_directory.join("bookmarks.previous.jsonl");
+        let source_binding_backup = state_directory.join("source.previous.json");
+        for backup in [&snapshot_backup, &source_binding_backup] {
             if backup.exists() {
-                let _ = fs::rename(&backup, &snapshot);
+                fs::remove_file(backup).map_err(|_| SnapshotPreviewError)?;
             }
+        }
+        if source_binding.exists() {
+            fs::rename(&source_binding, &source_binding_backup)
+                .map_err(|_| SnapshotPreviewError)?;
+        }
+        if snapshot.exists() && fs::rename(&snapshot, &snapshot_backup).is_err() {
+            restore_file(&source_binding_backup, &source_binding);
             return Err(SnapshotPreviewError);
         }
-        if backup.exists() {
-            fs::remove_file(backup).map_err(|_| SnapshotPreviewError)?;
+        if fs::rename(&incoming, &snapshot).is_err() {
+            restore_file(&snapshot_backup, &snapshot);
+            restore_file(&source_binding_backup, &source_binding);
+            return Err(SnapshotPreviewError);
         }
-        set_private_file_permissions(&snapshot).map_err(|_| SnapshotPreviewError)
+        if fs::rename(&incoming_binding, &source_binding).is_err() {
+            let _ = fs::remove_file(&snapshot);
+            restore_file(&snapshot_backup, &snapshot);
+            restore_file(&source_binding_backup, &source_binding);
+            return Err(SnapshotPreviewError);
+        }
+        set_private_file_permissions(&snapshot).map_err(|_| SnapshotPreviewError)?;
+        set_private_file_permissions(&source_binding).map_err(|_| SnapshotPreviewError)?;
+        for backup in [snapshot_backup, source_binding_backup] {
+            if backup.exists() {
+                fs::remove_file(backup).map_err(|_| SnapshotPreviewError)?;
+            }
+        }
+        Ok(())
     }
 
     fn cleanup(&self, staging: &Path) {
         let _ = fs::remove_dir_all(staging);
     }
+}
+
+fn restore_file(backup: &Path, destination: &Path) {
+    if backup.exists() {
+        let _ = fs::rename(backup, destination);
+    }
+}
+
+fn source_fingerprint(source: &XSourceReference) -> String {
+    let mut digest = Sha256::new();
+    digest.update(source.browser_id.as_bytes());
+    digest.update([0]);
+    digest.update(source.profile_id.as_bytes());
+    format!("{:x}", digest.finalize())
 }
 
 #[cfg(unix)]
@@ -323,7 +402,8 @@ impl AcquisitionSupervisor {
             return Err(AcquisitionStartError::OperationActive);
         }
 
-        let staging = store.prepare(&request.acquisition_id)?;
+        let source = request.source.clone();
+        let staging = store.prepare(&request.acquisition_id, &source)?;
         let mut command = Command::new(&runner.node_path);
         command
             .arg(&runner.bridge_path)
@@ -413,7 +493,8 @@ impl AcquisitionSupervisor {
                         let Some(data) = message.data else {
                             break;
                         };
-                        if data.media_downloaded != Some(false) || store.promote(&staging).is_err()
+                        if data.media_downloaded != Some(false)
+                            || store.promote(&staging, &source).is_err()
                         {
                             break;
                         }
@@ -433,7 +514,11 @@ impl AcquisitionSupervisor {
                     }
                     "error" => {
                         let code = message.error.as_ref().map(|error| error.code.as_str());
-                        terminal = Some(failure_event(&acquisition_id, code, store.has_snapshot()));
+                        terminal = Some(failure_event(
+                            &acquisition_id,
+                            code,
+                            store.has_snapshot_for(&source),
+                        ));
                         break;
                     }
                     _ => break,
@@ -451,7 +536,7 @@ impl AcquisitionSupervisor {
                         acquisition_id: acquisition_id.clone(),
                     }
                 } else {
-                    failure_event(&acquisition_id, None, store.has_snapshot())
+                    failure_event(&acquisition_id, None, store.has_snapshot_for(&source))
                 });
             }
             if let Ok(mut current) = active.lock()
