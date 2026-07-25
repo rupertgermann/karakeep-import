@@ -1,6 +1,9 @@
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use serde::{Deserialize, Serialize};
@@ -450,16 +453,27 @@ fn preview_x_snapshot(
 }
 
 struct TransferState {
+    approved_file_source: Mutex<Option<ApprovedFileSource>>,
     coordinator: Mutex<Option<Arc<DeliveryCoordinator>>>,
     ledger_path: PathBuf,
+    next_file_approval: AtomicU64,
     operations: OperationGate,
+}
+
+#[derive(Clone)]
+struct ApprovedFileSource {
+    approval_id: String,
+    preview: file_source::FileSourcePreview,
+    source: TransferSourceRequest,
 }
 
 impl TransferState {
     fn new(ledger_path: PathBuf) -> Self {
         Self {
+            approved_file_source: Mutex::new(None),
             coordinator: Mutex::new(None),
             ledger_path,
+            next_file_approval: AtomicU64::new(1),
             operations: OperationGate::default(),
         }
     }
@@ -468,12 +482,55 @@ impl TransferState {
     fn in_memory() -> Self {
         let ledger = ledger::DeliveryLedger::open_in_memory().expect("in-memory delivery ledger");
         Self {
+            approved_file_source: Mutex::new(None),
             coordinator: Mutex::new(Some(Arc::new(DeliveryCoordinator::new(Arc::new(
                 Mutex::new(ledger),
             ))))),
             ledger_path: PathBuf::new(),
+            next_file_approval: AtomicU64::new(1),
             operations: OperationGate::default(),
         }
+    }
+
+    fn approve_file_source(
+        &self,
+        source: &TransferSourceRequest,
+        preview: &file_source::FileSourcePreview,
+    ) -> Result<Option<String>, TransferCommandError> {
+        if !matches!(source, TransferSourceRequest::File { .. }) {
+            return Ok(None);
+        }
+        let approval_id = format!(
+            "file-approval-{}",
+            self.next_file_approval.fetch_add(1, Ordering::Relaxed)
+        );
+        *self.approved_file_source.lock().map_err(|_| {
+            TransferCommandError::for_code(TransferCommandErrorCode::DeliveryFailed)
+        })? = Some(ApprovedFileSource {
+            approval_id: approval_id.clone(),
+            preview: preview.clone(),
+            source: source.clone(),
+        });
+        Ok(Some(approval_id))
+    }
+
+    fn approved_file_preview(
+        &self,
+        approval_id: Option<&str>,
+        source: &TransferSourceRequest,
+    ) -> Result<file_source::FileSourcePreview, TransferCommandError> {
+        let approved = self.approved_file_source.lock().map_err(|_| {
+            TransferCommandError::for_code(TransferCommandErrorCode::DeliveryFailed)
+        })?;
+        approved
+            .as_ref()
+            .filter(|approved| {
+                Some(approved.approval_id.as_str()) == approval_id && &approved.source == source
+            })
+            .map(|approved| approved.preview.clone())
+            .ok_or_else(|| {
+                TransferCommandError::for_code(TransferCommandErrorCode::SourceUnavailable)
+            })
     }
 
     fn coordinator(&self) -> Result<Arc<DeliveryCoordinator>, TransferCommandError> {
@@ -504,6 +561,7 @@ impl TransferState {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StartDeliveryRequest {
+    approval_id: Option<String>,
     delivery_id: String,
     source: TransferSourceRequest,
 }
@@ -555,6 +613,8 @@ impl TransferCommandError {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TransferPreview {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    approval_id: Option<String>,
     total: usize,
     pending: usize,
     previously_delivered: usize,
@@ -618,7 +678,9 @@ fn preview_transfer(
         .coordinator()?
         .preview(&preview, &destination_identity)
         .map_err(map_coordinator_error)?;
+    let approval_id = transfers.approve_file_source(&source, &preview)?;
     Ok(TransferPreview {
+        approval_id,
         total: counts.total,
         pending: counts.pending,
         previously_delivered: counts.previously_delivered,
@@ -649,8 +711,13 @@ fn start_delivery<R: tauri::Runtime>(
         .0
         .delivery_api()
         .map_err(map_destination_error)?;
-    let preview = resolve_transfer_source(&request.source, &field_theory)
-        .map_err(map_transfer_source_error)?;
+    let preview = match &request.source {
+        TransferSourceRequest::X => resolve_transfer_source(&request.source, &field_theory)
+            .map_err(map_transfer_source_error)?,
+        TransferSourceRequest::File { .. } => {
+            transfers.approved_file_preview(request.approval_id.as_deref(), &request.source)?
+        }
+    };
     let sink: Arc<dyn DeliveryEventSink> = Arc::new(TauriDeliveryEventSink(app));
     let coordinator = transfers.coordinator()?;
     let run = coordinator
@@ -777,16 +844,16 @@ mod tests {
         fs,
         path::PathBuf,
         sync::{
-            Arc,
+            Arc, Mutex,
             atomic::{AtomicUsize, Ordering},
             mpsc,
         },
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use serde_json::{Value, json};
     use tauri::{
-        Listener, WebviewWindowBuilder,
+        Listener, Manager, WebviewWindowBuilder,
         test::{
             INVOKE_KEY, assert_ipc_response, get_ipc_response, mock_builder, mock_context,
             noop_assets,
@@ -800,14 +867,19 @@ mod tests {
     #[derive(Default)]
     struct SuccessfulDeliveryApi {
         creates: AtomicUsize,
+        notes: Mutex<Vec<Option<String>>>,
     }
 
     impl super::karakeep::KarakeepApi for SuccessfulDeliveryApi {
         fn ensure_bookmark(
             &self,
-            _draft: &super::karakeep::BookmarkDraft,
+            draft: &super::karakeep::BookmarkDraft,
             _cancellation: &dyn super::karakeep::RequestCancellation,
         ) -> Result<super::karakeep::EnsuredBookmark, super::karakeep::ApiError> {
+            self.notes
+                .lock()
+                .expect("captured notes")
+                .push(draft.note.clone());
             let number = self.creates.fetch_add(1, Ordering::SeqCst) + 1;
             Ok(super::karakeep::EnsuredBookmark {
                 bookmark: super::karakeep::KarakeepBookmark {
@@ -1381,10 +1453,14 @@ mod tests {
     }
 
     #[test]
-    fn file_transfer_runs_through_the_tauri_boundary_and_updates_preview() {
+    fn file_delivery_uses_the_reviewed_snapshot_for_retries_and_rejects_stale_approval() {
         let directory = tempdir().expect("temporary app state");
-        let source =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl");
+        let source = directory.path().join("selected-bookmarks.jsonl");
+        let approved_contents = fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl"),
+        )
+        .expect("approved fixture");
+        fs::write(&source, &approved_contents).expect("selected source");
         let api = Arc::new(SuccessfulDeliveryApi::default());
         let app = super::configure_builder(mock_builder())
             .manage(super::FieldTheoryState::bundled(
@@ -1427,8 +1503,18 @@ mod tests {
         .expect("preview succeeds")
         .deserialize::<Value>()
         .expect("preview JSON");
+        let approval_id = preview["approvalId"].clone();
+        let approval_text = approval_id.as_str().expect("opaque approval ID");
+        assert!(!approval_text.contains("selected-bookmarks"));
+        assert!(!approval_text.contains(&directory.path().display().to_string()));
+        assert!(!approval_text.contains("A useful post"));
+        let mut preview_summary = preview;
+        preview_summary
+            .as_object_mut()
+            .expect("preview object")
+            .remove("approvalId");
         assert_eq!(
-            preview,
+            preview_summary,
             json!({
                 "total": 1,
                 "pending": 1,
@@ -1441,6 +1527,11 @@ mod tests {
                 }
             })
         );
+        fs::write(
+            &source,
+            approved_contents.replace("A useful post", "Changed after review"),
+        )
+        .expect("source changes after preview");
 
         assert_ipc_response(
             &webview,
@@ -1451,6 +1542,7 @@ mod tests {
                 url: "tauri://localhost".parse().expect("valid IPC origin"),
                 body: json!({
                     "request": {
+                        "approvalId": approval_id.clone(),
                         "deliveryId": "delivery-ipc",
                         "source": request_body["source"].clone()
                     }
@@ -1486,15 +1578,62 @@ mod tests {
             })
         );
         assert_eq!(api.creates.load(Ordering::SeqCst), 1);
+        let notes = api.notes.lock().expect("captured notes");
+        let delivered_note = notes[0].as_deref().expect("delivered note");
+        assert!(delivered_note.contains("A useful post"));
+        assert!(!delivered_note.contains("Changed after review"));
+        drop(notes);
+
+        let operation_timeout = Instant::now() + Duration::from_secs(2);
+        while app.state::<super::TransferState>().operations.is_active()
+            && Instant::now() < operation_timeout
+        {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            !app.state::<super::TransferState>().operations.is_active(),
+            "completed delivery releases the operation"
+        );
+        assert_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: "start_delivery".into(),
+                callback: tauri::ipc::CallbackFn(4),
+                error: tauri::ipc::CallbackFn(5),
+                url: "tauri://localhost".parse().expect("valid IPC origin"),
+                body: json!({
+                    "request": {
+                        "approvalId": approval_id.clone(),
+                        "deliveryId": "delivery-retry",
+                        "source": request_body["source"].clone()
+                    }
+                })
+                .into(),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+            Ok::<_, Value>(Value::Null),
+        );
+        let retry_terminal = (0..2)
+            .find_map(|_| {
+                let payload = delivered
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("retry delivery event");
+                let value: Value = serde_json::from_str(&payload).expect("retry event JSON");
+                (value["type"] == "completed").then_some(value)
+            })
+            .expect("retry completed event");
+        assert_eq!(retry_terminal["deliveryId"], "delivery-retry");
+        assert_eq!(api.creates.load(Ordering::SeqCst), 1);
 
         let after = get_ipc_response(
             &webview,
             InvokeRequest {
                 cmd: "preview_transfer".into(),
-                callback: tauri::ipc::CallbackFn(4),
-                error: tauri::ipc::CallbackFn(5),
+                callback: tauri::ipc::CallbackFn(6),
+                error: tauri::ipc::CallbackFn(7),
                 url: "tauri://localhost".parse().expect("valid IPC origin"),
-                body: request_body.into(),
+                body: request_body.clone().into(),
                 headers: Default::default(),
                 invoke_key: INVOKE_KEY.to_string(),
             },
@@ -1508,6 +1647,30 @@ mod tests {
                 after["previouslyDelivered"].as_u64(),
             ),
             (Some(0), Some(1))
+        );
+
+        assert_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: "start_delivery".into(),
+                callback: tauri::ipc::CallbackFn(8),
+                error: tauri::ipc::CallbackFn(9),
+                url: "tauri://localhost".parse().expect("valid IPC origin"),
+                body: json!({
+                    "request": {
+                        "approvalId": approval_id,
+                        "deliveryId": "delivery-stale-approval",
+                        "source": request_body["source"].clone()
+                    }
+                })
+                .into(),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+            Err(json!({
+                "code": "source-unavailable",
+                "message": "The selected bookmark source is unavailable."
+            })),
         );
     }
 

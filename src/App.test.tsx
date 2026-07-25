@@ -266,6 +266,7 @@ describe("Karakeep Transfer shell", () => {
     const stopListening = vi.fn();
     const deliveryApi = transferApi({
       previewTransfer: vi.fn().mockResolvedValue({
+        approvalId: "file-approval-1",
         total: 1,
         pending: 1,
         previouslyDelivered: 0,
@@ -317,6 +318,7 @@ describe("Karakeep Transfer shell", () => {
     await waitFor(() =>
       expect(deliveryApi.startDelivery).toHaveBeenCalledWith(
         {
+          approvalId: "file-approval-1",
           deliveryId: "delivery-1",
           source: {
             kind: "file",

@@ -17,6 +17,7 @@ export type TransferSourceRequest =
     };
 
 export interface StartDeliveryRequest {
+  approvalId?: string;
   deliveryId: string;
   source: TransferSourceRequest;
 }

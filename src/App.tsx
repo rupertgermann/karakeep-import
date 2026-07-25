@@ -181,7 +181,13 @@ export default function App({
     activeDelivery.current = { id: deliveryId };
     try {
       const unlisten = await transferApi.startDelivery(
-        { deliveryId, source: deliverySource },
+        {
+          ...(preview.approvalId
+            ? { approvalId: preview.approvalId }
+            : {}),
+          deliveryId,
+          source: deliverySource,
+        },
         (event) => handleDeliveryEvent(deliveryId, preview, event),
       );
       if (terminalDeliveries.current.delete(deliveryId)) {

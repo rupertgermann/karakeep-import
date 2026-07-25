@@ -95,6 +95,36 @@ describe("transfer desktop API", () => {
     });
   });
 
+  it("forwards the opaque approval alongside the existing File Source selector", async () => {
+    mocks.listen.mockResolvedValue(() => {});
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await transferApi.startDelivery(
+      {
+        approvalId: "file-approval-1",
+        deliveryId: "delivery-file",
+        source: {
+          kind: "file",
+          path: "/private/selected/bookmarks.jsonl",
+          format: "fieldTheoryJsonl",
+        },
+      },
+      vi.fn(),
+    );
+
+    expect(mocks.invoke).toHaveBeenCalledWith("start_delivery", {
+      request: {
+        approvalId: "file-approval-1",
+        deliveryId: "delivery-file",
+        source: {
+          kind: "file",
+          path: "/private/selected/bookmarks.jsonl",
+          format: "fieldTheoryJsonl",
+        },
+      },
+    });
+  });
+
   it("forwards only events for the delivery that installed the listener", async () => {
     let listener: ((event: { payload: unknown }) => void) | undefined;
     mocks.listen.mockImplementation(async (_name, callback) => {

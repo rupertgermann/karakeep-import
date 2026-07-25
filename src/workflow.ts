@@ -5,6 +5,7 @@ export interface DestinationSummary {
 }
 
 export interface TransferPreview {
+  approvalId?: string;
   total: number;
   pending: number;
   previouslyDelivered: number;
