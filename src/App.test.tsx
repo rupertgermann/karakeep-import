@@ -50,6 +50,7 @@ function settingsApi(): SettingsApi {
       },
       lastFailure: null,
     }),
+    saveDiagnostics: vi.fn().mockResolvedValue(false),
     versionInformation: vi.fn().mockResolvedValue({
       app: "0.1.0",
       fieldTheory: "1.3.22",

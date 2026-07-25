@@ -64,6 +64,17 @@ describe("settings desktop API", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("export_diagnostics");
   });
 
+  it.each([true, false])(
+    "reports whether the native diagnostics Save dialog completed: %s",
+    async (saved) => {
+      mocks.invoke.mockResolvedValue(saved);
+
+      await expect(settingsDesktopApi.saveDiagnostics()).resolves.toBe(saved);
+
+      expect(mocks.invoke).toHaveBeenCalledWith("save_diagnostics");
+    },
+  );
+
   it("requests component versions from the desktop backend", async () => {
     mocks.invoke.mockResolvedValue({});
 

@@ -43,6 +43,7 @@ function createSettingsApi(): SettingsApi {
     replaceXSource: vi.fn().mockResolvedValue(undefined),
     deleteLocalTransferData: vi.fn().mockResolvedValue(undefined),
     exportDiagnostics: vi.fn().mockResolvedValue(diagnostics),
+    saveDiagnostics: vi.fn().mockResolvedValue(false),
     versionInformation: vi.fn().mockResolvedValue(diagnostics.versions),
     manualUpdateCheck: vi.fn().mockResolvedValue({
       requestedByUser: true,

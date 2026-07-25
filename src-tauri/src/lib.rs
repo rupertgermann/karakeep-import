@@ -7,6 +7,7 @@ pub mod bookmark;
 pub mod delivery;
 pub mod destination;
 pub mod diagnostics;
+pub mod diagnostics_save;
 pub mod domain;
 pub mod fieldtheory;
 pub mod file_source;
@@ -61,6 +62,22 @@ fn export_diagnostics(
     state: tauri::State<'_, diagnostics::DiagnosticsStore>,
 ) -> Result<diagnostics::DiagnosticsExport, &'static str> {
     state.explicit_export()
+}
+
+#[tauri::command]
+async fn save_diagnostics<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, diagnostics::DiagnosticsStore>,
+) -> Result<bool, &'static str> {
+    let export = state.explicit_export()?;
+    let dialog = diagnostics_save::NativeDiagnosticsSaveDialog::new(app);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        diagnostics_save::save_diagnostics_export(&dialog, &export)
+    })
+    .await
+    .map_err(|_| "diagnostics could not be saved")?
+    .map_err(diagnostics_save::DiagnosticsSaveError::public_message)
 }
 
 #[tauri::command]
@@ -238,6 +255,7 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
             version_information,
             manual_update_check,
             export_diagnostics,
+            save_diagnostics,
             discover_x_sources,
             select_x_source,
             preview_file_source,
