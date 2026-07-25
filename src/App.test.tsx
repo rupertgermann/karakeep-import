@@ -5,18 +5,25 @@ import App from "./App";
 import type { DesktopApi } from "./desktop-api";
 
 describe("Karakeep Transfer shell", () => {
-  const xSourceApi = {
-    discoverXSources: vi.fn().mockResolvedValue({ browsers: [] }),
-    selectXSource: vi.fn(),
-  };
+  function desktopApi(
+    health: DesktopApi["health"],
+  ): DesktopApi {
+    return {
+      health,
+      discoverXSources: vi.fn().mockResolvedValue({ browsers: [] }),
+      selectXSource: vi.fn(),
+      destinationStatus: vi.fn().mockResolvedValue(null),
+      connectDestination: vi.fn(),
+      forgetDestination: vi.fn(),
+    };
+  }
 
   it("shows a checking state while the desktop bridge responds", () => {
-    const desktopApi: DesktopApi = {
-      ...xSourceApi,
-      health: vi.fn().mockReturnValue(new Promise<never>(() => undefined)),
-    };
+    const api = desktopApi(
+      vi.fn().mockReturnValue(new Promise<never>(() => undefined)),
+    );
 
-    render(<App desktopApi={desktopApi} />);
+    render(<App desktopApi={api} />);
 
     expect(
       screen.getByRole("status", { name: "Checking desktop bridge" }),
@@ -24,16 +31,15 @@ describe("Karakeep Transfer shell", () => {
   });
 
   it("shows the branded desktop shell after the backend health check", async () => {
-    const desktopApi: DesktopApi = {
-      ...xSourceApi,
-      health: vi.fn().mockResolvedValue({
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
         status: "ok",
         appName: "Karakeep Transfer",
         version: "0.1.0",
       }),
-    };
+    );
 
-    render(<App desktopApi={desktopApi} />);
+    render(<App desktopApi={api} />);
 
     expect(
       screen.getByRole("heading", { name: "Karakeep Transfer" }),
@@ -46,12 +52,11 @@ describe("Karakeep Transfer shell", () => {
   });
 
   it("reports when the desktop bridge is unavailable", async () => {
-    const desktopApi: DesktopApi = {
-      ...xSourceApi,
-      health: vi.fn().mockRejectedValue(new Error("bridge unavailable")),
-    };
+    const api = desktopApi(
+      vi.fn().mockRejectedValue(new Error("bridge unavailable")),
+    );
 
-    render(<App desktopApi={desktopApi} />);
+    render(<App desktopApi={api} />);
 
     expect(
       await screen.findByRole("status", {

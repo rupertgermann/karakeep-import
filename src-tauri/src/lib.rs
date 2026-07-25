@@ -1,27 +1,31 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use serde::Serialize;
 use tauri::Manager;
 
-pub mod fieldtheory;
-
-use fieldtheory::{
-    BridgeCommand, BridgeRequest, DiscoveryResponse, FieldTheoryState, SelectedXSource,
-    XSourceSelection,
-};
-
 pub mod bookmark;
+pub mod delivery;
+pub mod destination;
 pub mod diagnostics;
 pub mod domain;
+pub mod fieldtheory;
 pub mod file_source;
+pub mod karakeep;
 pub mod ledger;
 pub mod private_data;
 pub mod redaction;
 pub mod updates;
 pub mod versions;
 
-pub mod delivery;
-pub mod karakeep;
+use destination::{
+    ConnectDestinationInput, DestinationError, DestinationErrorCode, DestinationService,
+    DestinationSummary, FileDestinationSettings, NativeCredentialVault, ReqwestKarakeepClient,
+};
+
+use fieldtheory::{
+    BridgeCommand, BridgeRequest, DiscoveryResponse, FieldTheoryState, SelectedXSource,
+    XSourceSelection,
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -106,6 +110,42 @@ fn preview_file_source(
     })
 }
 
+type NativeDestinationService =
+    DestinationService<ReqwestKarakeepClient, NativeCredentialVault, FileDestinationSettings>;
+
+struct DestinationState(Arc<NativeDestinationService>);
+
+#[tauri::command]
+async fn destination_status(
+    state: tauri::State<'_, DestinationState>,
+) -> Result<Option<DestinationSummary>, DestinationError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || service.status())
+        .await
+        .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?
+}
+
+#[tauri::command]
+async fn connect_destination(
+    input: ConnectDestinationInput,
+    state: tauri::State<'_, DestinationState>,
+) -> Result<DestinationSummary, DestinationError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || service.connect(input))
+        .await
+        .map_err(|_| DestinationError::for_code(DestinationErrorCode::Network))?
+}
+
+#[tauri::command]
+async fn forget_destination(
+    state: tauri::State<'_, DestinationState>,
+) -> Result<(), DestinationError> {
+    let service = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || service.forget())
+        .await
+        .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?
+}
+
 fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .plugin(tauri_plugin_dialog::init())
@@ -113,6 +153,13 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
         .setup(|app| {
             let resource_dir = app.path().resource_dir()?;
             app.manage(FieldTheoryState::bundled(&resource_dir));
+            let settings_path = app.path().app_config_dir()?.join("destination.json");
+            let service = DestinationService::new(
+                ReqwestKarakeepClient::new(),
+                NativeCredentialVault::new()?,
+                FileDestinationSettings::new(settings_path),
+            );
+            app.manage(DestinationState(Arc::new(service)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -122,7 +169,10 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
             export_diagnostics,
             discover_x_sources,
             select_x_source,
-            preview_file_source
+            preview_file_source,
+            destination_status,
+            connect_destination,
+            forget_destination
         ])
 }
 

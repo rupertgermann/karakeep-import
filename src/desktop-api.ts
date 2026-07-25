@@ -79,7 +79,29 @@ export interface FileSourceApi {
   ): Promise<FileSourcePreview>;
 }
 
-export interface DesktopApi extends XSourceApi {
+export interface DestinationSummary {
+  serverUrl: string;
+  userId: string;
+  displayName: string;
+  email: string | null;
+  insecureHttp: boolean;
+}
+
+export interface ConnectDestinationInput {
+  server: string;
+  apiKey: string;
+  allowInsecureHttp: boolean;
+}
+
+export interface DestinationApi {
+  destinationStatus(): Promise<DestinationSummary | null>;
+  connectDestination(
+    input: ConnectDestinationInput,
+  ): Promise<DestinationSummary>;
+  forgetDestination(): Promise<void>;
+}
+
+export interface DesktopApi extends DestinationApi, XSourceApi {
   health(): Promise<HealthResponse>;
 }
 
@@ -104,4 +126,9 @@ export const desktopApi: DesktopApi & FileSourceApi = {
   },
   previewFileSource: (path, format) =>
     invoke<FileSourcePreview>("preview_file_source", { path, format }),
+  destinationStatus: () =>
+    invoke<DestinationSummary | null>("destination_status"),
+  connectDestination: (input) =>
+    invoke<DestinationSummary>("connect_destination", { input }),
+  forgetDestination: () => invoke<void>("forget_destination"),
 };

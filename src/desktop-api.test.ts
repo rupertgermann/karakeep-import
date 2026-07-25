@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 import {
   desktopApi,
+  type DestinationSummary,
   type FileSourcePreview,
   type HealthResponse,
 } from "./desktop-api";
@@ -112,5 +113,34 @@ describe("desktop API", () => {
       path: "/private/bookmarks.txt",
       format: "fieldTheoryJsonl",
     });
+  });
+
+  it("uses the destination command boundary without frontend persistence", async () => {
+    const destination: DestinationSummary = {
+      serverUrl: "https://keep.example",
+      userId: "user-1",
+      displayName: "Ada Example",
+      email: "ada@example.com",
+      insecureHttp: false,
+    };
+    mocks.invoke.mockResolvedValue(destination);
+
+    await desktopApi.destinationStatus();
+    await desktopApi.connectDestination({
+      server: "https://keep.example",
+      apiKey: "transient-key",
+      allowInsecureHttp: false,
+    });
+    await desktopApi.forgetDestination();
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "destination_status");
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "connect_destination", {
+      input: {
+        server: "https://keep.example",
+        apiKey: "transient-key",
+        allowInsecureHttp: false,
+      },
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(3, "forget_destination");
   });
 });

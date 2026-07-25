@@ -216,6 +216,144 @@ h1 {
   background: #a9453d;
 }
 
+.destination-panel {
+  margin-top: 2rem;
+  padding-top: 1.75rem;
+  border-top: 1px solid #d8d3c8;
+}
+
+.destination-step,
+.destination-loading {
+  margin: 0 0 0.5rem;
+  color: #526b54;
+  font-size: 0.75rem;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.destination-panel h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+.destination-copy,
+.destination-server,
+.destination-email,
+.security-hint,
+.security-warning {
+  color: #687067;
+  line-height: 1.5;
+}
+
+.destination-copy {
+  margin: 0.75rem 0 1.25rem;
+}
+
+.destination-server {
+  margin: 0.65rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.destination-email {
+  margin: 0.2rem 0 1rem;
+}
+
+.destination-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.destination-form label:not(.http-exception) {
+  display: grid;
+  gap: 0.4rem;
+  color: #3e5641;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.destination-form input[type="url"],
+.destination-form input[type="password"] {
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid #bdb8ab;
+  border-radius: 0.75rem;
+  background: #fffdf8;
+  color: #263028;
+}
+
+.destination-form input:focus-visible,
+.button:focus-visible {
+  outline: 3px solid rgb(82 107 84 / 25%);
+  outline-offset: 2px;
+  border-color: #526b54;
+}
+
+.http-exception {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem;
+  align-items: start;
+  color: #5f4a24;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.http-exception input {
+  margin-top: 0.2rem;
+}
+
+.security-hint,
+.security-warning {
+  margin: -0.4rem 0 0;
+  color: #765e2f;
+  font-size: 0.8rem;
+}
+
+[role="alert"] {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid #d2aaa5;
+  border-radius: 0.75rem;
+  background: #fff1ef;
+  color: #8c352f;
+  line-height: 1.45;
+}
+
+.button {
+  justify-self: start;
+  padding: 0.75rem 1.1rem;
+  border: 1px solid #405a43;
+  border-radius: 999px;
+  background: #526b54;
+  color: #fffdf8;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.button:hover:not(:disabled) {
+  background: #405a43;
+}
+
+.button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.button--secondary {
+  margin-top: 1rem;
+  border-color: #bdb8ab;
+  background: transparent;
+  color: #405a43;
+}
+
+.button--secondary:hover:not(:disabled) {
+  background: #eee9df;
+}
+
 footer {
   color: #687067;
   font-size: 0.75rem;

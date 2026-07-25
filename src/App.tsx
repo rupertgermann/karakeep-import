@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { desktopApi as defaultDesktopApi } from "./desktop-api";
 import type { DesktopApi, HealthResponse } from "./desktop-api";
 import XSourceSetup from "./x-source/XSourceSetup";
+import DestinationSetup from "./DestinationSetup";
 
 interface AppProps {
   desktopApi?: DesktopApi;
@@ -71,6 +72,7 @@ export default function App({ desktopApi = defaultDesktopApi }: AppProps) {
           <span className="status-dot" aria-hidden="true" />
           {status.text}
         </p>
+        <DestinationSetup desktopApi={desktopApi} />
       </section>
 
       {health ? <XSourceSetup api={desktopApi} /> : null}
