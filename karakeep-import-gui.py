@@ -61,6 +61,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       --color-primary-hover: #3E5641;
       --color-signal: #E4B75D;
       --color-danger: #A9453D;
+      --color-danger-hover: #8C352F;
       --color-focus: #B6583F;
       --color-border: #CEC9BC;
       --color-border-strong: #7B8178;
@@ -344,11 +345,48 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       color: var(--color-text);
       box-shadow: var(--shadow-lg);
     }}
-    dialog::backdrop {{ background: rgb(23 29 24 / 68%); }}
-    .dialog-content {{ margin: 0; padding: 1.5rem; }}
-    .dialog-content h2 {{ margin: 0 0 .6rem; }}
+    dialog[open] {{
+      animation: quiet-dialog-arrive var(--duration-base) var(--ease-out) both;
+    }}
+    dialog::backdrop {{
+      background: rgb(23 29 24 / 76%);
+      backdrop-filter: blur(4px);
+    }}
+    .dialog-content {{
+      position: relative;
+      margin: 0;
+      padding: 2rem;
+      text-align: center;
+    }}
+    .dialog-warning {{
+      display: grid;
+      width: 3.25rem;
+      height: 3.25rem;
+      margin: 0 auto 1.25rem;
+      place-items: center;
+      border: 1px solid var(--color-danger);
+      border-radius: 50%;
+      background: var(--color-surface-alt);
+      color: var(--color-danger);
+      font: 600 1.45rem/1 var(--font-display);
+    }}
+    .dialog-kicker {{
+      margin: 0 0 .45rem !important;
+      color: var(--color-danger) !important;
+      font: 700 .68rem/1.3 var(--font-mono);
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }}
+    .dialog-content h2 {{
+      margin: 0 0 .75rem;
+      font-size: 2rem;
+      font-weight: 500;
+      letter-spacing: -.035em;
+      line-height: 1;
+    }}
     .dialog-content p {{
-      margin: 0 0 1.25rem;
+      margin: 0 auto 1.5rem;
+      max-width: 34ch;
       color: var(--color-muted);
     }}
     .dialog-actions {{
@@ -362,6 +400,9 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
     }}
     #cancel-execute-button:hover {{ background: var(--color-border); }}
     #confirm-execute-button {{ background: var(--color-danger); }}
+    #confirm-execute-button:hover {{
+      background: var(--color-danger-hover);
+    }}
     .run-panel {{
       align-self: start;
       border-color: transparent;
@@ -399,6 +440,13 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       background: currentColor;
       content: "";
       box-shadow: 0 0 0 4px rgb(228 183 93 / 12%);
+    }}
+    #run-status[data-state="ready"] {{ color: var(--color-signal); }}
+    #run-status[data-state="running"] {{ color: var(--color-primary); }}
+    #run-status[data-state="success"] {{ color: var(--color-primary); }}
+    #run-status[data-state="failure"] {{ color: var(--color-danger); }}
+    #run-status[data-state="running"]::before {{
+      animation: quiet-pulse 1.35s ease-in-out infinite;
     }}
     #output {{
       min-height: 10rem;
@@ -444,6 +492,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
         --color-primary-hover: #C0D4BC;
         --color-signal: #D6AE66;
         --color-danger: #E18B7F;
+        --color-danger-hover: #F0A197;
         --color-focus: #E18B7F;
         --color-border: #424C43;
         --color-border-strong: #778178;
@@ -461,6 +510,14 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
     @keyframes quiet-arrive {{
       from {{ opacity: 0; transform: translateY(18px); }}
       to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    @keyframes quiet-dialog-arrive {{
+      from {{ opacity: 0; transform: translateY(12px) scale(.98); }}
+      to {{ opacity: 1; transform: translateY(0) scale(1); }}
+    }}
+    @keyframes quiet-pulse {{
+      0%, 100% {{ opacity: .55; transform: scale(.8); }}
+      50% {{ opacity: 1; transform: scale(1.15); }}
     }}
     @media (prefers-reduced-motion: reduce) {{
       *, *::before, *::after {{
@@ -595,6 +652,8 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       aria-describedby="execute-dialog-description"
     >
       <form class="dialog-content" method="dialog">
+        <div class="dialog-warning" aria-hidden="true">!</div>
+        <p class="dialog-kicker">Live import</p>
         <h2 id="execute-dialog-title">Import bookmarks live?</h2>
         <p id="execute-dialog-description">
           This will send pending bookmarks to Karakeep. Continue?
@@ -617,7 +676,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       <section class="run-panel" aria-labelledby="output-heading">
         <p class="run-kicker">Local CLI stream</p>
         <h2 id="output-heading">Run output</h2>
-        <p id="run-status" role="status" aria-live="polite">
+        <p id="run-status" role="status" aria-live="polite" data-state="ready">
           Ready to preview.
         </p>
         <pre id="output" role="log" aria-live="polite" tabindex="0"></pre>
@@ -648,10 +707,16 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       return document.getElementById(id).checked;
     }}
 
+    function setRunStatus(message, state) {{
+      status.textContent = message;
+      status.dataset.state = state;
+    }}
+
     function setBusy(busy, execute) {{
       for (const control of form.elements) {{
         control.disabled = busy;
       }}
+      form.setAttribute("aria-busy", String(busy));
       previewButton.textContent = busy && !execute
         ? "Previewing…"
         : "Preview import";
@@ -697,9 +762,12 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       }}
       if (event.type === "complete") {{
         const action = execute ? "Import" : "Preview";
-        status.textContent = event.exitCode === 0
-          ? action + " complete."
-          : action + " failed with exit code " + event.exitCode + ".";
+        setRunStatus(
+          event.exitCode === 0
+            ? action + " complete."
+            : action + " failed with exit code " + event.exitCode + ".",
+          event.exitCode === 0 ? "success" : "failure"
+        );
       }}
     }}
 
@@ -707,9 +775,10 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
       if (!form.reportValidity()) return;
       setBusy(true, execute);
       output.textContent = "";
-      status.textContent = execute
-        ? "Preparing live import…"
-        : "Preparing preview…";
+      setRunStatus(
+        execute ? "Preparing live import…" : "Preparing preview…",
+        "running"
+      );
       try {{
         const response = await fetch("/api/run", {{
           method: "POST",
@@ -722,7 +791,10 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
         if (!response.ok || !response.body) {{
           throw new Error(await response.text() || "Run could not start.");
         }}
-        status.textContent = execute ? "Import running…" : "Preview running…";
+        setRunStatus(
+          execute ? "Import running…" : "Preview running…",
+          "running"
+        );
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffered = "";
@@ -740,7 +812,10 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
         }}
         if (buffered) handleEvent(JSON.parse(buffered), execute);
       }} catch (error) {{
-        status.textContent = execute ? "Import failed." : "Preview failed.";
+        setRunStatus(
+          execute ? "Import failed." : "Preview failed.",
+          "failure"
+        );
         output.textContent += String(error) + "\\n";
       }} finally {{
         setBusy(false, execute);

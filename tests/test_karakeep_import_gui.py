@@ -392,6 +392,27 @@ class GuiAcceptanceTests(unittest.TestCase):
             self.assertIn("executeDialog.showModal()", page)
             self.assertNotIn("window.confirm", page)
 
+    def test_live_import_flow_exposes_distinct_visual_states(self):
+        gui = load_gui_module()
+        with running(gui.create_server(port=0)) as server:
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{server.server_port}/"
+            ) as response:
+                page = response.read().decode("utf-8")
+
+            self.assertIn('class="dialog-warning" aria-hidden="true"', page)
+            self.assertIn(
+                'id="run-status" role="status" aria-live="polite" '
+                'data-state="ready"',
+                page,
+            )
+            for state in ("ready", "running", "success", "failure"):
+                self.assertIn(
+                    f'#run-status[data-state="{state}"]',
+                    page,
+                )
+            self.assertIn("status.dataset.state = state", page)
+
     def test_live_import_uses_child_environment_and_streams_completion(self):
         gui = load_gui_module()
         FakeKarakeepHandler.requests = []
