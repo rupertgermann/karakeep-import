@@ -217,6 +217,26 @@ class GuiAcceptanceTests(unittest.TestCase):
             self.assertIn('id="preview-button"', page)
             self.assertIn("Preview is always safe", page)
 
+    def test_root_page_serves_a_square_png_favicon(self):
+        gui = load_gui_module()
+        with running(gui.create_server(port=0)) as server:
+            base_url = f"http://127.0.0.1:{server.server_port}"
+            with urllib.request.urlopen(f"{base_url}/") as response:
+                page = response.read().decode("utf-8")
+            with urllib.request.urlopen(f"{base_url}/favicon.png") as response:
+                favicon = response.read()
+                content_type = response.headers.get_content_type()
+
+            self.assertIn(
+                '<link rel="icon" type="image/png" sizes="64x64" '
+                'href="/favicon.png">',
+                page,
+            )
+            self.assertEqual(content_type, "image/png")
+            self.assertEqual(favicon[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertEqual(int.from_bytes(favicon[16:20], "big"), 64)
+            self.assertEqual(int.from_bytes(favicon[20:24], "big"), 64)
+
     def test_import_form_represents_every_cli_option(self):
         gui = load_gui_module()
         with running(gui.create_server(port=0)) as server:

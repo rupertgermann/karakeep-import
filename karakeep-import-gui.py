@@ -19,6 +19,7 @@ from typing import Any, Mapping, TextIO, cast
 
 
 IMPORTER_PATH = Path(__file__).with_name("karakeep-import.py")
+FAVICON_PATH = Path(__file__).with_name("assets") / "favicon.png"
 
 
 def load_importer():
@@ -49,6 +50,7 @@ def render_page(defaults: argparse.Namespace, run_token: str) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="run-token" content="{escaped_run_token}">
   <title>Karakeep Importer</title>
+  <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">
   <style>
     :root {{
       color-scheme: light;
@@ -878,6 +880,16 @@ class GuiRequestHandler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path == "/favicon.png":
+            body = FAVICON_PATH.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path != "/":
             self.send_error(404)
             return
