@@ -338,6 +338,7 @@ export default function App({
             setTransferError(null);
           }}
           onRunningChange={setAcquisitionActive}
+          onChooseAnotherSource={chooseAnotherSource}
         />
       ) : null}
 

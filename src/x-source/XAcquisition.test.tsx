@@ -46,6 +46,115 @@ function controlledApi() {
 }
 
 describe("X acquisition", () => {
+  it("offers another source before acquisition begins", () => {
+    const controlled = controlledApi();
+    const onChooseAnotherSource = vi.fn();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        onPreview={() => {}}
+        onChooseAnotherSource={onChooseAnotherSource}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose another source" }),
+    );
+
+    expect(onChooseAnotherSource).toHaveBeenCalledOnce();
+  });
+
+  it("does not offer another source while acquisition is running", async () => {
+    const controlled = controlledApi();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        onPreview={() => {}}
+        onChooseAnotherSource={() => {}}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalledOnce(),
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Choose another source" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers another source after acquisition is cancelled", async () => {
+    const controlled = controlledApi();
+    const onChooseAnotherSource = vi.fn();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-cancelled-switch"}
+        onPreview={() => {}}
+        onChooseAnotherSource={onChooseAnotherSource}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalledOnce(),
+    );
+
+    controlled.emit({
+      type: "cancelled",
+      acquisitionId: "acquire-ui-cancelled-switch",
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Choose another source" }),
+    );
+
+    expect(onChooseAnotherSource).toHaveBeenCalledOnce();
+  });
+
+  it("offers another source after acquisition fails", async () => {
+    const controlled = controlledApi();
+    const onChooseAnotherSource = vi.fn();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        destination={destination}
+        createAcquisitionId={() => "acquire-ui-failed-switch"}
+        onPreview={() => {}}
+        onChooseAnotherSource={onChooseAnotherSource}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Acquire X bookmarks" }),
+    );
+    await waitFor(() =>
+      expect(controlled.api.startXAcquisition).toHaveBeenCalledOnce(),
+    );
+
+    controlled.emit({
+      type: "failed",
+      acquisitionId: "acquire-ui-failed-switch",
+      code: "sourceUnavailable",
+      message: "private source details",
+      previousSnapshotAvailable: false,
+    });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Choose another source" }),
+    );
+
+    expect(onChooseAnotherSource).toHaveBeenCalledOnce();
+  });
+
   it("reports structured progress and yields a read-only Transfer Preview", async () => {
     const controlled = controlledApi();
     const onPreview = vi.fn();
@@ -58,6 +167,7 @@ describe("X acquisition", () => {
         createAcquisitionId={() => "acquire-ui-1"}
         onEvent={onEvent}
         onPreview={onPreview}
+        onChooseAnotherSource={() => {}}
       />,
     );
 
@@ -114,6 +224,7 @@ describe("X acquisition", () => {
         destination={destination}
         createAcquisitionId={() => "acquire-ui-cancel"}
         onPreview={() => {}}
+        onChooseAnotherSource={() => {}}
       />,
     );
 
@@ -142,6 +253,7 @@ describe("X acquisition", () => {
         destination={destination}
         createAcquisitionId={() => "acquire-ui-cancel-error"}
         onPreview={() => {}}
+        onChooseAnotherSource={() => {}}
       />,
     );
 
@@ -184,6 +296,7 @@ describe("X acquisition", () => {
         destination={destination}
         createAcquisitionId={() => "acquire-ui-failure"}
         onPreview={onPreview}
+        onChooseAnotherSource={() => {}}
       />,
     );
 
@@ -221,6 +334,7 @@ describe("X acquisition", () => {
         destination={destination}
         createAcquisitionId={() => "acquire-ui-cancelled"}
         onPreview={() => {}}
+        onChooseAnotherSource={() => {}}
       />,
     );
     fireEvent.click(
@@ -254,6 +368,7 @@ describe("X acquisition", () => {
         destination={destination}
         createAcquisitionId={() => "acquire-ui-preview-error"}
         onPreview={() => {}}
+        onChooseAnotherSource={() => {}}
       />,
     );
     fireEvent.click(
@@ -290,6 +405,7 @@ describe("X acquisition", () => {
         destination={destination}
         createAcquisitionId={() => "acquire-ui-start-error"}
         onPreview={() => {}}
+        onChooseAnotherSource={() => {}}
       />,
     );
 

@@ -751,6 +751,58 @@ describe("Karakeep Transfer shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("returns an idle selected X Source to the source choice", async () => {
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        discoverXSources: vi.fn().mockResolvedValue({
+          browsers: [
+            {
+              id: "chrome",
+              name: "Google Chrome",
+              profiles: [{ id: "Default", name: "Personal" }],
+            },
+          ],
+        }),
+        selectXSource: vi.fn().mockResolvedValue({
+          browserId: "chrome",
+          browserName: "Google Chrome",
+          profileId: "Default",
+          profileName: "Personal",
+        }),
+      },
+    );
+
+    render(<App desktopApi={api} xAcquisitionApi={xAcquisitionApi()} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use my X Source" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: /temporarily using my existing authenticated X session/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use this X Source" }),
+    );
+    await screen.findByRole("heading", { name: "Retrieve bookmarks from X" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose another source" }),
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Choose a bookmark source" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Retrieve bookmarks from X" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps Settings unavailable while X acquisition is active", async () => {
     const api = desktopApi(
       vi.fn().mockResolvedValue({
@@ -1059,6 +1111,7 @@ describe("Karakeep Transfer shell", () => {
     );
 
     render(<App desktopApi={api} settingsApi={settingsApi()} />);
+    await screen.findByRole("heading", { name: "Choose a bookmark source" });
     fireEvent.click(
       await screen.findByRole("button", { name: "Open Settings" }),
     );

@@ -18,6 +18,7 @@ interface XAcquisitionProps {
   onEvent?: (event: AcquisitionEvent) => void;
   onPreview: (preview: TransferPreview) => void;
   onRunningChange?: (running: boolean) => void;
+  onChooseAnotherSource: () => void;
 }
 
 type ViewState =
@@ -55,6 +56,7 @@ export default function XAcquisition({
   onEvent,
   onPreview,
   onRunningChange,
+  onChooseAnotherSource,
 }: XAcquisitionProps) {
   const [view, setView] = useState<ViewState>({ step: "idle" });
   const [cancellationError, setCancellationError] = useState<string | null>(
@@ -222,6 +224,15 @@ export default function XAcquisition({
             </button>
           ) : null}
         </div>
+      ) : null}
+      {view.step !== "running" ? (
+        <button
+          type="button"
+          className="button button--secondary"
+          onClick={onChooseAnotherSource}
+        >
+          Choose another source
+        </button>
       ) : null}
     </section>
   );
