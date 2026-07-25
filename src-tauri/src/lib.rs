@@ -27,7 +27,8 @@ pub mod updates;
 pub mod versions;
 
 use delivery_coordinator::{
-    DeliveryCoordinator, DeliveryCoordinatorErrorCode, DeliveryEvent, DeliveryEventSink, DeliveryId,
+    DeliveryCoordinator, DeliveryCoordinatorErrorCode, DeliveryEvent, DeliveryEventSink,
+    DeliveryFailureCode, DeliveryId, DeliveryTerminalEvent,
 };
 use destination::{
     ConnectDestinationInput, DestinationError, DestinationErrorCode, DestinationService,
@@ -36,8 +37,9 @@ use destination::{
 use domain::DestinationIdentity;
 
 use fieldtheory::{
-    AcquisitionEvent, BridgeCommand, BridgeRequest, DestinationPreview, DiscoveryResponse,
-    FieldTheoryState, SelectedXSource, XAcquisitionRequest, XSourceSelection, XTransferPreview,
+    AcquisitionEvent, AcquisitionFailureCode, BridgeCommand, BridgeRequest, DestinationPreview,
+    DiscoveryResponse, FieldTheoryState, SelectedXSource, XAcquisitionRequest, XSourceSelection,
+    XTransferPreview,
 };
 use operation_gate::{OperationGate, OperationKind};
 use transfer_source::{
@@ -75,16 +77,22 @@ fn manual_update_check() -> updates::ManualUpdateCheckResult {
 #[tauri::command]
 fn export_diagnostics(
     state: tauri::State<'_, diagnostics::DiagnosticsStore>,
+    field_theory: tauri::State<'_, FieldTheoryState>,
+    destination: tauri::State<'_, DestinationState>,
+    settings: tauri::State<'_, settings::SettingsService>,
 ) -> Result<diagnostics::DiagnosticsExport, &'static str> {
-    state.explicit_export()
+    current_diagnostics(&state, &field_theory, &destination, &settings)
 }
 
 #[tauri::command]
 async fn save_diagnostics<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, diagnostics::DiagnosticsStore>,
+    field_theory: tauri::State<'_, FieldTheoryState>,
+    destination: tauri::State<'_, DestinationState>,
+    settings: tauri::State<'_, settings::SettingsService>,
 ) -> Result<bool, &'static str> {
-    let export = state.explicit_export()?;
+    let export = current_diagnostics(&state, &field_theory, &destination, &settings)?;
     let dialog = diagnostics_save::NativeDiagnosticsSaveDialog::new(app);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -95,28 +103,80 @@ async fn save_diagnostics<R: tauri::Runtime>(
     .map_err(diagnostics_save::DiagnosticsSaveError::public_message)
 }
 
+fn current_diagnostics(
+    state: &diagnostics::DiagnosticsStore,
+    field_theory: &FieldTheoryState,
+    destination: &DestinationState,
+    settings: &settings::SettingsService,
+) -> Result<diagnostics::DiagnosticsExport, &'static str> {
+    let (source_hint, destination_hint) = state.component_statuses()?;
+    let source = if field_theory.has_snapshot() {
+        diagnostics::ComponentStatus::Ready
+    } else if source_hint == diagnostics::ComponentStatus::Unavailable {
+        diagnostics::ComponentStatus::Unavailable
+    } else {
+        diagnostics::ComponentStatus::NotConfigured
+    };
+    let destination = match destination.0.status() {
+        Ok(Some(_)) if destination_hint == diagnostics::ComponentStatus::Unavailable => {
+            diagnostics::ComponentStatus::Unavailable
+        }
+        Ok(Some(_)) => diagnostics::ComponentStatus::Ready,
+        Ok(None) if destination_hint == diagnostics::ComponentStatus::Unavailable => {
+            diagnostics::ComponentStatus::Unavailable
+        }
+        Ok(None) => diagnostics::ComponentStatus::NotConfigured,
+        Err(_) => diagnostics::ComponentStatus::Unavailable,
+    };
+    let storage = settings
+        .inspect_private_data()
+        .map_err(|_| "private transfer data is unavailable")?;
+    let snapshot_bytes = field_theory
+        .snapshot_bytes()
+        .map_err(|_| "private transfer data is unavailable")?;
+    state.explicit_export_with(
+        source,
+        destination,
+        diagnostics::StorageSummary {
+            data_directory: "private application data".to_owned(),
+            snapshot_bytes,
+            ledger_bytes: storage.ledger_bytes,
+        },
+    )
+}
+
 #[tauri::command]
 fn discover_x_sources(
     state: tauri::State<'_, FieldTheoryState>,
+    diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
 ) -> Result<DiscoveryResponse, String> {
-    state
+    let result = state
         .runner()
         .request(&BridgeRequest::new(
             "discover-x-sources",
             BridgeCommand::DiscoverSources,
         ))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string());
+    if result.is_err() {
+        let _ = diagnostics.record_source_failure(diagnostics::DiagnosticFailure::BrowserAccess);
+    }
+    result
 }
 
 #[tauri::command]
 fn select_x_source(
     state: tauri::State<'_, FieldTheoryState>,
+    diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
     request: XSourceSelection,
 ) -> Result<SelectedXSource, String> {
-    state
+    let result = state
         .runner()
         .request(&BridgeRequest::select("select-x-source", request))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string());
+    if result.is_err() {
+        let _ = diagnostics.record_source_failure(diagnostics::DiagnosticFailure::BrowserAccess);
+    }
+    result
 }
 
 #[derive(Debug, Serialize)]
@@ -183,40 +243,88 @@ struct DestinationState(Arc<dyn DestinationConnection>);
 #[tauri::command]
 async fn destination_status(
     state: tauri::State<'_, DestinationState>,
+    diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
 ) -> Result<Option<DestinationSummary>, DestinationError> {
     let service = Arc::clone(&state.0);
-    tauri::async_runtime::spawn_blocking(move || service.status())
+    let result = tauri::async_runtime::spawn_blocking(move || service.status())
         .await
-        .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?
+        .unwrap_or_else(|_| Err(DestinationError::for_code(DestinationErrorCode::Storage)));
+    match &result {
+        Ok(Some(_)) => {
+            let _ = diagnostics.set_destination_status(diagnostics::ComponentStatus::Ready);
+        }
+        Ok(None) => {
+            let _ = diagnostics.set_destination_status(diagnostics::ComponentStatus::NotConfigured);
+        }
+        Err(error) => record_destination_diagnostic(&diagnostics, error.code()),
+    }
+    result
 }
 
 #[tauri::command]
 async fn connect_destination(
     input: ConnectDestinationInput,
     state: tauri::State<'_, DestinationState>,
+    diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
 ) -> Result<DestinationSummary, DestinationError> {
     let service = Arc::clone(&state.0);
-    tauri::async_runtime::spawn_blocking(move || service.connect(input))
+    let result = tauri::async_runtime::spawn_blocking(move || service.connect(input))
         .await
-        .map_err(|_| DestinationError::for_code(DestinationErrorCode::Network))?
+        .unwrap_or_else(|_| Err(DestinationError::for_code(DestinationErrorCode::Network)));
+    match &result {
+        Ok(_) => {
+            let _ = diagnostics.set_destination_status(diagnostics::ComponentStatus::Ready);
+        }
+        Err(error) => record_destination_diagnostic(&diagnostics, error.code()),
+    }
+    result
 }
 
 #[tauri::command]
 async fn forget_destination(
     state: tauri::State<'_, DestinationState>,
     transfers: tauri::State<'_, TransferState>,
+    diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
 ) -> Result<(), DestinationError> {
     let operation = transfers
         .operations
         .reserve(OperationKind::Maintenance)
         .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?;
     let service = Arc::clone(&state.0);
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let _operation = operation;
         service.forget()
     })
     .await
-    .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?
+    .unwrap_or_else(|_| Err(DestinationError::for_code(DestinationErrorCode::Storage)));
+    match &result {
+        Ok(()) => {
+            let _ = diagnostics.set_destination_status(diagnostics::ComponentStatus::NotConfigured);
+        }
+        Err(error) => record_destination_diagnostic(&diagnostics, error.code()),
+    }
+    result
+}
+
+fn record_destination_diagnostic(
+    diagnostics: &diagnostics::DiagnosticsStore,
+    code: DestinationErrorCode,
+) {
+    let failure = match code {
+        DestinationErrorCode::Authentication => {
+            Some(diagnostics::DiagnosticFailure::DestinationAuthentication)
+        }
+        DestinationErrorCode::MissingCapability | DestinationErrorCode::UnsupportedDestination => {
+            Some(diagnostics::DiagnosticFailure::DestinationCompatibility)
+        }
+        DestinationErrorCode::Network => Some(diagnostics::DiagnosticFailure::Network),
+        DestinationErrorCode::InsecureDestination
+        | DestinationErrorCode::InvalidServerUrl
+        | DestinationErrorCode::Storage => None,
+    };
+    if let Some(failure) = failure {
+        let _ = diagnostics.record_destination_failure(failure);
+    }
 }
 
 #[tauri::command]
@@ -232,21 +340,27 @@ fn inspect_private_transfer_data(
 fn replace_x_source(
     state: tauri::State<'_, settings::SettingsService>,
     transfers: tauri::State<'_, TransferState>,
+    diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
     confirmation: settings::ReplaceXSourceConfirmation,
 ) -> Result<(), &'static str> {
     let _operation = transfers
         .operations
         .reserve(OperationKind::Maintenance)
         .map_err(|_| "local transfer data is in use")?;
-    state
+    let result = state
         .replace_x_source(confirmation.capability())
-        .map_err(|_| "X source data could not be replaced")
+        .map_err(|_| "X source data could not be replaced");
+    if result.is_ok() {
+        let _ = diagnostics.set_source_status(diagnostics::ComponentStatus::NotConfigured);
+    }
+    result
 }
 
 #[tauri::command]
 fn delete_local_transfer_data(
     state: tauri::State<'_, settings::SettingsService>,
     transfers: tauri::State<'_, TransferState>,
+    diagnostics: tauri::State<'_, diagnostics::DiagnosticsStore>,
     confirmation: settings::DeleteLocalTransferDataConfirmation,
 ) -> Result<(), &'static str> {
     let _operation = transfers
@@ -254,9 +368,13 @@ fn delete_local_transfer_data(
         .reserve(OperationKind::Maintenance)
         .map_err(|_| "local transfer data is in use")?;
     transfers.close_ledger()?;
-    state
+    let result = state
         .delete_local_transfer_data(confirmation.capability())
-        .map_err(|_| "local transfer data could not be deleted")
+        .map_err(|_| "local transfer data could not be deleted");
+    if result.is_ok() {
+        let _ = diagnostics.set_source_status(diagnostics::ComponentStatus::NotConfigured);
+    }
+    result
 }
 
 #[tauri::command]
@@ -274,6 +392,27 @@ fn start_x_acquisition<R: tauri::Runtime>(
     let terminal_operation = Arc::clone(&operation);
     state
         .start_acquisition(request, move |event| {
+            let diagnostics = app.state::<diagnostics::DiagnosticsStore>();
+            match &event {
+                AcquisitionEvent::Completed { .. } => {
+                    let _ = diagnostics.set_source_status(diagnostics::ComponentStatus::Ready);
+                }
+                AcquisitionEvent::Failed { code, .. } => {
+                    let failure = match code {
+                        AcquisitionFailureCode::XCompatibility => {
+                            diagnostics::DiagnosticFailure::XCompatibility
+                        }
+                        AcquisitionFailureCode::SourceUnavailable => {
+                            diagnostics::DiagnosticFailure::BrowserAccess
+                        }
+                        AcquisitionFailureCode::Unexpected => {
+                            diagnostics::DiagnosticFailure::XCompatibility
+                        }
+                    };
+                    let _ = diagnostics.record_source_failure(failure);
+                }
+                AcquisitionEvent::Progress { .. } | AcquisitionEvent::Cancelled { .. } => {}
+            }
             let terminal = matches!(
                 event,
                 AcquisitionEvent::Completed { .. }
@@ -428,6 +567,24 @@ struct TauriDeliveryEventSink<R: tauri::Runtime>(tauri::AppHandle<R>);
 
 impl<R: tauri::Runtime> DeliveryEventSink for TauriDeliveryEventSink<R> {
     fn publish(&self, event: DeliveryEvent) {
+        if let DeliveryEvent::Terminal(DeliveryTerminalEvent::Failed { code, .. }) = &event {
+            let failure = match code {
+                DeliveryFailureCode::DestinationAuthentication => {
+                    Some(diagnostics::DiagnosticFailure::DestinationAuthentication)
+                }
+                DeliveryFailureCode::DestinationCompatibility => {
+                    Some(diagnostics::DiagnosticFailure::DestinationCompatibility)
+                }
+                DeliveryFailureCode::Network => Some(diagnostics::DiagnosticFailure::Network),
+                DeliveryFailureCode::DeliveryFailed | DeliveryFailureCode::Unexpected => None,
+            };
+            if let Some(failure) = failure {
+                let _ = self
+                    .0
+                    .state::<diagnostics::DiagnosticsStore>()
+                    .record_destination_failure(failure);
+            }
+        }
         let _ = self.0.emit("delivery", event);
     }
 }
@@ -743,6 +900,9 @@ mod tests {
                 directory.path(),
             ))
             .manage(super::DestinationState(Arc::new(DisconnectedDestination)))
+            .manage(super::settings::SettingsService::from_app_data_dir(
+                directory.path(),
+            ))
             .manage(test_transfer_state())
             .build(mock_context(noop_assets()))
             .expect("mock app builds");
@@ -867,12 +1027,155 @@ mod tests {
                 "source": "notConfigured",
                 "destination": "notConfigured",
                 "storage": {
-                    "dataDirectory": "not available",
+                    "dataDirectory": "private application data",
                     "snapshotBytes": 0,
                     "ledgerBytes": 0
                 },
                 "lastFailure": null
             }),
+        );
+    }
+
+    #[test]
+    fn diagnostics_export_reflects_live_component_and_storage_state() {
+        let directory = tempdir().expect("temporary app state");
+        let snapshot = directory.path().join("fieldtheory/bookmarks.jsonl");
+        fs::create_dir_all(snapshot.parent().expect("snapshot parent"))
+            .expect("snapshot directory");
+        fs::write(
+            &snapshot,
+            "{\"tweetId\":\"private-bookmark-id\",\"url\":\"https://example.invalid/private\"}\n",
+        )
+        .expect("snapshot");
+        let snapshot_bytes = fs::metadata(&snapshot).expect("snapshot metadata").len();
+        fs::write(directory.path().join("delivery-ledger.sqlite3"), b"ledger").expect("ledger");
+        let app = super::configure_builder(mock_builder())
+            .manage(super::FieldTheoryState::bundled(
+                directory.path(),
+                directory.path(),
+            ))
+            .manage(super::DestinationState(Arc::new(ConnectedDestination(
+                Arc::new(SuccessfulDeliveryApi::default()),
+            ))))
+            .manage(super::settings::SettingsService::from_app_data_dir(
+                directory.path(),
+            ))
+            .manage(test_transfer_state())
+            .build(mock_context(noop_assets()))
+            .expect("mock app builds");
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview builds");
+
+        let response = get_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: "export_diagnostics".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "tauri://localhost".parse().expect("valid IPC origin"),
+                body: tauri::ipc::InvokeBody::default(),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+        )
+        .expect("diagnostics export succeeds")
+        .deserialize::<Value>()
+        .expect("diagnostics JSON");
+
+        assert_eq!(
+            (
+                response["source"].as_str(),
+                response["destination"].as_str(),
+                response["storage"]["dataDirectory"].as_str(),
+                response["storage"]["snapshotBytes"].as_u64(),
+                response["storage"]["ledgerBytes"].as_u64(),
+                response["lastFailure"].as_null(),
+                serde_json::to_string(&response)
+                    .expect("diagnostics serialize")
+                    .contains("private-bookmark-id"),
+            ),
+            (
+                Some("ready"),
+                Some("ready"),
+                Some("private application data"),
+                Some(snapshot_bytes),
+                Some(6),
+                Some(()),
+                false,
+            )
+        );
+    }
+
+    #[test]
+    fn rejected_destination_connection_is_retained_as_the_latest_diagnostic_failure() {
+        let directory = tempdir().expect("temporary app state");
+        let app = super::configure_builder(mock_builder())
+            .manage(super::FieldTheoryState::bundled(
+                directory.path(),
+                directory.path(),
+            ))
+            .manage(super::DestinationState(Arc::new(DisconnectedDestination)))
+            .manage(super::settings::SettingsService::from_app_data_dir(
+                directory.path(),
+            ))
+            .manage(test_transfer_state())
+            .build(mock_context(noop_assets()))
+            .expect("mock app builds");
+        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .expect("mock webview builds");
+
+        let connection = get_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: "connect_destination".into(),
+                callback: tauri::ipc::CallbackFn(0),
+                error: tauri::ipc::CallbackFn(1),
+                url: "tauri://localhost".parse().expect("valid IPC origin"),
+                body: json!({
+                    "input": {
+                        "server": "https://keep.example",
+                        "apiKey": "diagnostic-key-canary",
+                        "allowInsecureHttp": false
+                    }
+                })
+                .into(),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+        );
+        let diagnostics = get_ipc_response(
+            &webview,
+            InvokeRequest {
+                cmd: "export_diagnostics".into(),
+                callback: tauri::ipc::CallbackFn(2),
+                error: tauri::ipc::CallbackFn(3),
+                url: "tauri://localhost".parse().expect("valid IPC origin"),
+                body: tauri::ipc::InvokeBody::default(),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.to_string(),
+            },
+        )
+        .expect("diagnostics export succeeds")
+        .deserialize::<Value>()
+        .expect("diagnostics JSON");
+
+        assert_eq!(
+            (
+                connection.is_err(),
+                diagnostics["destination"].as_str(),
+                diagnostics["lastFailure"]["kind"].as_str(),
+                serde_json::to_string(&diagnostics)
+                    .expect("diagnostics serialize")
+                    .contains("diagnostic-key-canary"),
+            ),
+            (
+                true,
+                Some("unavailable"),
+                Some("destinationAuthentication"),
+                false,
+            )
         );
     }
 

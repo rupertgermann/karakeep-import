@@ -153,6 +153,14 @@ impl SnapshotStore {
         self.snapshot_path().is_file()
     }
 
+    pub fn snapshot_bytes(&self) -> std::io::Result<u64> {
+        match fs::metadata(self.snapshot_path()) {
+            Ok(metadata) => Ok(metadata.len()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Returns the retained X snapshot through the same parsed delivery seam
     /// used by one-off File Sources. The private storage path stays internal.
     pub fn delivery_source(&self) -> Result<FileSourcePreview, SnapshotPreviewError> {

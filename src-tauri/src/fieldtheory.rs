@@ -188,6 +188,14 @@ impl FieldTheoryState {
         self.snapshots.delivery_source()
     }
 
+    pub fn has_snapshot(&self) -> bool {
+        self.snapshots.has_snapshot()
+    }
+
+    pub fn snapshot_bytes(&self) -> std::io::Result<u64> {
+        self.snapshots.snapshot_bytes()
+    }
+
     pub fn preview(
         &self,
         destination: DestinationPreview,

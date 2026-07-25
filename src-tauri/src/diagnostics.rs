@@ -168,6 +168,78 @@ impl DiagnosticsStore {
         Ok(())
     }
 
+    pub fn set_source_status(&self, status: ComponentStatus) -> Result<(), &'static str> {
+        self.state
+            .write()
+            .map_err(|_| "diagnostics state is unavailable")?
+            .input
+            .source = status;
+        Ok(())
+    }
+
+    pub fn set_destination_status(&self, status: ComponentStatus) -> Result<(), &'static str> {
+        self.state
+            .write()
+            .map_err(|_| "diagnostics state is unavailable")?
+            .input
+            .destination = status;
+        Ok(())
+    }
+
+    pub fn record_source_failure(&self, failure: DiagnosticFailure) -> Result<(), &'static str> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| "diagnostics state is unavailable")?;
+        state.input.source = ComponentStatus::Unavailable;
+        state.input.last_failure = Some(failure);
+        Ok(())
+    }
+
+    pub fn record_destination_failure(
+        &self,
+        failure: DiagnosticFailure,
+    ) -> Result<(), &'static str> {
+        let mut state = self
+            .state
+            .write()
+            .map_err(|_| "diagnostics state is unavailable")?;
+        state.input.destination = ComponentStatus::Unavailable;
+        state.input.last_failure = Some(failure);
+        Ok(())
+    }
+
+    pub fn component_statuses(&self) -> Result<(ComponentStatus, ComponentStatus), &'static str> {
+        let state = self
+            .state
+            .read()
+            .map_err(|_| "diagnostics state is unavailable")?;
+        Ok((state.input.source, state.input.destination))
+    }
+
+    pub fn explicit_export_with(
+        &self,
+        source: ComponentStatus,
+        destination: ComponentStatus,
+        storage: StorageSummary,
+    ) -> Result<DiagnosticsExport, &'static str> {
+        let state = self
+            .state
+            .read()
+            .map_err(|_| "diagnostics state is unavailable")?;
+        let input = DiagnosticsInput {
+            source,
+            destination,
+            storage,
+            last_failure: state.input.last_failure,
+        };
+        Ok(build_explicit_export(
+            &input,
+            state.versions.clone(),
+            &state.redactor,
+        ))
+    }
+
     pub fn explicit_export(&self) -> Result<DiagnosticsExport, &'static str> {
         let state = self
             .state
