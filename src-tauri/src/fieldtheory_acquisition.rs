@@ -368,11 +368,9 @@ fn promote_artifacts(artifacts: &mut [PromotionArtifact]) -> Result<(), Snapshot
         if !artifact.included {
             continue;
         }
-        if artifact.backup.exists() {
-            if fs::remove_file(&artifact.backup).is_err() {
-                restore_artifacts(artifacts);
-                return Err(SnapshotPreviewError);
-            }
+        if artifact.backup.exists() && fs::remove_file(&artifact.backup).is_err() {
+            restore_artifacts(artifacts);
+            return Err(SnapshotPreviewError);
         }
         if artifact.destination.exists() {
             if fs::rename(&artifact.destination, &artifact.backup).is_err() {
