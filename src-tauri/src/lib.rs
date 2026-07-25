@@ -18,6 +18,9 @@ pub mod redaction;
 pub mod updates;
 pub mod versions;
 
+pub mod delivery;
+pub mod karakeep;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HealthResponse {
