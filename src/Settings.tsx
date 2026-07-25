@@ -18,6 +18,7 @@ type Confirmation = "replace-source" | "delete-data" | "forget-connection";
 interface SettingsProps {
   api?: SettingsApi;
   onXSourceReplaced?: () => void;
+  onLocalDataDeleted?: () => void;
   onForgetKarakeepConnection?: (
     confirmation: ForgetKarakeepConnectionConfirmation,
   ) => Promise<void>;
@@ -26,6 +27,7 @@ interface SettingsProps {
 export default function Settings({
   api = settingsDesktopApi,
   onXSourceReplaced,
+  onLocalDataDeleted,
   onForgetKarakeepConnection,
 }: SettingsProps) {
   const [privateData, setPrivateData] = useState<PrivateDataSummary | null>(
@@ -91,6 +93,7 @@ export default function Settings({
       setStatus(
         "Local transfer data was deleted. Karakeep bookmarks were unchanged.",
       );
+      onLocalDataDeleted?.();
     });
   }
 

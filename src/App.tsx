@@ -622,6 +622,10 @@ export default function App({
               chooseAnotherSource();
               setShowSettings(false);
             }}
+            onLocalDataDeleted={() => {
+              chooseAnotherSource();
+              setShowSettings(false);
+            }}
             onForgetKarakeepConnection={
               destination
                 ? async () => {

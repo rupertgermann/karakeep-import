@@ -166,6 +166,52 @@ describe("Settings", () => {
     );
   });
 
+  it("notifies the shell after local transfer data is deleted", async () => {
+    const api = createSettingsApi();
+    const onLocalDataDeleted = vi.fn();
+    render(
+      <Settings
+        api={api}
+        onLocalDataDeleted={onLocalDataDeleted}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete local transfer data" }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm local data deletion" }),
+    );
+
+    await waitFor(() => expect(onLocalDataDeleted).toHaveBeenCalledOnce());
+  });
+
+  it("does not notify the shell when local data deletion is rejected", async () => {
+    const api = createSettingsApi();
+    const onLocalDataDeleted = vi.fn();
+    vi.mocked(api.deleteLocalTransferData).mockRejectedValue(
+      new Error("private deletion failure"),
+    );
+    render(
+      <Settings
+        api={api}
+        onLocalDataDeleted={onLocalDataDeleted}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete local transfer data" }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm local data deletion" }),
+    );
+
+    expect(
+      await screen.findByText("The Settings action could not be completed."),
+    ).toBeInTheDocument();
+    expect(onLocalDataDeleted).not.toHaveBeenCalled();
+  });
+
   it("exposes a typed callback seam for forgetting the connection", async () => {
     const onForgetKarakeepConnection = vi.fn().mockResolvedValue(undefined);
     render(

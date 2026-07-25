@@ -982,6 +982,71 @@ describe("Karakeep Transfer shell", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("resets the selected source and closes Settings after local data deletion", async () => {
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        discoverXSources: vi.fn().mockResolvedValue({
+          browsers: [
+            {
+              id: "chrome",
+              name: "Google Chrome",
+              profiles: [{ id: "Default", name: "Personal" }],
+            },
+          ],
+        }),
+        selectXSource: vi.fn().mockResolvedValue({
+          browserId: "chrome",
+          browserName: "Google Chrome",
+          profileId: "Default",
+          profileName: "Personal",
+        }),
+      },
+    );
+    const localSettings = settingsApi();
+
+    render(
+      <App
+        desktopApi={api}
+        settingsApi={localSettings}
+        xAcquisitionApi={xAcquisitionApi()}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use my X Source" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: /temporarily using my existing authenticated X session/i,
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Use this X Source" }),
+    );
+    await screen.findByRole("heading", { name: "Retrieve bookmarks from X" });
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Delete local transfer data",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Confirm local data deletion" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Choose a bookmark source" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Settings" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("continues an acquired X snapshot into confirmed delivery", async () => {
     let acquisitionEvent:
       | Parameters<XAcquisitionApi["startXAcquisition"]>[1]
