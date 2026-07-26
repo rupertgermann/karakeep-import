@@ -74,10 +74,10 @@ Theory bridge resources, `RELEASE-METADATA.json`,
 It also contains `NATIVE-BUILD-COMMAND.txt`; that checksummed file invokes the
 tracked release-build wrapper shown above. The wrapper requires a clean
 checkout whose `HEAD` equals `RELEASE-METADATA.json`, verifies every
-`SHA256SUMS` entry, rejects a non-macOS host, derives the Tauri target and
-bundle format from staged metadata, and supplies an absolute staged-input
-Tauri override. Run it from the checkout root on the controlled macOS release
-machine.
+staged regular file is covered by `SHA256SUMS`, rejects symlinks and a
+non-macOS host, derives the Tauri target and bundle format from staged
+metadata, and supplies an absolute staged-input Tauri override. Run it from
+the checkout root on the controlled macOS release machine.
 
 ## Windows x64 inputs
 
