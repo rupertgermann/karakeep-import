@@ -13,6 +13,25 @@ const send = (message) => {
 
 for await (const line of input) {
   const request = JSON.parse(line);
+  if (
+    request.requestId === "acquire-argument-boundary" &&
+    process.argv.some(
+      (argument) =>
+        argument.includes("karakeep-key-canary-arguments-5519") ||
+        argument.includes("x-session-canary-arguments-8472"),
+    )
+  ) {
+    send({
+      protocolVersion: 1,
+      requestId: request.requestId,
+      type: "error",
+      error: {
+        code: "leaked_arguments",
+        message: "A password-equivalent value reached process arguments.",
+      },
+    });
+    continue;
+  }
   if (request.command === "cancelAcquisition") {
     send({
       protocolVersion: 1,

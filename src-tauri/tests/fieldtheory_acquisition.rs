@@ -817,6 +817,25 @@ fn supervisor_does_not_pass_a_karakeep_key_from_the_app_environment_to_field_the
 }
 
 #[test]
+fn supervisor_keeps_password_equivalent_canaries_out_of_process_arguments() {
+    let _api_key = ScopedEnvironment::set("KARAKEEP_API_KEY", "karakeep-key-canary-arguments-5519");
+    let _x_session = ScopedEnvironment::set("X_SESSION_CANARY", "x-session-canary-arguments-8472");
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    let supervisor = AcquisitionSupervisor::default();
+    let runner = BridgeRunner::new(PathBuf::from("node"), fixture());
+
+    let event = run_acquisition(
+        &supervisor,
+        &runner,
+        &store,
+        request("acquire-argument-boundary"),
+    );
+
+    assert!(matches!(event, AcquisitionEvent::Completed { .. }));
+}
+
+#[test]
 fn acquisition_progress_is_structured_for_frontend_events() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
