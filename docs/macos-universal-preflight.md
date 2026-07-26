@@ -7,7 +7,7 @@ and the complete supported-browser matrix remain release gates.
 
 ## Tested source and host
 
-- Implementation commit: `dc8bf7b067f906a03239fd627e5f26cdad580ace`
+- Implementation commit: `bc1e845a54c6673501d59e9e1fda9dd54b0d1708`
 - Branch: `feat/karakeep-transfer-mvp`
 - Host: macOS 14.8.7 on Apple Silicon
 - Rust: 1.93.0
@@ -23,12 +23,12 @@ npm run release:build-candidate -- --input release-inputs/macos-universal
 ```
 
 For this deliberately unsigned preflight, `--no-sign` was appended. The
-wrapper verified the clean checkout commit and the complete staged checksum
-inventory, rejected symlinks, disabled Tauri's build hook, and bound Tauri to
-the absolute staged frontend and resource paths. Tauri built both Rust target
-binaries and combined them with `lipo`. The filesystem sandbox prevented
-`hdiutil create`; rerunning the same verified wrapper in the controlled local
-macOS environment completed successfully.
+wrapper verified the clean checkout commit and complete staged checksum
+inventory, rejected symlinks, rebuilt an independent canonical UUID snapshot,
+compared every supplied path and byte with that snapshot, and bound Tauri to
+the canonical frontend and resources for the entire child process. It removed
+the private snapshot after the build. Tauri built both Rust target binaries,
+combined them with `lipo`, and created the DMG with the local macOS tooling.
 
 ## Retained results
 
@@ -38,14 +38,14 @@ macOS environment completed successfully.
 | Declared macOS baseline | PASS | Both Mach-O slices report `minos 12.0`. |
 | Universal DMG integrity | PASS | `hdiutil verify` reported a valid disk image. |
 | DMG installation layout | PASS | A read-only mount contained `Karakeep Transfer.app` and the `/Applications` link. |
-| Isolated application launch | PASS | LaunchServices started a new process from the app inside the read-only mounted DMG. |
+| LaunchServices application launch | PASS | The supported Finder/LaunchServices path started a new process from the app inside the read-only mounted DMG. A direct Mach-O launch with an artificial empty `HOME` is not a supported application-launch path and was not counted as evidence. |
 | Guided first screen | PASS | The retained packaged visual preflight and 116 current frontend tests show the ready desktop bridge and Step 1, **Connect Karakeep**, rather than stopping at an intro-only screen. |
 | Private runtime packaging | PASS | All 340 staged resource files were byte-identical in the app; the only additional resource was Tauri's `icon.icns`. The app contains arm64 and x86-64 Node executables, Field Theory, its bridge, checksums, licenses, and notices. |
 | No separately installed Node requirement | PASS | With `PATH=/nonexistent` and an empty home directory, both packaged Node executables started the packaged bridge and returned protocol-v1 browser discovery results. |
 | Browser/profile discovery protocol | PASS | Both packaged architectures returned a structured empty-browser result against the isolated empty home. Real supported-browser acquisition remains a separate gate below. |
 | Intel runtime execution on this host | PASS | `arch -x86_64` ran the final packaged x86-64 Node runtime and bridge under Rosetta. This is not native Intel-host evidence. |
-| Developer ID signature | FAIL | `codesign` reported an ad-hoc linker signature, no Team Identifier, and no sealed resources. The local keychain contains no valid code-signing identity. |
-| Gatekeeper execution assessment | FAIL | `spctl` did not accept the unsigned app. |
+| Developer ID signature | FAIL | `codesign --verify --deep --strict` reported that the app is not signed at all. No Developer ID identity was used. |
+| Gatekeeper execution assessment | FAIL | `spctl` rejected both the app and DMG with `source=no usable signature`. |
 | Apple notarization and stapling | UNAVAILABLE | Notarization cannot proceed without a Developer ID identity and notarization credentials. |
 | Native Intel clean installation | UNAVAILABLE | No controlled Intel Mac is available in this environment. |
 | Five-browser acquisition matrix | UNAVAILABLE | Real session acquisition still requires explicit local consent and retained evidence for Chrome, Edge, Brave, Chromium, and Firefox. |
@@ -55,8 +55,10 @@ macOS environment completed successfully.
 The unsigned DMG SHA-256 was:
 
 ```text
-c641b8c4a445d1b5e85ad9fd42e5389fa1f892c2b30d2fd98a08b3f5ce308991
+4ded4c1dd2e22a19fd0253b6956232459b4d5f0a44c32b0d46c7f655c78934d6
 ```
+
+The unsigned DMG size was `98,787,736` bytes.
 
 That checksum identifies only this unsigned development artifact. It must not
 be published or reused as the checksum for the signed and notarized release
