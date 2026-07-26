@@ -23,6 +23,8 @@ use karakeep_transfer_lib::{
     transfer::SqliteDeliveryLedgerAdapter,
 };
 
+static PROCESS_ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
+
 fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -793,6 +795,9 @@ fn rust_supervisor_never_surfaces_password_equivalent_bridge_stderr() {
 
 #[test]
 fn supervisor_does_not_pass_a_karakeep_key_from_the_app_environment_to_field_theory() {
+    let _environment_lock = PROCESS_ENVIRONMENT_LOCK
+        .lock()
+        .expect("process environment lock");
     let _environment =
         ScopedEnvironment::set("KARAKEEP_API_KEY", "karakeep-key-canary-acquisition-5519");
     let temporary = tempfile::tempdir().expect("temporary directory");
@@ -818,6 +823,9 @@ fn supervisor_does_not_pass_a_karakeep_key_from_the_app_environment_to_field_the
 
 #[test]
 fn supervisor_keeps_password_equivalent_canaries_out_of_process_arguments() {
+    let _environment_lock = PROCESS_ENVIRONMENT_LOCK
+        .lock()
+        .expect("process environment lock");
     let _api_key = ScopedEnvironment::set("KARAKEEP_API_KEY", "karakeep-key-canary-arguments-5519");
     let _x_session = ScopedEnvironment::set("X_SESSION_CANARY", "x-session-canary-arguments-8472");
     let temporary = tempfile::tempdir().expect("temporary directory");
