@@ -103,6 +103,12 @@ artifact, publish a release, or independently reproduce platform trust
 semantics. The retained native command results attest those semantics; the
 finalizer binds and verifies their bytes.
 
+Before assembling the release directory, the finalizer copies every validated
+artifact, staged release material, acceptance record, and typed evidence record
+into a private temporary snapshot and rechecks its digest. Assembly and final
+checksums use only those snapshot bytes, so later changes to caller-supplied
+paths cannot alter the finalized release.
+
 Finalization structurally parses the artifact instead of trusting a filename
 or magic bytes alone. A DMG must have a coherent UDIF trailer, bounded nonempty
 data and XML-plist forks, `resource-fork`/`blkx` plist metadata, bounded optional

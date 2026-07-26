@@ -12,6 +12,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -97,14 +98,6 @@ function requireOption(options, name) {
     throw new Error(`--${name} is required.`);
   }
   return path.resolve(options[name]);
-}
-
-async function readJson(file, description) {
-  try {
-    return JSON.parse(await readFile(file, "utf8"));
-  } catch (error) {
-    throw new Error(`Could not read ${description} JSON ${file}: ${error.message}`);
-  }
 }
 
 async function requireFile(file, description) {
@@ -339,8 +332,7 @@ function coherentPeNsis(content) {
   );
 }
 
-async function requireArtifactStructure(file, target) {
-  const content = await readFile(file);
+function requireArtifactStructure(content, target) {
   const valid =
     target === "macos-universal"
       ? coherentUdif(content)
@@ -461,6 +453,7 @@ async function verifyStagingChecksums(directory, target) {
       throw new Error(`${target} staging checksum mismatch: ${relative}`);
     }
   }
+  return expected;
 }
 
 function validateProduct(product) {
@@ -933,13 +926,14 @@ async function verifyEvidenceFiles(
   for (const [filename, reference] of references) {
     const file = path.join(path.dirname(evidenceFile), filename);
     await requireFile(file, `${target} referenced evidence ${filename}`);
-    const actual = await sha256(file);
+    const content = await readFile(file);
+    const actual = createHash("sha256").update(content).digest("hex");
     if (actual !== reference.sha256) {
       throw new Error(`${target} referenced evidence SHA-256 mismatch: ${filename}`);
     }
     let record;
     try {
-      record = JSON.parse(await readFile(file, "utf8"));
+      record = JSON.parse(content.toString("utf8"));
     } catch {
       throw new Error(
         `${target} referenced evidence ${filename} is not a typed evidence record.`,
@@ -961,12 +955,19 @@ async function verifyEvidenceFiles(
 
 async function validateTarget(options, target, commit) {
   const input = requireOption(options, target.inputOption);
-  await verifyStagingChecksums(input, target.name);
+  const stagingChecksums = await verifyStagingChecksums(input, target.name);
   const metadataFile = path.join(input, "RELEASE-METADATA.json");
-  const metadata = await readJson(
-    metadataFile,
-    `${target.name} release metadata`,
-  );
+  const metadataContent = await readFile(metadataFile);
+  const metadataSha256 = createHash("sha256").update(metadataContent).digest("hex");
+  if (metadataSha256 !== stagingChecksums.get("RELEASE-METADATA.json")) {
+    throw new Error(`${target.name} release metadata changed during validation.`);
+  }
+  let metadata;
+  try {
+    metadata = JSON.parse(metadataContent.toString("utf8"));
+  } catch (error) {
+    throw new Error(`Could not read ${target.name} release metadata JSON ${metadataFile}: ${error.message}`);
+  }
   if (metadata.schemaVersion !== 1) {
     throw new Error(`${target.name} release metadata has an unsupported schema.`);
   }
@@ -991,14 +992,26 @@ async function validateTarget(options, target, commit) {
     artifact,
     `${target.name} signed artifact`,
   );
-  await requireArtifactStructure(artifact, target.name);
-  const artifactSha256 = await sha256(artifact);
+  const artifactContent = await readFile(artifact);
+  if (artifactContent.length !== artifactDetails.size) {
+    throw new Error(`${target.name} signed artifact changed during validation.`);
+  }
+  requireArtifactStructure(artifactContent, target.name);
+  const artifactSha256 = createHash("sha256")
+    .update(artifactContent)
+    .digest("hex");
   const evidenceFile = requireOption(options, target.evidenceOption);
   await requireFile(evidenceFile, `${target.name} acceptance evidence`);
-  const evidence = await readJson(
-    evidenceFile,
-    `${target.name} acceptance evidence`,
-  );
+  const evidenceContent = await readFile(evidenceFile);
+  const evidenceSha256 = createHash("sha256")
+    .update(evidenceContent)
+    .digest("hex");
+  let evidence;
+  try {
+    evidence = JSON.parse(evidenceContent.toString("utf8"));
+  } catch (error) {
+    throw new Error(`Could not read ${target.name} acceptance evidence JSON ${evidenceFile}: ${error.message}`);
+  }
   const references = validateEvidence(evidence, {
     target: target.name,
     commit,
@@ -1021,17 +1034,94 @@ async function validateTarget(options, target, commit) {
       },
     },
   );
+  const inventoryFile = path.join(input, "DEPENDENCY-INVENTORY.json");
+  const noticesFile = path.join(input, "THIRD-PARTY-NOTICES.md");
+  const releaseNotesFile = path.join(input, "RELEASE-NOTES.md");
 
   return {
     target: target.name,
     input,
     metadata,
     metadataFile,
-    metadataSha256: await sha256(metadataFile),
+    metadataSha256,
+    inventoryFile,
+    inventorySha256: stagingChecksums.get("DEPENDENCY-INVENTORY.json"),
+    noticesFile,
+    noticesSha256: stagingChecksums.get("THIRD-PARTY-NOTICES.md"),
+    releaseNotesFile,
+    releaseNotesSha256: stagingChecksums.get("RELEASE-NOTES.md"),
     artifact,
     artifactSha256,
     evidenceFile,
-    evidenceSha256: await sha256(evidenceFile),
+    evidenceSha256,
+    evidenceFiles,
+  };
+}
+
+async function snapshotFile(source, destination, expectedSha256, description) {
+  const content = await readFile(source);
+  const actualSha256 = createHash("sha256").update(content).digest("hex");
+  if (actualSha256 !== expectedSha256) {
+    throw new Error(`${description} changed after validation.`);
+  }
+  await mkdir(path.dirname(destination), { recursive: true });
+  await writeFile(destination, content);
+  if ((await sha256(destination)) !== expectedSha256) {
+    throw new Error(`${description} snapshot checksum mismatch.`);
+  }
+}
+
+async function snapshotCandidate(candidate, root) {
+  const input = path.join(root, "inputs", candidate.target);
+  const artifact = path.join(
+    root,
+    "artifacts",
+    candidate.target,
+    path.basename(candidate.artifact),
+  );
+  const evidenceFile = path.join(
+    root,
+    "acceptance-evidence",
+    candidate.target,
+    "acceptance-evidence.json",
+  );
+  const metadataFile = path.join(input, "RELEASE-METADATA.json");
+  const inventoryFile = path.join(input, "DEPENDENCY-INVENTORY.json");
+  const noticesFile = path.join(input, "THIRD-PARTY-NOTICES.md");
+  const releaseNotesFile = path.join(input, "RELEASE-NOTES.md");
+  await Promise.all([
+    snapshotFile(candidate.metadataFile, metadataFile, candidate.metadataSha256, `${candidate.target} release metadata`),
+    snapshotFile(candidate.inventoryFile, inventoryFile, candidate.inventorySha256, `${candidate.target} dependency inventory`),
+    snapshotFile(candidate.noticesFile, noticesFile, candidate.noticesSha256, `${candidate.target} third-party notices`),
+    snapshotFile(candidate.releaseNotesFile, releaseNotesFile, candidate.releaseNotesSha256, `${candidate.target} release notes`),
+    snapshotFile(candidate.artifact, artifact, candidate.artifactSha256, `${candidate.target} signed artifact`),
+    snapshotFile(candidate.evidenceFile, evidenceFile, candidate.evidenceSha256, `${candidate.target} acceptance evidence`),
+  ]);
+  const evidenceFiles = [];
+  for (const evidence of candidate.evidenceFiles) {
+    const file = path.join(
+      root,
+      "acceptance-evidence",
+      candidate.target,
+      evidence.filename,
+    );
+    await snapshotFile(
+      evidence.file,
+      file,
+      evidence.sha256,
+      `${candidate.target} typed evidence ${evidence.filename}`,
+    );
+    evidenceFiles.push({ ...evidence, file });
+  }
+  return {
+    ...candidate,
+    input,
+    metadataFile,
+    inventoryFile,
+    noticesFile,
+    releaseNotesFile,
+    artifact,
+    evidenceFile,
     evidenceFiles,
   };
 }
@@ -1179,41 +1269,50 @@ async function finalize(options) {
   await ensureOutputDoesNotExist(output);
   const commit = repositoryHead(root);
   await requireLegacyGuiAbsent(root);
+  const snapshots = await mkdtemp(
+    path.join(os.tmpdir(), "karakeep-finalizer-inputs-"),
+  );
+  try {
+    const candidates = [];
+    for (const target of targets) {
+      const candidate = await validateTarget(options, target, commit);
+      candidates.push(await snapshotCandidate(candidate, snapshots));
+    }
+    const [macos, windows] = candidates;
+    if (!isDeepStrictEqual(macos.metadata.product, windows.metadata.product)) {
+      throw new Error("Staged release product or version does not match across targets.");
+    }
+    if (macos.metadata.sourceDateEpoch !== windows.metadata.sourceDateEpoch) {
+      throw new Error("Staged release source date epoch does not match across targets.");
+    }
+    const macosNotes = await readFile(macos.releaseNotesFile);
+    const windowsNotes = await readFile(windows.releaseNotesFile);
+    if (!macosNotes.equals(windowsNotes)) {
+      throw new Error("Staged release notes are not byte-identical.");
+    }
 
-  const candidates = [];
-  for (const target of targets) {
-    candidates.push(await validateTarget(options, target, commit));
+    await assemble(
+      output,
+      commit,
+      macos.metadata.product,
+      candidates,
+      macosNotes,
+    );
+    process.stdout.write(
+      `Finalized ${macos.metadata.product.name} ${macos.metadata.product.version} at ${output}\n`,
+    );
+  } finally {
+    await rm(snapshots, { recursive: true, force: true });
   }
-  const [macos, windows] = candidates;
-  if (!isDeepStrictEqual(macos.metadata.product, windows.metadata.product)) {
-    throw new Error("Staged release product or version does not match across targets.");
-  }
-  if (macos.metadata.sourceDateEpoch !== windows.metadata.sourceDateEpoch) {
-    throw new Error("Staged release source date epoch does not match across targets.");
-  }
-  const macosNotes = await readFile(path.join(macos.input, "RELEASE-NOTES.md"));
-  const windowsNotes = await readFile(
-    path.join(windows.input, "RELEASE-NOTES.md"),
-  );
-  if (!macosNotes.equals(windowsNotes)) {
-    throw new Error("Staged release notes are not byte-identical.");
-  }
-
-  await assemble(
-    output,
-    commit,
-    macos.metadata.product,
-    candidates,
-    macosNotes,
-  );
-  process.stdout.write(
-    `Finalized ${macos.metadata.product.name} ${macos.metadata.product.version} at ${output}\n`,
-  );
 }
 
-try {
-  await finalize(parseArguments(process.argv.slice(2)));
-} catch (error) {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    await finalize(parseArguments(process.argv.slice(2)));
+  } catch (error) {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  }
 }
+
+export { assemble, snapshotCandidate, targets, validateTarget };

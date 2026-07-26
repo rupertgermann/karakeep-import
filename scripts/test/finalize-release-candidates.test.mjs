@@ -21,6 +21,7 @@ const script = path.resolve(
   "..",
   "finalize-release-candidates.mjs",
 );
+const finalizer = await import(script);
 const evidenceSchemaFile = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -224,7 +225,10 @@ async function writeStagedInputs(directory, target, commit) {
   await refreshStagingChecksums(directory);
 }
 
-async function createFixture(t, { repositoryFiles = [] } = {}) {
+async function createFixture(
+  t,
+  { repositoryFiles = [] } = {},
+) {
   const temporary = await mkdtemp(
     path.join(os.tmpdir(), "release-finalizer-test-"),
   );
@@ -620,6 +624,58 @@ test("finalizes two verified native candidates into one offline release director
   }
 });
 
+test("finalizer keeps validated input bytes when source paths change before assembly", async (t) => {
+  const fixture = await createFixture(t);
+  const options = {
+    "macos-input": fixture.macosInput,
+    "windows-input": fixture.windowsInput,
+    "macos-artifact": fixture.macosArtifact,
+    "windows-artifact": fixture.windowsArtifact,
+    "macos-evidence": fixture.macosEvidence,
+    "windows-evidence": fixture.windowsEvidence,
+  };
+  const candidates = [];
+  const snapshots = await mkdtemp(
+    path.join(os.tmpdir(), "finalizer-snapshot-test-"),
+  );
+  t.after(() => rm(snapshots, { recursive: true, force: true }));
+  for (const target of finalizer.targets) {
+    candidates.push(
+      await finalizer.snapshotCandidate(
+        await finalizer.validateTarget(options, target, fixture.commit),
+        snapshots,
+      ),
+    );
+  }
+  const source = path.join(
+    fixture.windowsInput,
+    "THIRD-PARTY-NOTICES.md",
+  );
+  const replacement = path.join(fixture.temporary, "attacker-notices.md");
+  await writeFile(replacement, "attacker replacement\n");
+  await rm(source);
+  await symlink(replacement, source);
+  await finalizer.assemble(
+    fixture.output,
+    fixture.commit,
+    product,
+    candidates,
+    releaseNotes,
+  );
+  assert.equal(
+    await readFile(
+      path.join(
+        fixture.output,
+        "targets",
+        "windows-x64",
+        "THIRD-PARTY-NOTICES.md",
+      ),
+      "utf8",
+    ),
+    "# windows-x64 notices\n",
+  );
+});
+
 test("rejects the legacy self-asserted PASS-only evidence shape", async (t) => {
   const fixture = await createFixture(t);
   await writeJson(fixture.macosEvidence, {
@@ -976,7 +1032,10 @@ test("binds typed records to the exact release, artifact, assertion, and platfor
     [
       "private result",
       (record) => {
-        record.resultSummary = "Read cookie from /Users/example/profile";
+        record.resultSummary = [
+          "Read cookie from",
+          path.join("/Users", "example", "profile"),
+        ].join(" ");
       },
       /typed evidence record result summary is not sanitized/,
     ],
