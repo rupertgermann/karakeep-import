@@ -340,6 +340,27 @@ fn snapshot_use_keeps_a_fully_promoted_snapshot_and_cleans_transaction_backups()
 }
 
 #[test]
+fn first_promotion_interruption_never_exposes_a_snapshot_without_its_source_binding() {
+    let temporary = tempfile::tempdir().expect("temporary directory");
+    let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
+    fs::create_dir_all(store.root().join("acquisition")).expect("state directory");
+    fs::write(
+        store.snapshot_path(),
+        "{\"id\":\"incomplete\",\"tweetId\":\"incomplete\",\"url\":\"https://x.com/example/status/incomplete\",\"folderNames\":[]}\n",
+    )
+    .expect("interrupted snapshot");
+
+    assert_eq!(
+        (
+            store.has_snapshot(),
+            store.snapshot_bytes().expect("snapshot bytes"),
+            store.delivery_source().is_err(),
+        ),
+        (false, 0, true)
+    );
+}
+
+#[test]
 fn acquisition_child_uses_staging_owned_temporary_storage() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let store = SnapshotStore::new(temporary.path().join("fieldtheory"));
@@ -630,6 +651,8 @@ fn snapshot_preview_partitions_pending_records_by_destination_without_delivery()
         ),
     )
     .expect("snapshot");
+    fs::create_dir_all(store.root().join("acquisition")).expect("state directory");
+    fs::write(store.root().join("acquisition/source.json"), "{}\n").expect("source binding");
     let destination_identity =
         DestinationIdentity::new("https://keep.example/", "user-7").expect("destination identity");
     let ledger = Arc::new(Mutex::new(
@@ -692,6 +715,8 @@ fn snapshot_store_returns_the_parsed_retained_x_source_for_delivery() {
         "{\"id\":\"one\",\"tweetId\":\"1\",\"url\":\"https://x.com/example/status/1\",\"folderNames\":[\"Research\"]}\n",
     )
     .expect("snapshot");
+    fs::create_dir_all(store.root().join("acquisition")).expect("state directory");
+    fs::write(store.root().join("acquisition/source.json"), "{}\n").expect("source binding");
 
     let source = store
         .delivery_source()
@@ -723,6 +748,8 @@ fn field_theory_state_exposes_parsed_snapshot_data_without_its_private_path() {
         "{\"id\":\"one\",\"tweetId\":\"1\",\"url\":\"https://x.com/example/status/1\",\"auth_token\":\"raw-auth-secret\",\"ct0\":\"raw-csrf-secret\"}\n",
     )
     .expect("snapshot");
+    fs::create_dir_all(snapshot_root.join("acquisition")).expect("state directory");
+    fs::write(snapshot_root.join("acquisition/source.json"), "{}\n").expect("source binding");
     let state = FieldTheoryState::bundled(temporary.path(), temporary.path());
 
     let source = state

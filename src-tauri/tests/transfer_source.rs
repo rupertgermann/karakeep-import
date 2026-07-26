@@ -58,6 +58,8 @@ fn x_request_resolves_the_private_snapshot_without_exposing_path_or_raw_fields()
         "{\"tweetId\":\"1\",\"url\":\"https://x.com/example/status/1\",\"auth_token\":\"raw-auth-secret\",\"ct0\":\"raw-csrf-secret\"}\n",
     )
     .expect("snapshot");
+    fs::create_dir_all(snapshot_root.join("acquisition")).expect("acquisition state directory");
+    fs::write(snapshot_root.join("acquisition/source.json"), "{}\n").expect("source binding");
     let state = FieldTheoryState::bundled(temporary.path(), temporary.path());
 
     let preview =

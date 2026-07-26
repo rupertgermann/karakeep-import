@@ -1420,6 +1420,13 @@ mod tests {
             "{\"tweetId\":\"private-bookmark-id\",\"url\":\"https://example.invalid/private\"}\n",
         )
         .expect("snapshot");
+        fs::create_dir_all(directory.path().join("fieldtheory/acquisition"))
+            .expect("acquisition state directory");
+        fs::write(
+            directory.path().join("fieldtheory/acquisition/source.json"),
+            "{}\n",
+        )
+        .expect("source binding");
         let snapshot_bytes = fs::metadata(&snapshot).expect("snapshot metadata").len();
         fs::write(directory.path().join("delivery-ledger.sqlite3"), b"ledger").expect("ledger");
         let app = super::configure_builder(mock_builder())

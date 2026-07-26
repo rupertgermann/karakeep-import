@@ -176,12 +176,15 @@ impl SnapshotStore {
     }
 
     pub fn has_snapshot(&self) -> bool {
-        self.recover().is_ok() && self.snapshot_path().is_file()
+        self.recover().is_ok() && self.complete_snapshot_present()
     }
 
     pub fn snapshot_bytes(&self) -> std::io::Result<u64> {
         self.recover()
             .map_err(|_| std::io::Error::other("private snapshot recovery failed"))?;
+        if !self.complete_snapshot_present() {
+            return Ok(0);
+        }
         match fs::metadata(self.snapshot_path()) {
             Ok(metadata) => Ok(metadata.len()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
@@ -208,13 +211,17 @@ impl SnapshotStore {
     }
 
     fn has_snapshot_for(&self, source: &XSourceReference) -> bool {
-        if !self.has_snapshot() {
+        if !self.complete_snapshot_present() {
             return false;
         }
         fs::read(self.source_binding_path())
             .ok()
             .and_then(|binding| serde_json::from_slice::<SnapshotBinding>(&binding).ok())
             .is_some_and(|binding| binding.source_fingerprint == source_fingerprint(source))
+    }
+
+    fn complete_snapshot_present(&self) -> bool {
+        self.snapshot_path().is_file() && self.source_binding_path().is_file()
     }
 
     fn has_backfill_for(&self, source: &XSourceReference) -> bool {
@@ -229,6 +236,9 @@ impl SnapshotStore {
     /// used by one-off File Sources. The private storage path stays internal.
     pub fn delivery_source(&self) -> Result<FileSourcePreview, SnapshotPreviewError> {
         self.recover()?;
+        if !self.complete_snapshot_present() {
+            return Err(SnapshotPreviewError);
+        }
         preview_file(&self.snapshot_path(), FileSourceFormat::FieldTheoryJsonl)
             .map_err(|_| SnapshotPreviewError)
     }
