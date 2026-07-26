@@ -38,14 +38,18 @@ async function fixture(target = "macos-universal") {
   const root = await (await import("node:fs/promises")).mkdtemp(
     path.join(os.tmpdir(), "release-candidate-test-"),
   );
-  await writeFile(path.join(root, ".gitignore"), "release-inputs/\ncanonical/\ndist/\n");
+  await writeFile(path.join(root, ".gitignore"), "release-inputs/\ncanonical/\ndist/\npackage-result.json\ntauri-fail\n");
   await writeFile(
     path.join(root, "package.json"),
-    `${JSON.stringify({ type: "module", scripts: { build: "node build.mjs" } })}\n`,
+    `${JSON.stringify({ type: "module", scripts: { build: "node build.mjs", tauri: "node tauri.mjs" } })}\n`,
   );
   await writeFile(
     path.join(root, "build.mjs"),
     'import { mkdir, writeFile } from "node:fs/promises";\nawait mkdir("dist", { recursive: true });\nawait writeFile("dist/index.html", "built\\n");\n',
+  );
+  await writeFile(
+    path.join(root, "tauri.mjs"),
+    'import { readFile, writeFile } from "node:fs/promises";\nimport path from "node:path";\nconst config = process.argv[process.argv.indexOf("--config") + 1];\nawait writeFile(path.join("release-inputs", "macos-universal", "frontend", "index.html"), "attacker replacement\\n");\nif (await readFile("tauri-fail", "utf8").catch(() => null)) process.exit(7);\nconst value = JSON.parse(await readFile(config, "utf8"));\nconst resources = Object.keys(value.bundle.resources).find((key) => key !== "resources");\nawait writeFile("package-result.json", JSON.stringify({ frontend: await readFile(path.join(value.build.frontendDist, "index.html"), "utf8"), resource: await readFile(path.join(resources, "runtime.txt"), "utf8"), frontendDist: value.build.frontendDist, resources }));\n',
   );
   await mkdir(path.join(root, "scripts"), { recursive: true });
   await writeFile(
@@ -92,14 +96,16 @@ async function fixture(target = "macos-universal") {
   return { root, input, commit };
 }
 
-function run(root, input) {
-  return spawnSync(process.execPath, [script, "--input", input, "--dry-run"], {
+function run(root, input, { dryRun = true } = {}) {
+  const args = [script, "--input", input];
+  if (dryRun) args.push("--dry-run");
+  return spawnSync(process.execPath, args, {
     cwd: root,
     encoding: "utf8",
   });
 }
 
-test("verified plan binds Tauri to staged frontend and resources", async () => {
+test("verified plan binds Tauri to a canonical frontend and resources snapshot", async () => {
   const { root, input } = await fixture();
   const result = run(root, input);
 
@@ -108,14 +114,55 @@ test("verified plan binds Tauri to staged frontend and resources", async () => {
   assert.deepEqual(plan.tauri.args.slice(0, 8), [
     "run", "tauri", "--", "build", "--target", "universal-apple-darwin", "--bundles", "dmg",
   ]);
-  assert.deepEqual(plan.config.build, {
-    beforeBuildCommand: "",
-    frontendDist: path.join(input, "frontend"),
-  });
-  assert.deepEqual(plan.config.bundle.resources, {
-    resources: null,
-    [path.join(input, "resources")]: "",
-  });
+  assert.equal(plan.config.build.beforeBuildCommand, "");
+  assert.match(
+    plan.config.build.frontendDist,
+    /release-inputs\/\.verify-[0-9a-f-]{36}\/frontend$/,
+  );
+  assert.deepEqual(plan.config.bundle.resources.resources, null);
+  const resources = Object.keys(plan.config.bundle.resources).find(
+    (key) => key !== "resources",
+  );
+  assert.match(resources, /release-inputs\/\.verify-[0-9a-f-]{36}\/resources$/);
+  assert.equal(plan.config.bundle.resources[resources], "");
+  assert.notEqual(plan.config.build.frontendDist, path.join(input, "frontend"));
+  assert.deepEqual(
+    (await readdir(path.join(root, "release-inputs"))).filter((name) => name.startsWith(".verify-")),
+    [],
+  );
+});
+
+test("package consumes the canonical snapshot after supplied staging is mutated", async () => {
+  const { root, input } = await fixture();
+  const result = run(root, input, { dryRun: false });
+
+  assert.equal(result.status, 0, result.stderr);
+  const packaged = JSON.parse(await readFile(path.join(root, "package-result.json"), "utf8"));
+  assert.equal(packaged.frontend, "staged frontend\n");
+  assert.equal(packaged.resource, "staged resource\n");
+  assert.notEqual(packaged.frontendDist, path.join(input, "frontend"));
+  assert.match(packaged.resources, /release-inputs\/\.verify-[0-9a-f-]{36}\/resources$/);
+  assert.equal(
+    await readFile(path.join(input, "frontend", "index.html"), "utf8"),
+    "attacker replacement\n",
+  );
+  assert.deepEqual(
+    (await readdir(path.join(root, "release-inputs"))).filter((name) => name.startsWith(".verify-")),
+    [],
+  );
+});
+
+test("failed package removes the canonical snapshot", async () => {
+  const { root, input } = await fixture();
+  await writeFile(path.join(root, "tauri-fail"), "yes\n");
+
+  const result = run(root, input, { dryRun: false });
+
+  assert.equal(result.status, 7, result.stderr);
+  assert.deepEqual(
+    (await readdir(path.join(root, "release-inputs"))).filter((name) => name.startsWith(".verify-")),
+    [],
+  );
 });
 
 test("verified plan rejects staged inputs from another checkout commit", async () => {

@@ -184,6 +184,13 @@ function safeVerificationOutput(output) {
   );
 }
 
+async function removeCanonicalSnapshot(output) {
+  if (!safeVerificationOutput(output)) {
+    throw new Error("Canonical staging output is invalid.");
+  }
+  await rm(output, { recursive: true, force: true });
+}
+
 function rebuildFrontend() {
   const command = process.platform === "win32" ? "npm.cmd" : "npm";
   const result = spawnSync(command, ["run", "build"], {
@@ -259,30 +266,33 @@ async function verifiedPlan(options) {
   try {
     await canonicalStaging(metadata, canonical);
     await requireCanonicalMatch(input, canonical);
-  } finally {
-    if (safeVerificationOutput(canonical)) {
-      await rm(canonical, { recursive: true, force: true });
-    }
+    return { canonical, plan: planFor(canonical, metadata, options.noSign) };
+  } catch (error) {
+    await removeCanonicalSnapshot(canonical);
+    throw error;
   }
-  return planFor(input, metadata, options.noSign);
 }
 
 async function main() {
   const options = argumentsFrom(process.argv.slice(2));
-  const plan = await verifiedPlan(options);
-  if (options.dryRun) {
-    process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
-    return;
-  }
-  const temporary = await mkdtemp(path.join(os.tmpdir(), "karakeep-tauri-config-"));
+  const { canonical, plan } = await verifiedPlan(options);
   try {
-    const config = path.join(temporary, "tauri.release-inputs.json");
-    await writeFile(config, `${JSON.stringify(plan.config)}\n`);
-    const result = spawnSync(plan.tauri.command, [...plan.tauri.args, "--config", config], { cwd: root, stdio: "inherit" });
-    if (result.error) throw result.error;
-    process.exitCode = result.status ?? 1;
+    if (options.dryRun) {
+      process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
+      return;
+    }
+    const temporary = await mkdtemp(path.join(os.tmpdir(), "karakeep-tauri-config-"));
+    try {
+      const config = path.join(temporary, "tauri.release-inputs.json");
+      await writeFile(config, `${JSON.stringify(plan.config)}\n`);
+      const result = spawnSync(plan.tauri.command, [...plan.tauri.args, "--config", config], { cwd: root, stdio: "inherit" });
+      if (result.error) throw result.error;
+      process.exitCode = result.status ?? 1;
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   } finally {
-    await rm(temporary, { recursive: true, force: true });
+    await removeCanonicalSnapshot(canonical);
   }
 }
 

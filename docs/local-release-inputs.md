@@ -82,10 +82,11 @@ non-macOS host, rebuilds the tracked frontend locally, and prepares a fresh,
 unique canonical staging tree. It requires the supplied staging tree to have
 the same paths, bytes, and supported file modes as that canonical tree before
 deriving the Tauri target and bundle format from staged metadata and supplying
-an absolute staged-input Tauri override. The temporary canonical tree is
-removed after comparison; it does not download or regenerate private runtime
-resources. Run it from the checkout root on the controlled macOS release
-machine.
+an absolute canonical-input Tauri override. The temporary canonical tree stays
+private until the Tauri build or dry run completes, so later changes to the
+supplied staging directory cannot affect packaging; it is then removed. It
+does not download or regenerate private runtime resources. Run it from the
+checkout root on the controlled macOS release machine.
 
 ## Windows x64 inputs
 
@@ -144,7 +145,8 @@ signing. Before the native package build:
 4. run `NATIVE-BUILD-COMMAND.txt` from the native host; the wrapper rebuilds
    the tracked frontend, recreates canonical release inputs locally without
    downloading private runtimes, and packages only after an exact comparison
-   with the supplied staging tree;
+   with the supplied staging tree, then packages the canonical snapshot rather
+   than the caller-supplied directory;
 5. keep credentials outside the checkout, staged inputs, process arguments,
    and logs.
 
