@@ -26,6 +26,7 @@ CHROME_BOOKMARKS = """\
 <DL><p>
   <DT><H3>Research</H3>
   <DL><p>
+    <DT><A HREF="chrome://cast/#devices">Google Cast</A>
     <DT><A HREF="https://example.com/docs" ADD_DATE="1721779200">Docs</A>
   </DL><p>
 </DL><p>
@@ -331,6 +332,11 @@ class GuiAcceptanceTests(unittest.TestCase):
             self.assertIn("Pending in this run: 1", output)
             self.assertIn("Static tags: chrome, Reading", output)
             self.assertIn("Target API: https://karakeep.example/api/v1", output)
+            self.assertIn(
+                'Click "Import live" to continue; enter an API key above if needed.',
+                output,
+            )
+            self.assertNotIn("--execute", output)
             self.assertFalse(Path(payload["stateFile"]).exists())
             self.assertFalse(Path(payload["failureFile"]).exists())
 

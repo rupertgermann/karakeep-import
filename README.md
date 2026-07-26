@@ -245,7 +245,10 @@ while Karakeep's URL deduplication still prevents duplicate link bookmarks.
 | export tags | Field Theory `tags` values | Every folder in the bookmark path |
 
 All tags are attached as human tags and deduplicated case-insensitively.
-Chrome entries must resolve to an HTTP or HTTPS URL.
+Chrome entries that do not resolve to an HTTP or HTTPS URL, such as
+`chrome://` links and bookmarklets, are skipped.
+Duplicate Chrome URLs are imported once. The first copy supplies the title,
+timestamp, and folder path; folder tags from later copies are merged.
 
 The default `--timestamp-field source` selects `postedAt` for Field Theory and
 `addedAt` for Chrome. Missing or unparseable timestamps are omitted, so

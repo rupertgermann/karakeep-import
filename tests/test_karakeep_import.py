@@ -309,47 +309,67 @@ class ImporterTests(unittest.TestCase):
         self.assertIn("Input format: Chrome bookmarks HTML", output.getvalue())
         self.assertIn("Pending in this run: 1", output.getvalue())
 
-    def test_chrome_urls_must_be_unique_after_view_source_normalization(self):
+    def test_chrome_duplicate_urls_are_merged_after_normalization(self):
         duplicate_bookmarks = """\
 <!DOCTYPE NETSCAPE-Bookmark-file-1>
 <DL><p>
-    <DT><A HREF="https://example.com/docs">Documentation</A>
-    <DT><A HREF="view-source:https://example.com/docs">Source</A>
+    <DT><H3>Reading</H3>
+    <DL><p>
+        <DT><A HREF="https://example.com/docs">Documentation</A>
+    </DL><p>
+    <DT><H3>Research</H3>
+    <DL><p>
+        <DT><A HREF="view-source:https://example.com/docs">Source</A>
+    </DL><p>
 </DL><p>
 """
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bookmarks.html"
             path.write_text(duplicate_bookmarks, encoding="utf-8")
-            error_output = io.StringIO()
 
-            with redirect_stderr(error_output):
-                result = importer.main(["--input", str(path)])
+            records = importer.load_records(path)
 
-        self.assertEqual(result, 1)
-        self.assertIn(
-            "Duplicate URL https://example.com/docs in Chrome bookmark 2",
-            error_output.getvalue(),
+        self.assertEqual(
+            records,
+            [
+                {
+                    "sourceType": "chrome",
+                    "url": "https://example.com/docs",
+                    "title": "Documentation",
+                    "addedAt": "",
+                    "folders": ["Reading"],
+                    "tags": ["Reading", "Research"],
+                }
+            ],
         )
 
-    def test_chrome_import_rejects_non_web_bookmarks(self):
-        bookmarklet_export = """\
+    def test_chrome_import_skips_non_web_bookmarks(self):
+        mixed_export = """\
 <!DOCTYPE NETSCAPE-Bookmark-file-1>
 <DL><p>
+    <DT><A HREF="chrome://cast/#devices">Google Cast</A>
     <DT><A HREF="javascript:document.body.remove()">Clean page</A>
+    <DT><A HREF="https://example.com/docs">Documentation</A>
 </DL><p>
 """
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bookmarks.html"
-            path.write_text(bookmarklet_export, encoding="utf-8")
-            error_output = io.StringIO()
+            path.write_text(mixed_export, encoding="utf-8")
 
-            with redirect_stderr(error_output):
-                result = importer.main(["--input", str(path)])
+            records = importer.load_records(path)
 
-        self.assertEqual(result, 1)
-        self.assertIn(
-            "Chrome bookmark Clean page has no supported http(s) URL",
-            error_output.getvalue(),
+        self.assertEqual(
+            records,
+            [
+                {
+                    "sourceType": "chrome",
+                    "url": "https://example.com/docs",
+                    "title": "Documentation",
+                    "addedAt": "",
+                    "folders": [],
+                    "tags": [],
+                }
+            ],
         )
 
     def test_chrome_export_is_imported_through_the_live_cli(self):

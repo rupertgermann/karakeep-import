@@ -975,6 +975,13 @@ class GuiRequestHandler(BaseHTTPRequestHandler):
             output_stream = cast(TextIO, process.stdout)
             with output_stream:
                 for line in output_stream:
+                    if not payload.get("execute") and line.startswith(
+                        "Run again with --execute"
+                    ):
+                        line = (
+                            'Click "Import live" to continue; '
+                            "enter an API key above if needed.\n"
+                        )
                     self._send_event(
                         {
                             "type": "output",

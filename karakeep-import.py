@@ -355,9 +355,7 @@ class ChromeBookmarksParser(HTMLParser):
         raw_url = str(attributes.get("href") or "").strip()
         url = normalize_chrome_url(raw_url)
         if not url:
-            raise ImportFailure(
-                f"Chrome bookmark {title or '(untitled)'} has no supported http(s) URL"
-            )
+            return
 
         folders = list(self._folders)
         self.records.append(
@@ -407,15 +405,24 @@ def load_input(
     if resolved_format == "chrome":
         parser = ChromeBookmarksParser()
         parser.feed(path.read_text(encoding="utf-8"))
-        seen_urls: set[str] = set()
-        for position, record in enumerate(parser.records, start=1):
+        records_by_url: dict[str, dict[str, Any]] = {}
+        unique_records: list[dict[str, Any]] = []
+        for record in parser.records:
             url = str(record["url"])
-            if url in seen_urls:
-                raise ImportFailure(
-                    f"Duplicate URL {url} in Chrome bookmark {position}"
-                )
-            seen_urls.add(url)
-        return parser.records, resolved_format
+            existing = records_by_url.get(url)
+            if existing is None:
+                records_by_url[url] = record
+                unique_records.append(record)
+                continue
+
+            existing_tags = list(existing["tags"])
+            seen_tags = {tag.casefold() for tag in existing_tags}
+            for tag in record["tags"]:
+                if tag.casefold() not in seen_tags:
+                    existing_tags.append(tag)
+                    seen_tags.add(tag.casefold())
+            existing["tags"] = existing_tags
+        return unique_records, resolved_format
     if resolved_format != "fieldtheory":
         raise ImportFailure(f"Unsupported input format: {resolved_format}")
 
