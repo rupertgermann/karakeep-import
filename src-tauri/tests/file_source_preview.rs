@@ -41,7 +41,7 @@ fn one_field_theory_record_maps_to_a_read_only_transfer_preview() {
             .note
             .contains("> Quoted from Quoted Person (@quoted):\n> Quoted context\n> on two lines.")
     );
-    assert!(bookmark.note.ends_with("Imported from Field Theory."));
+    assert!(bookmark.note.ends_with("Transferred from Field Theory."));
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn chrome_netscape_header_is_auto_detected_and_mapped() {
         bookmark.note,
         "Chrome folder: Bookmarks bar > Research & Docs\n\
          Added to Chrome: 2024-07-24T00:00:00Z\n\
-         Imported from Chrome bookmarks."
+         Transferred from Chrome bookmarks."
     );
 }
 

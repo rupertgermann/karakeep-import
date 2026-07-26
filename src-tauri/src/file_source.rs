@@ -310,7 +310,7 @@ fn make_field_theory_note(record: &Map<String, Value>) -> String {
     }
 
     sections.push(metadata.join("\n"));
-    sections.push("Imported from Field Theory.".to_string());
+    sections.push("Transferred from Field Theory.".to_string());
     sections.join("\n\n")
 }
 
@@ -422,7 +422,7 @@ impl ChromeParser {
         if let Some(timestamp) = &created_at {
             metadata.push(format!("Added to Chrome: {timestamp}"));
         }
-        metadata.push("Imported from Chrome bookmarks.".to_string());
+        metadata.push("Transferred from Chrome bookmarks.".to_string());
 
         self.bookmarks.push(BookmarkPreview {
             source_id: url.clone(),
