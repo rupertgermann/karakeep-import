@@ -7,7 +7,7 @@ and the complete supported-browser matrix remain release gates.
 
 ## Tested source and host
 
-- Implementation commit: `d9cc4ee80956f9826cf70ab0e5578bbeb2ba9365`
+- Implementation commit: `dc8bf7b067f906a03239fd627e5f26cdad580ace`
 - Branch: `feat/karakeep-transfer-mvp`
 - Host: macOS 14.8.7 on Apple Silicon
 - Rust: 1.93.0
@@ -15,16 +15,20 @@ and the complete supported-browser matrix remain release gates.
 - Bundled private Node.js: 22.20.0
 - Bundled Field Theory: 1.3.22
 
-The build used only local inputs and the target-specific command generated in
-`release-inputs/macos-universal/NATIVE-BUILD-COMMAND.txt`:
+The build used only verified local inputs. The target-specific command
+generated in `release-inputs/macos-universal/NATIVE-BUILD-COMMAND.txt` was:
 
 ```bash
-npm run tauri -- build --target universal-apple-darwin --bundles dmg
+npm run release:build-candidate -- --input release-inputs/macos-universal
 ```
 
-Tauri built both Rust target binaries and combined them with `lipo`. The
-filesystem sandbox prevented `hdiutil create`; running the unchanged generated
-DMG script in the controlled local macOS environment completed successfully.
+For this deliberately unsigned preflight, `--no-sign` was appended. The
+wrapper verified the clean checkout commit and the complete staged checksum
+inventory, rejected symlinks, disabled Tauri's build hook, and bound Tauri to
+the absolute staged frontend and resource paths. Tauri built both Rust target
+binaries and combined them with `lipo`. The filesystem sandbox prevented
+`hdiutil create`; rerunning the same verified wrapper in the controlled local
+macOS environment completed successfully.
 
 ## Retained results
 
@@ -34,12 +38,12 @@ DMG script in the controlled local macOS environment completed successfully.
 | Declared macOS baseline | PASS | Both Mach-O slices report `minos 12.0`. |
 | Universal DMG integrity | PASS | `hdiutil verify` reported a valid disk image. |
 | DMG installation layout | PASS | A read-only mount contained `Karakeep Transfer.app` and the `/Applications` link. |
-| Isolated application launch | PASS | LaunchServices accepted and opened the final local app bundle. |
-| Guided first screen | PASS | The retained packaged visual preflight and final UI tests show the ready desktop bridge and Step 1, **Connect Karakeep**, rather than stopping at an intro-only screen. |
-| Private runtime packaging | PASS | The app contains arm64 and x86-64 Node executables, Field Theory, its bridge, checksums, licenses, and notices. |
-| No separately installed Node requirement | PASS | With `PATH=/nonexistent` and an empty home directory, the packaged arm64 Node executable started the packaged bridge and returned a protocol-v1 browser discovery result. |
-| Browser/profile discovery | PASS | The packaged bridge discovered three installed supported browsers and seven profiles; names and paths were not retained. |
-| Intel runtime execution on this host | PASS | `arch -x86_64` ran the final packaged x86-64 Node runtime under Rosetta and reported version 22.20.0. This is not native Intel-host evidence. |
+| Isolated application launch | PASS | LaunchServices started a new process from the app inside the read-only mounted DMG. |
+| Guided first screen | PASS | The retained packaged visual preflight and 116 current frontend tests show the ready desktop bridge and Step 1, **Connect Karakeep**, rather than stopping at an intro-only screen. |
+| Private runtime packaging | PASS | All 340 staged resource files were byte-identical in the app; the only additional resource was Tauri's `icon.icns`. The app contains arm64 and x86-64 Node executables, Field Theory, its bridge, checksums, licenses, and notices. |
+| No separately installed Node requirement | PASS | With `PATH=/nonexistent` and an empty home directory, both packaged Node executables started the packaged bridge and returned protocol-v1 browser discovery results. |
+| Browser/profile discovery protocol | PASS | Both packaged architectures returned a structured empty-browser result against the isolated empty home. Real supported-browser acquisition remains a separate gate below. |
+| Intel runtime execution on this host | PASS | `arch -x86_64` ran the final packaged x86-64 Node runtime and bridge under Rosetta. This is not native Intel-host evidence. |
 | Developer ID signature | FAIL | `codesign` reported an ad-hoc linker signature, no Team Identifier, and no sealed resources. The local keychain contains no valid code-signing identity. |
 | Gatekeeper execution assessment | FAIL | `spctl` did not accept the unsigned app. |
 | Apple notarization and stapling | UNAVAILABLE | Notarization cannot proceed without a Developer ID identity and notarization credentials. |
@@ -51,7 +55,7 @@ DMG script in the controlled local macOS environment completed successfully.
 The unsigned DMG SHA-256 was:
 
 ```text
-3ed13b525a7d31411f366941a52b5601f8fc7599dd9b5632a3c5a354ad5d082e
+c641b8c4a445d1b5e85ad9fd42e5389fa1f892c2b30d2fd98a08b3f5ce308991
 ```
 
 That checksum identifies only this unsigned development artifact. It must not
