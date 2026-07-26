@@ -118,6 +118,22 @@ const expectedSigningScopes = {
     "bundled-sqlite",
   ],
 };
+const privateSignerSubjects = [
+  "CN=release@example.invalid",
+  "CN=https://build.internal.example",
+  "CN=HTTPS://build.internal.example",
+  `CN=file://${path.posix.join("/", "Users", "release", "identity")}`,
+  `CN=${path.posix.join("/", "USERS", "release", "identity")}`,
+  `CN=${path.posix.join("/", "private", "tmp", "release-identity")}`,
+  "CN=release-builder.local",
+  "CN=192.168.1.42",
+  "CN=HOSTNAME=release-builder-42",
+  "CN=UID=release-operator",
+];
+const publicSignerSubjects = [
+  "Developer ID Application: Example Organization (ABCDE12345)",
+  "CN=Example Organization, O=Example Organization, C=US",
+];
 
 function assertionMatrix(target) {
   return new Map([
@@ -523,6 +539,20 @@ test("acceptance evidence schema fixes the exact assertion and signer matrices",
     "certificateSha256",
     "timestampStatus",
   ]);
+  const subjectPrivacyRules =
+    schema.$defs.signingIdentity.properties.subject.allOf ?? [];
+  for (const subject of privateSignerSubjects) {
+    assert.ok(
+      subjectPrivacyRules.some(({ not }) => not && new RegExp(not.pattern).test(subject)),
+      `schema must reject private signer subject: ${subject}`,
+    );
+  }
+  for (const subject of publicSignerSubjects) {
+    assert.ok(
+      subjectPrivacyRules.every(({ not }) => !not || !new RegExp(not.pattern).test(subject)),
+      `schema must allow public signer subject: ${subject}`,
+    );
+  }
   assert.deepEqual(schema.$defs.evidenceReference.required, [
     "file",
     "sha256",
@@ -1089,6 +1119,36 @@ test("requires a UTC test timestamp and public signing identities", async (t) =>
     mutate(evidence);
     await writeJson(fixture.macosEvidence, evidence);
     await assertRejected(fixture, pattern, description);
+  }
+});
+
+test("accepts public certificate subjects and rejects private signer subjects", async (t) => {
+  for (const [target, subject] of [
+    ["macos", publicSignerSubjects[0]],
+    ["windows", publicSignerSubjects[1]],
+  ]) {
+    const fixture = await createFixture(t);
+    const evidenceFile =
+      target === "macos" ? fixture.macosEvidence : fixture.windowsEvidence;
+    const evidence = await readJson(evidenceFile);
+    for (const identity of evidence.signingIdentities) {
+      identity.subject = subject;
+    }
+    await writeJson(evidenceFile, evidence);
+    const result = run(fixture);
+    assert.equal(result.status, 0, `${subject}\n${result.stderr}`);
+  }
+
+  for (const subject of privateSignerSubjects) {
+    const fixture = await createFixture(t);
+    const evidence = await readJson(fixture.macosEvidence);
+    evidence.signingIdentities[0].subject = subject;
+    await writeJson(fixture.macosEvidence, evidence);
+    await assertRejected(
+      fixture,
+      /macos-universal evidence signing identity subject is not publish-safe/,
+      subject,
+    );
   }
 });
 

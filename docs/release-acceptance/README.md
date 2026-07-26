@@ -236,6 +236,12 @@ thumbprints are required signing evidence and are not secret. Obtain secrets
 from the controlled platform credential store; never pass them in a command
 argument or copy them into a record.
 
+A signing subject must identify only the public certificate issuer and
+organization. For example, `Developer ID Application: Example Organization
+(ABCDE12345)` and `CN=Example Organization, O=Example Organization, C=US` are
+publish-safe. Do not put email addresses, URLs, local paths, private hosts or
+IP addresses, or account and machine identifiers in a signing subject.
+
 If output cannot be sanitized without weakening the evidence, mark the row
 `UNAVAILABLE`. Do not retain sensitive output merely to turn a gate green.
 

@@ -212,7 +212,44 @@
         "subject": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 256
+          "maxLength": 256,
+          "allOf": [
+            {
+              "not": {
+                "pattern": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:[Hh][Tt][Tt][Pp][Ss]?|[Ff][Ii][Ll][Ee])://"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:~[\\\\/]|/(?:[Uu][Ss][Ee][Rr][Ss]|[Hh][Oo][Mm][Ee]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]/[Tt][Mm][Pp]|[Tt][Mm][Pp]|[Vv][Aa][Rr]/[Ff][Oo][Ll][Dd][Ee][Rr][Ss])/[\\s\\S]*|[A-Za-z]:\\\\(?:[Uu][Ss][Ee][Rr][Ss]|[Dd][Oo][Cc][Uu][Mm][Ee][Nn][Tt][Ss] [Aa][Nn][Dd] [Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]|[Tt][Ee][Mm][Pp])\\\\)"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:^|[^A-Za-z0-9.-])(?:[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]|(?:[A-Za-z0-9-]+\\.)+(?:[Ll][Oo][Cc][Aa][Ll]|[Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll]|[Ll][Aa][Nn]|[Hh][Oo][Mm][Ee]|[Cc][Oo][Rr][Pp]))(?:$|[^A-Za-z0-9.-])"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:^|[^0-9.])(?:10(?:\\.\\d{1,3}){3}|127(?:\\.\\d{1,3}){3}|169\\.254(?:\\.\\d{1,3}){2}|172\\.(?:1[6-9]|2\\d|3[0-1])(?:\\.\\d{1,3}){2}|192\\.168(?:\\.\\d{1,3}){2})(?:$|[^0-9.])"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:^|[^0-9A-Fa-f:])(?:::1|(?:[Ff][Cc]|[Ff][Dd])[0-9A-Fa-f]{2}:|[Ff][Ee]80:)(?:$|[^0-9A-Fa-f:])"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:^|[=,;\\\\/\\s])(?:[Aa][Cc][Cc][Oo][Uu][Nn][Tt]|[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr](?:[Nn][Aa][Mm][Ee])?|[Hh][Oo][Ss][Tt](?:[Nn][Aa][Mm][Ee])?|[Mm][Aa][Cc][Hh][Ii][Nn][Ee]|[Uu][Ii][Dd]|[Uu][Ss][Ee][Rr](?:[Nn][Aa][Mm][Ee])?)\\s*[:=]"
+              }
+            }
+          ]
         },
         "stableIdentifier": {
           "type": "string",

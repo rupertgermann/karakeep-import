@@ -117,6 +117,15 @@ const expectedSigningScopes = {
     "bundled-sqlite",
   ],
 };
+const privateSignerSubjectPatterns = [
+  /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/,
+  /(?:https?|file):\/\//i,
+  /(?:~[\\/]|\/(?:Users|home|private\/tmp|tmp|var\/folders)\/|[A-Za-z]:\\(?:Users|Documents and Settings|Temp)\\)/i,
+  /(?:^|[^A-Za-z0-9.-])(?:localhost|(?:[A-Za-z0-9-]+\.)+(?:local|internal|lan|home|corp))(?:$|[^A-Za-z0-9.-])/i,
+  /(?:^|[^0-9.])(?:10(?:\.\d{1,3}){3}|127(?:\.\d{1,3}){3}|169\.254(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})(?:$|[^0-9.])/,
+  /(?:^|[^0-9A-Fa-f:])(?:::1|(?:fc|fd)[0-9a-f]{2}:|fe80:)(?:$|[^0-9A-Fa-f:])/i,
+  /(?:^|[=,;\\/\s])(?:account|computer(?:name)?|host(?:name)?|machine|uid|user(?:name)?)\s*[:=]/i,
+];
 function assertionMatrix(target) {
   return new Map([
     ...[...commonPlatformAssertions, ...targetPlatformAssertions[target.name]].map(
@@ -711,9 +720,11 @@ function validateSigningIdentity(identity, target) {
     identity.subject.length === 0 ||
     identity.subject.length > 256 ||
     /[\r\n]/.test(identity.subject) ||
-    /(?:\/Users\/|\/home\/|[A-Za-z]:\\Users\\)/i.test(identity.subject)
+    privateSignerSubjectPatterns.some((pattern) => pattern.test(identity.subject))
   ) {
-    throw new Error(`${target} evidence signing identity subject is invalid.`);
+    throw new Error(
+      `${target} evidence signing identity subject is not publish-safe.`,
+    );
   }
   if (
     typeof identity.stableIdentifier !== "string" ||
