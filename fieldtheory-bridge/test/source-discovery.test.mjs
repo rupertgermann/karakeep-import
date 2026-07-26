@@ -20,16 +20,28 @@ async function chromiumProfile(root, directory, displayName) {
   );
 }
 
-test("discovers only the supported installed browser and profile matrix", async () => {
+test("discovers the supported browser and profile matrix in stable UI order", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "karakeep-x-sources-"));
   const chrome = path.join(root, "Chrome");
+  const edge = path.join(root, "Edge");
+  const brave = path.join(root, "Brave");
+  const chromium = path.join(root, "Chromium");
   const safari = path.join(root, "Safari");
   const firefox = path.join(root, "Firefox");
 
   await chromiumProfile(chrome, "Default", "Personal");
   await chromiumProfile(chrome, "Profile 2", "Research");
+  await chromiumProfile(edge, "Default", "Work");
+  await chromiumProfile(edge, "Profile 3", "Edge research");
+  await chromiumProfile(brave, "Default", "Personal");
+  await chromiumProfile(brave, "Profile 1", "Reading");
+  await chromiumProfile(chromium, "Default", "Default");
+  await chromiumProfile(chromium, "Profile 10", "Archive");
   await chromiumProfile(safari, "Default", "Unsupported");
   await mkdir(path.join(firefox, "Profiles", "abc.default-release"), {
+    recursive: true,
+  });
+  await mkdir(path.join(firefox, "Profiles", "research"), {
     recursive: true,
   });
   await writeFile(
@@ -40,6 +52,11 @@ test("discovers only the supported installed browser and profile matrix", async 
       "IsRelative=1",
       "Path=Profiles/abc.default-release",
       "",
+      "[Profile1]",
+      "Name=Research",
+      "IsRelative=1",
+      "Path=Profiles/research",
+      "",
     ].join("\n"),
   );
 
@@ -47,6 +64,9 @@ test("discovers only the supported installed browser and profile matrix", async 
     userDataDirForBrowser: (browserId) =>
       ({
         chrome,
+        edge,
+        brave,
+        chromium,
         firefox,
         safari,
       })[browserId],
@@ -63,12 +83,40 @@ test("discovers only the supported installed browser and profile matrix", async 
         ],
       },
       {
+        id: "edge",
+        name: "Microsoft Edge",
+        profiles: [
+          { id: "Default", name: "Work" },
+          { id: "Profile 3", name: "Edge research" },
+        ],
+      },
+      {
+        id: "brave",
+        name: "Brave",
+        profiles: [
+          { id: "Default", name: "Personal" },
+          { id: "Profile 1", name: "Reading" },
+        ],
+      },
+      {
+        id: "chromium",
+        name: "Chromium",
+        profiles: [
+          { id: "Default", name: "Default" },
+          { id: "Profile 10", name: "Archive" },
+        ],
+      },
+      {
         id: "firefox",
         name: "Firefox",
         profiles: [
           {
             id: "Profiles/abc.default-release",
             name: "default-release",
+          },
+          {
+            id: "Profiles/research",
+            name: "Research",
           },
         ],
       },
