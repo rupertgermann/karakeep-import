@@ -63,7 +63,7 @@ cargo fetch --locked --manifest-path src-tauri/Cargo.toml
 npm run prepare:fieldtheory
 npm run build
 npm run release:inputs -- --target macos-universal
-npm run tauri -- build --target universal-apple-darwin --bundles dmg
+npm run release:build-candidate -- --input release-inputs/macos-universal
 ```
 
 The output is `release-inputs/macos-universal`. It contains both macOS private
@@ -71,10 +71,13 @@ Node runtimes (`darwin-arm64` and `darwin-x64`), the frontend build, Field
 Theory bridge resources, `RELEASE-METADATA.json`,
 `RELEASE-NOTES.md`, `DEPENDENCY-INVENTORY.json`,
 `THIRD-PARTY-NOTICES.md`, and `SHA256SUMS`.
-It also contains `NATIVE-BUILD-COMMAND.txt`; that checksummed file is generated
-from the declared `rustTarget` and `bundleFormat` and must contain the exact
-Tauri command shown above. Run that command from the checkout root on the
-controlled macOS release machine.
+It also contains `NATIVE-BUILD-COMMAND.txt`; that checksummed file invokes the
+tracked release-build wrapper shown above. The wrapper requires a clean
+checkout whose `HEAD` equals `RELEASE-METADATA.json`, verifies every
+`SHA256SUMS` entry, rejects a non-macOS host, derives the Tauri target and
+bundle format from staged metadata, and supplies an absolute staged-input
+Tauri override. Run it from the checkout root on the controlled macOS release
+machine.
 
 ## Windows x64 inputs
 
@@ -86,7 +89,7 @@ cargo fetch --locked --manifest-path src-tauri/Cargo.toml
 npm run prepare:fieldtheory
 npm run build
 npm run release:inputs -- --target windows-x64
-npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis
+npm run release:build-candidate -- --input release-inputs/windows-x64
 ```
 
 The output is `release-inputs/windows-x64`. It contains only the Windows x64
@@ -94,8 +97,8 @@ private Node runtime, the pinned `sqlite3.exe` helper, and the same
 deterministic metadata, notices, and checksum files. The packaged bridge puts
 the private SQLite directory first on its Windows-only `PATH`; no separately
 installed SQLite command is required. Its `NATIVE-BUILD-COMMAND.txt` contains
-the exact Windows command shown above; run it from the checkout root on the
-controlled Windows release machine. The later issue #17 Authenticode gate must
+the tracked Windows wrapper command shown above; run it from the checkout root
+on the controlled Windows release machine. The later issue #17 Authenticode gate must
 verify every shipped executable, including this helper, as well as the app and
 installer.
 
@@ -129,8 +132,9 @@ signing. Before the native package build:
    expected commit, version, native target, bundle format, native build
    command, bundled runtimes, toolchain versions, and source release-note
    checksum;
-4. confirm `NATIVE-BUILD-COMMAND.txt` selects the same target and bundle format
-   before running it on the native host;
+4. run `NATIVE-BUILD-COMMAND.txt` from the native host; the wrapper derives the
+   target and bundle format from checked staged metadata and never rebuilds or
+   downloads staged frontend/resources;
 5. keep credentials outside the checkout, staged inputs, process arguments,
    and logs.
 

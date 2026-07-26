@@ -598,11 +598,11 @@ test("macOS staging does not contain the Windows-only SQLite runtime", async () 
 for (const [target, expected] of [
   [
     "macos-universal",
-    "npm run tauri -- build --target universal-apple-darwin --bundles dmg\n",
+    "npm run release:build-candidate -- --input release-inputs/macos-universal\n",
   ],
   [
     "windows-x64",
-    "npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis\n",
+    "npm run release:build-candidate -- --input release-inputs/windows-x64\n",
   ],
 ]) {
   test(`${target} staging produces its exact local native build command`, async () => {

@@ -50,7 +50,7 @@ async function sha3_256(file) {
   return createHash("sha3-256").update(await readFile(file)).digest("hex");
 }
 
-function nativeBuildCommand(targetConfig) {
+function nativeBuildCommand(target, targetConfig) {
   for (const [name, value] of [
     ["Rust target", targetConfig.rustTarget],
     ["bundle format", targetConfig.bundleFormat],
@@ -59,7 +59,10 @@ function nativeBuildCommand(targetConfig) {
       throw new Error(`${name} is missing or invalid.`);
     }
   }
-  return `npm run tauri -- build --target ${targetConfig.rustTarget} --bundles ${targetConfig.bundleFormat}`;
+  if (!/^[A-Za-z0-9._-]+$/.test(target ?? "")) {
+    throw new Error("Release target is missing or invalid.");
+  }
+  return `npm run release:build-candidate -- --input release-inputs/${target}`;
 }
 
 function packageVersion(cargoToml) {
@@ -918,7 +921,7 @@ async function prepare(options) {
     await rm(output, { recursive: true, force: true });
     throw error;
   }
-  const buildCommand = nativeBuildCommand(validated.targetConfig);
+  const buildCommand = nativeBuildCommand(target, validated.targetConfig);
   await writeFile(
     path.join(output, "NATIVE-BUILD-COMMAND.txt"),
     `${buildCommand}\n`,
