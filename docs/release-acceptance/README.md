@@ -51,29 +51,108 @@ Every platform and publication record must identify:
 - the release metadata, dependency inventory, notices, and release notes that
   accompany the candidate.
 
-The JSON record uses schema version 3 from
+The JSON record uses schema version 4 from
 [`../../release/acceptance-evidence.schema.json`](../../release/acceptance-evidence.schema.json).
-Every checkout, platform, signing-timestamp, and aggregate acceptance assertion
-is an object with exact status `PASS` and one or more evidence references.
-The target/platform pairs are exact:
+Every named assertion is an object with exact status `PASS`. It contains
+exactly one distinct typed JSON file for every platform listed below; files
+cannot be shared across assertions. The target/platform pairs are exact:
 
 - `macos-universal`: `macos-arm64` and `macos-x86_64-native`;
 - `windows-x64`: `windows-10-x64` and `windows-11-x64`.
 
-Signing identities form a non-empty array because a Windows installer,
-installed application, bundled Node runtime, and bundled SQLite executable may
-have distinct signing scopes or certificates. Record each applicable scope
-instead of collapsing them into one assertion. Each identity has a stable
-`assertionId` derived from its public scope, and its evidence must bind that
-exact assertion.
+`M` means both exact macOS platforms, `W` means both exact Windows platforms,
+and `TW` means one target-wide record.
 
-Every gate except `signature` needs distinct evidence for both exact native
-platforms of its target. Signature, clean-checkout, signing-identity, and
-Windows application-payload assertions use the explicit `target-wide`
-platform. The Windows record additionally requires
-`application-payload:windows-x64`; this proves the installed application and
-packaged runtime payload are x64 even though the pinned NSIS bootstrapper is an
-i386 PE executable.
+| Assertion ID | Coverage | Check type |
+| --- | --- | --- |
+| `checkout:clean` | both targets / TW | `clean-checkout` |
+| `host:installer-completes` | both / M or W | `native-install` |
+| `host:app-launches` | both / M or W | `native-launch` |
+| `host:first-screen-connect-karakeep` | both / M or W | `first-screen` |
+| `host:component-versions` | both / M or W | `component-versions` |
+| `host:no-system-python` | both / M or W | `system-runtime-absence` |
+| `host:no-system-node` | both / M or W | `system-runtime-absence` |
+| `host:bundled-node-runtime` | both / M or W | `bundled-runtime` |
+| `host:bundled-sqlite-helper` | Windows / W | `bundled-helper` |
+| `host:no-runtime-download` | both / M or W | `no-runtime-download` |
+| `host:fresh-state` | both / M or W | `fresh-state` |
+
+Each browser has two independent required assertions on M or W:
+
+| Browser | Discovery assertion | Acquisition assertion |
+| --- | --- | --- |
+| Google Chrome | `browser:google-chrome:discovery` | `browser:google-chrome:x-acquisition` |
+| Microsoft Edge | `browser:microsoft-edge:discovery` | `browser:microsoft-edge:x-acquisition` |
+| Brave | `browser:brave:discovery` | `browser:brave:x-acquisition` |
+| Chromium | `browser:chromium:discovery` | `browser:chromium:x-acquisition` |
+| Firefox | `browser:firefox:discovery` | `browser:firefox:x-acquisition` |
+
+Discovery records use `browser-discovery`; acquisition records use
+`browser-x-acquisition`.
+
+| Workflow assertion ID | Coverage | Check type |
+| --- | --- | --- |
+| `workflow:https-destination-validation` | both / M or W | `destination-validation` |
+| `workflow:x-consent-before-session` | both / M or W | `x-session-consent` |
+| `workflow:x-acquisition-progress-no-media` | both / M or W | `x-acquisition` |
+| `workflow:x-folder-and-source-tags` | both / M or W | `x-tag-mapping` |
+| `workflow:x-transfer-preview` | both / M or W | `transfer-preview` |
+| `workflow:x-delivery-result-totals` | both / M or W | `transfer-result` |
+| `workflow:x-repeat-delivery-preserves-content` | both / M or W | `delivery-idempotency` |
+| `workflow:field-theory-file-transfer` | both / M or W | `field-theory-file-transfer` |
+| `workflow:chrome-netscape-file-transfer` | both / M or W | `chrome-file-transfer` |
+| `workflow:file-source-preserves-active-x` | both / M or W | `source-isolation` |
+| `workflow:cancellation-resume` | both / M or W | `transfer-resume` |
+| `workflow:evidence-sanitization` | both / M or W | `evidence-sanitization` |
+
+Package assertions are artifact-invariant and use one TW record:
+
+| Assertion ID | Check type |
+| --- | --- |
+| `package:release-inputs` | `package-inventory` |
+| `package:no-python-or-browser-gui` | `package-exclusions` |
+
+macOS requires these additional assertions:
+
+| Assertion ID | Coverage | Check type |
+| --- | --- | --- |
+| `signature:application` | TW | `developer-id-signature` |
+| `signature:dmg` | TW | `developer-id-signature` |
+| `signing-identity:application-and-dmg` | TW | `signing-identity` |
+| `signature:nested-code` | TW | `developer-id-signature` |
+| `notarization:application-and-dmg` | TW | `notarization` |
+| `gatekeeper:application-and-dmg` | TW | `gatekeeper` |
+| `dmg:hdiutil-verify` | TW | `dmg-verification` |
+| `architecture:universal` | TW | `universal-architecture` |
+| `minimum-macos:executable-slices` | M | `minimum-macos-version` |
+
+Windows requires these additional assertions:
+
+| Assertion ID | Coverage | Check type |
+| --- | --- | --- |
+| `signing-identity:installer` | TW | `authenticode-signature` |
+| `signing-identity:application` | TW | `authenticode-signature` |
+| `signing-identity:bundled-node` | TW | `authenticode-signature` |
+| `signing-identity:bundled-sqlite` | TW | `authenticode-signature` |
+| `signature:other-shipped-pe` | TW | `authenticode-other-pe` |
+| `application-payload:windows-x64` | TW | `x64-application-payload` |
+| `authenticode:platform-trust` | W | `authenticode-trust` |
+
+The matrix therefore contains 43 macOS assertions and 42 Windows assertions,
+with exactly 75 typed evidence records per target. Aggregate `gate:*` and
+`platform:*` assertions are not accepted.
+
+Signing identity metadata is also exact. macOS has only the
+`application-and-dmg` scope. Windows has exactly `installer`, `application`,
+`bundled-node`, and `bundled-sqlite`. Each scope records its public subject,
+stable public identifier, certificate digest, and successful timestamp status.
+The related typed signing assertion proves the native check. The
+`signature:other-shipped-pe` record is required even when no other PE is
+shipped; its package-relative inventory must then show a zero-extra result.
+
+The Windows `application-payload:windows-x64` assertion proves the installed
+application and packaged runtime payload are x64 even though the pinned NSIS
+bootstrapper is a PE32 i386 executable.
 
 Do not substitute an unsigned staging-input checksum for a final artifact
 checksum. If signing or notarization changes an artifact, compute and retain a
@@ -89,7 +168,11 @@ one file by more than one assertion.
 Every referenced JSON file is itself a schema-versioned typed evidence record.
 It repeats the target, accepted commit, final artifact filename, artifact byte
 size, artifact SHA-256, assertion ID, platform, tool, check type, exact `PASS`
-status, and a short sanitized result summary. These values must match the outer
+status, and a short sanitized result summary. It also contains a
+`releaseInputs` object with the exact SHA-256 of
+`RELEASE-METADATA.json`, `DEPENDENCY-INVENTORY.json`,
+`THIRD-PARTY-NOTICES.md`, and `RELEASE-NOTES.md`. Those four bindings must
+match the checksummed staging snapshot. These values must match the outer
 reference and current finalization candidate. A text line saying `PASS`, an
 untyped command transcript, or one shared file reused by many rows is not
 evidence. Generated output names such as `acceptance-evidence.json` are

@@ -10,15 +10,13 @@
     "commit",
     "product",
     "testedAt",
-    "checkout",
     "artifact",
     "signingIdentities",
-    "platforms",
-    "gates"
+    "assertions"
   ],
   "properties": {
     "schemaVersion": {
-      "const": 3
+      "const": 4
     },
     "target": {
       "enum": [
@@ -58,8 +56,81 @@
       "format": "date-time",
       "pattern": "Z$"
     },
-    "checkout": {
-      "$ref": "#/$defs/passWithEvidence"
+    "artifact": {
+      "$ref": "#/$defs/artifact"
+    },
+    "signingIdentities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/signingIdentity"
+      }
+    },
+    "assertions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/passWithEvidence"
+      },
+      "propertyNames": {
+        "enum": [
+          "checkout:clean",
+          "host:installer-completes",
+          "host:app-launches",
+          "host:first-screen-connect-karakeep",
+          "host:component-versions",
+          "host:no-system-python",
+          "host:no-system-node",
+          "host:bundled-node-runtime",
+          "host:bundled-sqlite-helper",
+          "host:no-runtime-download",
+          "host:fresh-state",
+          "browser:google-chrome:discovery",
+          "browser:google-chrome:x-acquisition",
+          "browser:microsoft-edge:discovery",
+          "browser:microsoft-edge:x-acquisition",
+          "browser:brave:discovery",
+          "browser:brave:x-acquisition",
+          "browser:chromium:discovery",
+          "browser:chromium:x-acquisition",
+          "browser:firefox:discovery",
+          "browser:firefox:x-acquisition",
+          "workflow:https-destination-validation",
+          "workflow:x-consent-before-session",
+          "workflow:x-acquisition-progress-no-media",
+          "workflow:x-folder-and-source-tags",
+          "workflow:x-transfer-preview",
+          "workflow:x-delivery-result-totals",
+          "workflow:x-repeat-delivery-preserves-content",
+          "workflow:field-theory-file-transfer",
+          "workflow:chrome-netscape-file-transfer",
+          "workflow:file-source-preserves-active-x",
+          "workflow:cancellation-resume",
+          "workflow:evidence-sanitization",
+          "package:release-inputs",
+          "package:no-python-or-browser-gui",
+          "signature:application",
+          "signature:dmg",
+          "signing-identity:application-and-dmg",
+          "signature:nested-code",
+          "notarization:application-and-dmg",
+          "gatekeeper:application-and-dmg",
+          "dmg:hdiutil-verify",
+          "architecture:universal",
+          "minimum-macos:executable-slices",
+          "signing-identity:installer",
+          "signing-identity:application",
+          "signing-identity:bundled-node",
+          "signing-identity:bundled-sqlite",
+          "signature:other-shipped-pe",
+          "application-payload:windows-x64",
+          "authenticode:platform-trust"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
     },
     "artifact": {
       "type": "object",
@@ -79,83 +150,10 @@
           "minimum": 1
         },
         "sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "$ref": "#/$defs/sha256"
         }
       }
     },
-    "signingIdentities": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "$ref": "#/$defs/signingIdentity"
-      }
-    },
-    "applicationPayload": {
-      "$ref": "#/$defs/passWithEvidence"
-    },
-    "platforms": {
-      "type": "object",
-      "additionalProperties": false,
-      "minProperties": 2,
-      "maxProperties": 2,
-      "properties": {
-        "macos-arm64": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "macos-x86_64-native": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "windows-10-x64": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "windows-11-x64": {
-          "$ref": "#/$defs/passWithEvidence"
-        }
-      }
-    },
-    "gates": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "native baseline",
-        "clean install",
-        "no system runtime",
-        "five-browser matrix",
-        "X transfer",
-        "File transfer",
-        "signature",
-        "platform verification"
-      ],
-      "properties": {
-        "native baseline": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "clean install": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "no system runtime": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "five-browser matrix": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "X transfer": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "File transfer": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "signature": {
-          "$ref": "#/$defs/passWithEvidence"
-        },
-        "platform verification": {
-          "$ref": "#/$defs/passWithEvidence"
-        }
-      }
-    }
-  },
-  "$defs": {
     "evidenceReference": {
       "type": "object",
       "additionalProperties": false,
@@ -174,8 +172,7 @@
           }
         },
         "sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "$ref": "#/$defs/sha256"
         },
         "assertionId": {
           "type": "string",
@@ -197,21 +194,20 @@
       "additionalProperties": false,
       "required": [
         "scope",
-        "assertionId",
         "subject",
         "stableIdentifier",
         "certificateSha256",
-        "timestampStatus",
-        "evidence"
+        "timestampStatus"
       ],
       "properties": {
         "scope": {
-          "type": "string",
-          "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
-        },
-        "assertionId": {
-          "type": "string",
-          "pattern": "^signing-identity:[a-z0-9][a-z0-9-]{1,63}$"
+          "enum": [
+            "application-and-dmg",
+            "installer",
+            "application",
+            "bundled-node",
+            "bundled-sqlite"
+          ]
         },
         "subject": {
           "type": "string",
@@ -223,14 +219,10 @@
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
         },
         "certificateSha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
+          "$ref": "#/$defs/sha256"
         },
         "timestampStatus": {
           "const": "PASS"
-        },
-        "evidence": {
-          "$ref": "#/$defs/evidenceReferences"
         }
       }
     },
@@ -258,6 +250,30 @@
         }
       }
     },
+    "releaseInputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "DEPENDENCY-INVENTORY.json",
+        "RELEASE-METADATA.json",
+        "RELEASE-NOTES.md",
+        "THIRD-PARTY-NOTICES.md"
+      ],
+      "properties": {
+        "DEPENDENCY-INVENTORY.json": {
+          "$ref": "#/$defs/sha256"
+        },
+        "RELEASE-METADATA.json": {
+          "$ref": "#/$defs/sha256"
+        },
+        "RELEASE-NOTES.md": {
+          "$ref": "#/$defs/sha256"
+        },
+        "THIRD-PARTY-NOTICES.md": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
     "typedEvidenceRecord": {
       "type": "object",
       "additionalProperties": false,
@@ -266,6 +282,7 @@
         "target",
         "commit",
         "artifact",
+        "releaseInputs",
         "assertionId",
         "platform",
         "tool",
@@ -288,27 +305,10 @@
           "pattern": "^[a-f0-9]{40}$"
         },
         "artifact": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "filename",
-            "size",
-            "sha256"
-          ],
-          "properties": {
-            "filename": {
-              "type": "string",
-              "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,191}$"
-            },
-            "size": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "sha256": {
-              "type": "string",
-              "pattern": "^[a-f0-9]{64}$"
-            }
-          }
+          "$ref": "#/$defs/artifact"
+        },
+        "releaseInputs": {
+          "$ref": "#/$defs/releaseInputs"
         },
         "assertionId": {
           "type": "string",
@@ -356,16 +356,68 @@
         ]
       },
       "then": {
-        "not": {
-          "required": [
-            "applicationPayload"
-          ]
-        },
         "properties": {
-          "platforms": {
+          "signingIdentities": {
+            "minItems": 1,
+            "maxItems": 1,
+            "contains": {
+              "properties": {
+                "scope": {
+                  "const": "application-and-dmg"
+                }
+              },
+              "required": [
+                "scope"
+              ]
+            }
+          },
+          "assertions": {
+            "minProperties": 43,
+            "maxProperties": 43,
             "required": [
-              "macos-arm64",
-              "macos-x86_64-native"
+              "host:installer-completes",
+              "host:app-launches",
+              "host:first-screen-connect-karakeep",
+              "host:component-versions",
+              "host:no-system-python",
+              "host:no-system-node",
+              "host:bundled-node-runtime",
+              "host:no-runtime-download",
+              "host:fresh-state",
+              "browser:google-chrome:discovery",
+              "browser:google-chrome:x-acquisition",
+              "browser:microsoft-edge:discovery",
+              "browser:microsoft-edge:x-acquisition",
+              "browser:brave:discovery",
+              "browser:brave:x-acquisition",
+              "browser:chromium:discovery",
+              "browser:chromium:x-acquisition",
+              "browser:firefox:discovery",
+              "browser:firefox:x-acquisition",
+              "workflow:https-destination-validation",
+              "workflow:x-consent-before-session",
+              "workflow:x-acquisition-progress-no-media",
+              "workflow:x-folder-and-source-tags",
+              "workflow:x-transfer-preview",
+              "workflow:x-delivery-result-totals",
+              "workflow:x-repeat-delivery-preserves-content",
+              "workflow:field-theory-file-transfer",
+              "workflow:chrome-netscape-file-transfer",
+              "workflow:file-source-preserves-active-x",
+              "workflow:cancellation-resume",
+              "workflow:evidence-sanitization",
+              "minimum-macos:executable-slices",
+              "checkout:clean",
+              "package:release-inputs",
+              "package:no-python-or-browser-gui",
+              "signature:application",
+              "signature:dmg",
+              "signing-identity:application-and-dmg",
+              "signature:nested-code",
+              "notarization:application-and-dmg",
+              "gatekeeper:application-and-dmg",
+              "dmg:hdiutil-verify",
+              "architecture:universal"
             ]
           }
         }
@@ -383,14 +435,107 @@
         ]
       },
       "then": {
-        "required": [
-          "applicationPayload"
-        ],
         "properties": {
-          "platforms": {
+          "signingIdentities": {
+            "minItems": 4,
+            "maxItems": 4,
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "scope": {
+                      "const": "installer"
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "scope": {
+                      "const": "application"
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "scope": {
+                      "const": "bundled-node"
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "scope": {
+                      "const": "bundled-sqlite"
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ]
+                }
+              }
+            ]
+          },
+          "assertions": {
+            "minProperties": 42,
+            "maxProperties": 42,
             "required": [
-              "windows-10-x64",
-              "windows-11-x64"
+              "host:installer-completes",
+              "host:app-launches",
+              "host:first-screen-connect-karakeep",
+              "host:component-versions",
+              "host:no-system-python",
+              "host:no-system-node",
+              "host:bundled-node-runtime",
+              "host:no-runtime-download",
+              "host:fresh-state",
+              "browser:google-chrome:discovery",
+              "browser:google-chrome:x-acquisition",
+              "browser:microsoft-edge:discovery",
+              "browser:microsoft-edge:x-acquisition",
+              "browser:brave:discovery",
+              "browser:brave:x-acquisition",
+              "browser:chromium:discovery",
+              "browser:chromium:x-acquisition",
+              "browser:firefox:discovery",
+              "browser:firefox:x-acquisition",
+              "workflow:https-destination-validation",
+              "workflow:x-consent-before-session",
+              "workflow:x-acquisition-progress-no-media",
+              "workflow:x-folder-and-source-tags",
+              "workflow:x-transfer-preview",
+              "workflow:x-delivery-result-totals",
+              "workflow:x-repeat-delivery-preserves-content",
+              "workflow:field-theory-file-transfer",
+              "workflow:chrome-netscape-file-transfer",
+              "workflow:file-source-preserves-active-x",
+              "workflow:cancellation-resume",
+              "workflow:evidence-sanitization",
+              "host:bundled-sqlite-helper",
+              "authenticode:platform-trust",
+              "checkout:clean",
+              "package:release-inputs",
+              "package:no-python-or-browser-gui",
+              "signing-identity:installer",
+              "signing-identity:application",
+              "signing-identity:bundled-node",
+              "signing-identity:bundled-sqlite",
+              "signature:other-shipped-pe",
+              "application-payload:windows-x64"
             ]
           }
         }

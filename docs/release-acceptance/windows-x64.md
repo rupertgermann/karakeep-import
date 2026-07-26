@@ -24,10 +24,13 @@ Recompute the installer SHA-256 after Authenticode signing and timestamping.
 
 The pinned Tauri/NSIS installer bootstrapper is a PE32 i386 executable. That is
 the expected installer structure and does not make the installed application
-32-bit. The machine-readable schema version 3 record separately requires the
+32-bit. The machine-readable schema version 4 record separately requires the
 typed `application-payload:windows-x64` assertion for the installed application
-and bundled runtime payload. Each required row and both Windows baseline
-columns need distinct typed JSON evidence; do not reuse one transcript across
+and bundled runtime payload. It contains 42 assertions and exactly 75 typed
+records according to the exact assertion IDs and coverage matrix in
+[`README.md`](./README.md). Host, browser, workflow, SQLite-helper, and trust
+rows require both Windows baselines. Checkout, package, signing, other-PE, and
+x64-payload rows are target-wide. Do not reuse one transcript across
 assertions.
 
 ## Artifact and Authenticode evidence
@@ -54,20 +57,33 @@ Retain the file's package-relative name, signature status, public signer
 subject, public certificate thumbprint, and timestamp result. Do not retain its
 absolute installed path.
 
-| Required gate | Status | Redacted evidence filename and SHA-256 |
-| --- | --- | --- |
-| Clean source checkout is exactly the accepted commit | UNAVAILABLE | Template not executed |
-| Release metadata identifies the accepted commit, version, Windows x64 target, and NSIS bundle | UNAVAILABLE | Template not executed |
-| Final installer filename, byte size, and post-signing SHA-256 match this record | UNAVAILABLE | Template not executed |
-| NSIS installer has a valid Authenticode signature and trusted timestamp | UNAVAILABLE | Template not executed |
-| Installed Karakeep Transfer executable has a valid Authenticode signature and trusted timestamp | UNAVAILABLE | Template not executed |
-| Bundled Node executable has an approved valid signature | UNAVAILABLE | Template not executed |
-| Bundled SQLite executable has an approved valid signature | UNAVAILABLE | Template not executed |
-| Every other shipped PE executable passes Authenticode verification | UNAVAILABLE | Template not executed |
-| Public signer subjects and certificate thumbprints match the approved signing identities | UNAVAILABLE | Template not executed |
-| Windows platform verification reports a valid trust chain for the installer and installed executables | UNAVAILABLE | Template not executed |
-| Packaged Field Theory, private Node runtime, SQLite helper, licenses, and notices match the release inputs | UNAVAILABLE | Template not executed |
-| Packaged resources contain no Python runtime or browser GUI | UNAVAILABLE | Template not executed |
+| Binding or assertion ID | Required gate | Status | Redacted evidence filename and SHA-256 |
+| --- | --- | --- | --- |
+| `checkout:clean` | Clean source checkout is exactly the accepted commit | UNAVAILABLE | Template not executed |
+| structural | Release metadata identifies the accepted commit, version, Windows x64 target, and NSIS bundle | UNAVAILABLE | Template not executed |
+| structural | Final installer filename, byte size, and post-signing SHA-256 match this record | UNAVAILABLE | Template not executed |
+| `signing-identity:installer` | NSIS installer has a valid Authenticode signature, trusted timestamp, and approved public identity | UNAVAILABLE | Template not executed |
+| `signing-identity:application` | Installed Karakeep Transfer executable has a valid Authenticode signature, trusted timestamp, and approved public identity | UNAVAILABLE | Template not executed |
+| `signing-identity:bundled-node` | Bundled Node executable has an approved valid signature and identity | UNAVAILABLE | Template not executed |
+| `signing-identity:bundled-sqlite` | Bundled SQLite executable has an approved valid signature and identity | UNAVAILABLE | Template not executed |
+| `signature:other-shipped-pe` | Every other shipped PE executable passes Authenticode verification, including a zero-extra inventory | UNAVAILABLE | Template not executed |
+| `application-payload:windows-x64` | Installed application and bundled runtime payload are x64 | UNAVAILABLE | Template not executed |
+| `package:release-inputs` | Packaged Field Theory, private Node runtime, SQLite helper, licenses, and notices match the release inputs | UNAVAILABLE | Template not executed |
+| `package:no-python-or-browser-gui` | Packaged resources contain no Python runtime or browser GUI | UNAVAILABLE | Template not executed |
+
+The target-wide machine IDs for the executable checks are
+`signing-identity:installer`, `signing-identity:application`,
+`signing-identity:bundled-node`, `signing-identity:bundled-sqlite`,
+`signature:other-shipped-pe`, and
+`application-payload:windows-x64`. Package checks use
+`package:release-inputs` and `package:no-python-or-browser-gui`; clean checkout
+uses `checkout:clean`. Release metadata and final artifact identity remain
+structural bindings enforced directly by the finalizer.
+
+The signing identity set is exact: installer, application, bundled Node, and
+bundled SQLite. The `signature:other-shipped-pe` row is still required when the
+candidate contains no additional PE executable; retain a package-relative PE
+inventory showing the zero-extra result.
 
 Record each public signing identity here:
 
@@ -87,18 +103,19 @@ Use clean supported hosts or clean virtual-machine snapshots. Do not reuse a
 machine that already contains application data or a prior Karakeep Transfer
 installation.
 
-| Host gate | Windows 10 version 1803+ x64 | Windows 11 x64 | Redacted evidence filename and SHA-256 |
-| --- | --- | --- | --- |
-| Final NSIS installer completes without an unexpected warning | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| Installed app launches from the Start menu | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| First screen reaches **Connect Karakeep** | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| App version and bundled component versions match this record | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| App runs without a separately installed Python runtime | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| App runs without a separately installed Node.js runtime | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| Field Theory bridge executes the Node runtime inside the installed app | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| Chromium acquisition uses the bundled SQLite helper rather than a system executable | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| App performs no runtime or dependency download | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| Fresh launch contains no previous destination, source, or delivery data | UNAVAILABLE | UNAVAILABLE | Template not executed |
+| Assertion ID and host gate | Windows 10 status and evidence | Windows 11 status and evidence |
+| --- | --- | --- |
+| `host:installer-completes` — Final NSIS installer completes without an unexpected warning | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `host:app-launches` — Installed app launches from the Start menu | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `host:first-screen-connect-karakeep` — First screen reaches **Connect Karakeep** | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `host:component-versions` — App version and bundled component versions match this record | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `host:no-system-python` — App runs without a separately installed Python runtime | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `host:no-system-node` — App runs without a separately installed Node.js runtime | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `host:bundled-node-runtime` — Field Theory bridge executes the Node runtime inside the installed app | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `host:bundled-sqlite-helper` — Chromium acquisition uses the bundled SQLite helper rather than a system executable | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `host:no-runtime-download` — App performs no runtime or dependency download | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `host:fresh-state` — Fresh launch contains no previous destination, source, or delivery data | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `authenticode:platform-trust` — Platform verification reports a valid trust chain for the installer and installed executables | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
 
 The retained process evidence may name an app-relative executable such as
 `resources/node/win-x64/node.exe`. It must not include the absolute
@@ -111,13 +128,18 @@ Record only the browser name, Windows version used for the check, aggregate
 counts, and result. Never record profile names, profile paths, cookies, X
 identity, bookmark content, or source URLs.
 
-| Browser | Discovery and profile selection | X acquisition | Evidence filename and SHA-256 |
-| --- | --- | --- | --- |
-| Google Chrome | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| Microsoft Edge | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| Brave | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| Chromium | UNAVAILABLE | UNAVAILABLE | Template not executed |
-| Firefox | UNAVAILABLE | UNAVAILABLE | Template not executed |
+| Assertion ID and browser check | Windows 10 status and evidence | Windows 11 status and evidence |
+| --- | --- | --- |
+| `browser:google-chrome:discovery` — Google Chrome discovery and profile selection | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `browser:google-chrome:x-acquisition` — Google Chrome X acquisition | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `browser:microsoft-edge:discovery` — Microsoft Edge discovery and profile selection | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `browser:microsoft-edge:x-acquisition` — Microsoft Edge X acquisition | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `browser:brave:discovery` — Brave discovery and profile selection | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `browser:brave:x-acquisition` — Brave X acquisition | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `browser:chromium:discovery` — Chromium discovery and profile selection | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `browser:chromium:x-acquisition` — Chromium X acquisition | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `browser:firefox:discovery` — Firefox discovery and profile selection | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `browser:firefox:x-acquisition` — Firefox X acquisition | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
 
 Every browser row is required. A documented absence of an installed browser is
 `UNAVAILABLE`, not `PASS`.
@@ -127,20 +149,20 @@ Every browser row is required. A documented absence of an installed browser is
 Use a controlled Karakeep destination and synthetic or non-sensitive bookmark
 records. Store only aggregate totals and safe assertions.
 
-| Workflow check | Status | Redacted evidence filename and SHA-256 |
+| Assertion ID and workflow check | Windows 10 status and evidence | Windows 11 status and evidence |
 | --- | --- | --- |
-| HTTPS destination validation succeeds without exposing its credential | UNAVAILABLE | Template not executed |
-| X Source consent precedes session use | UNAVAILABLE | Template not executed |
-| X acquisition reports progress and completes without downloading media | UNAVAILABLE | Template not executed |
-| X folder names appear as folder tags and `twitter` appears as the source tag | UNAVAILABLE | Template not executed |
-| X Transfer Preview reports total, pending, prior delivery, folders, and destination | UNAVAILABLE | Template not executed |
-| Confirmed X delivery reports created, existing, retried, failed, and cancelled totals | UNAVAILABLE | Template not executed |
-| Repeated X delivery preserves existing Karakeep content and safely skips or completes prior delivery | UNAVAILABLE | Template not executed |
-| Field Theory JSONL File Source previews in place and completes a confirmed delivery | UNAVAILABLE | Template not executed |
-| Chrome/Netscape File Source preserves title and folder tags through confirmed delivery | UNAVAILABLE | Template not executed |
-| File Source use does not replace the active X Source | UNAVAILABLE | Template not executed |
-| Cancellation leaves incomplete work pending and a later run can resume safely | UNAVAILABLE | Template not executed |
-| Evidence and exported diagnostics contain no credential, X session value, bookmark content, or private path | UNAVAILABLE | Template not executed |
+| `workflow:https-destination-validation` — HTTPS destination validation succeeds without exposing its credential | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:x-consent-before-session` — X Source consent precedes session use | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:x-acquisition-progress-no-media` — X acquisition reports progress and completes without downloading media | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:x-folder-and-source-tags` — X folder names appear as folder tags and `twitter` appears as the source tag | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:x-transfer-preview` — X Transfer Preview reports total, pending, prior delivery, folders, and destination | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:x-delivery-result-totals` — Confirmed X delivery reports created, existing, retried, failed, and cancelled totals | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:x-repeat-delivery-preserves-content` — Repeated X delivery preserves existing Karakeep content and safely skips or completes prior delivery | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:field-theory-file-transfer` — Field Theory JSONL File Source previews in place and completes a confirmed delivery | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:chrome-netscape-file-transfer` — Chrome/Netscape File Source preserves title and folder tags through confirmed delivery | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:file-source-preserves-active-x` — File Source use does not replace the active X Source | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:cancellation-resume` — Cancellation leaves incomplete work pending and a later run can resume safely | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
+| `workflow:evidence-sanitization` — Evidence and exported diagnostics contain no credential, X session value, bookmark content, or private path | UNAVAILABLE — Template not executed | UNAVAILABLE — Template not executed |
 
 ## Acceptance decision
 

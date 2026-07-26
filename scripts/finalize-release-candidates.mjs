@@ -37,26 +37,100 @@ const targets = [
     platforms: ["windows-10-x64", "windows-11-x64"],
   },
 ];
-const requiredGates = [
-  "native baseline",
-  "clean install",
-  "no system runtime",
-  "five-browser matrix",
-  "X transfer",
-  "File transfer",
-  "signature",
-  "platform verification",
+const commonPlatformAssertions = [
+  ["host:installer-completes", "native-install"],
+  ["host:app-launches", "native-launch"],
+  ["host:first-screen-connect-karakeep", "first-screen"],
+  ["host:component-versions", "component-versions"],
+  ["host:no-system-python", "system-runtime-absence"],
+  ["host:no-system-node", "system-runtime-absence"],
+  ["host:bundled-node-runtime", "bundled-runtime"],
+  ["host:no-runtime-download", "no-runtime-download"],
+  ["host:fresh-state", "fresh-state"],
+  ...[
+    ["google-chrome", "browser-discovery", "browser-x-acquisition"],
+    ["microsoft-edge", "browser-discovery", "browser-x-acquisition"],
+    ["brave", "browser-discovery", "browser-x-acquisition"],
+    ["chromium", "browser-discovery", "browser-x-acquisition"],
+    ["firefox", "browser-discovery", "browser-x-acquisition"],
+  ].flatMap(([browser, discoveryType, acquisitionType]) => [
+    [`browser:${browser}:discovery`, discoveryType],
+    [`browser:${browser}:x-acquisition`, acquisitionType],
+  ]),
+  ["workflow:https-destination-validation", "destination-validation"],
+  ["workflow:x-consent-before-session", "x-session-consent"],
+  ["workflow:x-acquisition-progress-no-media", "x-acquisition"],
+  ["workflow:x-folder-and-source-tags", "x-tag-mapping"],
+  ["workflow:x-transfer-preview", "transfer-preview"],
+  ["workflow:x-delivery-result-totals", "transfer-result"],
+  [
+    "workflow:x-repeat-delivery-preserves-content",
+    "delivery-idempotency",
+  ],
+  ["workflow:field-theory-file-transfer", "field-theory-file-transfer"],
+  ["workflow:chrome-netscape-file-transfer", "chrome-file-transfer"],
+  ["workflow:file-source-preserves-active-x", "source-isolation"],
+  ["workflow:cancellation-resume", "transfer-resume"],
+  ["workflow:evidence-sanitization", "evidence-sanitization"],
 ];
-const gateAssertionIds = {
-  "native baseline": "gate:native-baseline",
-  "clean install": "gate:clean-install",
-  "no system runtime": "gate:no-system-runtime",
-  "five-browser matrix": "gate:five-browser-matrix",
-  "X transfer": "gate:x-transfer",
-  "File transfer": "gate:file-transfer",
-  signature: "gate:signature",
-  "platform verification": "gate:platform-verification",
+const targetWideAssertions = {
+  "macos-universal": [
+    ["checkout:clean", "clean-checkout"],
+    ["package:release-inputs", "package-inventory"],
+    ["package:no-python-or-browser-gui", "package-exclusions"],
+    ["signature:application", "developer-id-signature"],
+    ["signature:dmg", "developer-id-signature"],
+    ["signing-identity:application-and-dmg", "signing-identity"],
+    ["signature:nested-code", "developer-id-signature"],
+    ["notarization:application-and-dmg", "notarization"],
+    ["gatekeeper:application-and-dmg", "gatekeeper"],
+    ["dmg:hdiutil-verify", "dmg-verification"],
+    ["architecture:universal", "universal-architecture"],
+  ],
+  "windows-x64": [
+    ["checkout:clean", "clean-checkout"],
+    ["package:release-inputs", "package-inventory"],
+    ["package:no-python-or-browser-gui", "package-exclusions"],
+    ["signing-identity:installer", "authenticode-signature"],
+    ["signing-identity:application", "authenticode-signature"],
+    ["signing-identity:bundled-node", "authenticode-signature"],
+    ["signing-identity:bundled-sqlite", "authenticode-signature"],
+    ["signature:other-shipped-pe", "authenticode-other-pe"],
+    ["application-payload:windows-x64", "x64-application-payload"],
+  ],
 };
+const targetPlatformAssertions = {
+  "macos-universal": [
+    ["minimum-macos:executable-slices", "minimum-macos-version"],
+  ],
+  "windows-x64": [
+    ["host:bundled-sqlite-helper", "bundled-helper"],
+    ["authenticode:platform-trust", "authenticode-trust"],
+  ],
+};
+const expectedSigningScopes = {
+  "macos-universal": ["application-and-dmg"],
+  "windows-x64": [
+    "installer",
+    "application",
+    "bundled-node",
+    "bundled-sqlite",
+  ],
+};
+function assertionMatrix(target) {
+  return new Map([
+    ...[...commonPlatformAssertions, ...targetPlatformAssertions[target.name]].map(
+      ([assertionId, checkType]) => [
+        assertionId,
+        { platforms: target.platforms, checkType },
+      ],
+    ),
+    ...targetWideAssertions[target.name].map(([assertionId, checkType]) => [
+      assertionId,
+      { platforms: ["target-wide"], checkType },
+    ]),
+  ]);
+}
 const requiredStagedFiles = [
   "DEPENDENCY-INVENTORY.json",
   "RELEASE-METADATA.json",
@@ -527,7 +601,10 @@ function collectEvidenceReferences(
   expected,
   collected,
 ) {
-  if (!Array.isArray(references) || references.length === 0) {
+  if (
+    !Array.isArray(references) ||
+    references.length !== expected.platforms.length
+  ) {
     throw new Error(`${target} evidence ${description} requires evidence references.`);
   }
   const coveredPlatforms = new Set();
@@ -554,6 +631,11 @@ function collectEvidenceReferences(
     if (!expected.platforms.includes(reference.platform)) {
       throw new Error(
         `${target} evidence ${description} reference platform does not match.`,
+      );
+    }
+    if (coveredPlatforms.has(reference.platform)) {
+      throw new Error(
+        `${target} evidence ${description} repeats a required platform.`,
       );
     }
     if (
@@ -605,17 +687,15 @@ function validatePassWithEvidence(
   );
 }
 
-function validateSigningIdentity(identity, target, collected) {
+function validateSigningIdentity(identity, target) {
   rejectUnsupportedProperties(
     identity,
     [
       "scope",
-      "assertionId",
       "subject",
       "stableIdentifier",
       "certificateSha256",
       "timestampStatus",
-      "evidence",
     ],
     `${target} evidence signing identity`,
   );
@@ -624,12 +704,6 @@ function validateSigningIdentity(identity, target, collected) {
     !/^[a-z0-9][a-z0-9-]{1,63}$/.test(identity.scope)
   ) {
     throw new Error(`${target} evidence signing identity scope is invalid.`);
-  }
-  const assertionId = `signing-identity:${identity.scope}`;
-  if (identity.assertionId !== assertionId) {
-    throw new Error(
-      `${target} evidence signing identity assertion does not match its scope.`,
-    );
   }
   if (
     typeof identity.subject !== "string" ||
@@ -664,26 +738,21 @@ function validateSigningIdentity(identity, target, collected) {
       `${target} evidence signing identity timestamp status is not PASS.`,
     );
   }
-  collectEvidenceReferences(
-    identity.evidence,
-    target,
-    "signing identity",
-    {
-      assertionId,
-      platforms: ["target-wide"],
-      checkType: "signing-identity",
-    },
-    collected,
-  );
 }
 
-function validateSigningIdentities(identities, target, collected) {
+function validateSigningIdentities(identities, target) {
+  const expectedScopes = expectedSigningScopes[target];
   if (!Array.isArray(identities) || identities.length === 0) {
     throw new Error(`${target} evidence requires signing identities.`);
   }
+  if (identities.length !== expectedScopes.length) {
+    throw new Error(
+      `${target} signing identity scopes do not match the required set.`,
+    );
+  }
   const scopes = new Set();
   for (const identity of identities) {
-    validateSigningIdentity(identity, target, collected);
+    validateSigningIdentity(identity, target);
     if (scopes.has(identity.scope)) {
       throw new Error(
         `${target} evidence has a duplicate signing identity scope: ${identity.scope}`,
@@ -691,10 +760,23 @@ function validateSigningIdentities(identities, target, collected) {
     }
     scopes.add(identity.scope);
   }
+  if (
+    !isDeepStrictEqual(
+      [...scopes].sort(),
+      [...expectedScopes].sort(),
+    )
+  ) {
+    throw new Error(
+      `${target} signing identity scopes do not match the required set.`,
+    );
+  }
 }
 
 function validateEvidence(evidence, expected) {
   const collected = new Map();
+  if (evidence?.schemaVersion !== 4) {
+    throw new Error(`${expected.target} evidence has an unsupported schema.`);
+  }
   rejectUnsupportedProperties(
     evidence,
     [
@@ -703,18 +785,12 @@ function validateEvidence(evidence, expected) {
       "commit",
       "product",
       "testedAt",
-      "checkout",
       "artifact",
       "signingIdentities",
-      "platforms",
-      "gates",
-      ...(expected.target === "windows-x64" ? ["applicationPayload"] : []),
+      "assertions",
     ],
     `${expected.target} evidence root`,
   );
-  if (evidence.schemaVersion !== 3) {
-    throw new Error(`${expected.target} evidence has an unsupported schema.`);
-  }
   if (evidence.target !== expected.target) {
     throw new Error(`${expected.target} evidence target does not match.`);
   }
@@ -758,84 +834,32 @@ function validateEvidence(evidence, expected) {
   if (evidence.artifact?.sha256 !== expected.artifactSha256) {
     throw new Error(`${expected.target} evidence artifact SHA-256 does not match.`);
   }
-  validatePassWithEvidence(
-    evidence.checkout,
-    expected.target,
-    "clean checkout",
-    {
-      assertionId: "checkout:clean",
-      platforms: ["target-wide"],
-      checkType: "clean-checkout",
-    },
-    collected,
-  );
-  validateSigningIdentities(
-    evidence.signingIdentities,
-    expected.target,
-    collected,
-  );
-  if (expected.target === "windows-x64") {
-    validatePassWithEvidence(
-      evidence.applicationPayload,
-      expected.target,
-      "x64 application payload",
-      {
-        assertionId: "application-payload:windows-x64",
-        platforms: ["target-wide"],
-        checkType: "x64-application-payload",
-      },
-      collected,
-    );
-  }
-  rejectUnsupportedProperties(
-    evidence.platforms,
-    expected.platforms,
-    `${expected.target} evidence platforms`,
-  );
-  const platformNames = Object.keys(evidence.platforms ?? {});
+  validateSigningIdentities(evidence.signingIdentities, expected.target);
+  const matrix = assertionMatrix(expected.targetConfig);
+  const assertionIds = [...matrix.keys()];
+  const names = Object.keys(evidence.assertions ?? {});
   if (
-    platformNames.length !== expected.platforms.length ||
-    expected.platforms.some((platform) => !platformNames.includes(platform))
+    names.length !== assertionIds.length ||
+    assertionIds.some((assertionId) => !names.includes(assertionId))
   ) {
     throw new Error(
-      `${expected.target} evidence platforms do not match the required native set.`,
-    );
-  }
-  for (const platform of expected.platforms) {
-    validatePassWithEvidence(
-      evidence.platforms[platform],
-      expected.target,
-      `platform ${platform}`,
-      {
-        assertionId: `platform:${platform}`,
-        platforms: [platform],
-        checkType: "native-platform",
-      },
-      collected,
+      `${expected.target} evidence assertion matrix does not match the required set.`,
     );
   }
   rejectUnsupportedProperties(
-    evidence.gates,
-    requiredGates,
-    `${expected.target} evidence gates`,
+    evidence.assertions,
+    assertionIds,
+    `${expected.target} evidence assertions`,
   );
-  const names = Object.keys(evidence.gates ?? {});
-  if (
-    names.length !== requiredGates.length ||
-    requiredGates.some((gate) => !names.includes(gate))
-  ) {
-    throw new Error(`${expected.target} evidence gates do not match the required set.`);
-  }
-  for (const gate of requiredGates) {
-    const assertionId = gateAssertionIds[gate];
+  for (const [assertionId, { platforms, checkType }] of matrix) {
     validatePassWithEvidence(
-      evidence.gates[gate],
+      evidence.assertions[assertionId],
       expected.target,
-      `gate ${gate}`,
+      `assertion ${assertionId}`,
       {
         assertionId,
-        platforms: gate === "signature" ? ["target-wide"] : expected.platforms,
-        checkType: assertionId.slice("gate:".length),
+        platforms,
+        checkType,
       },
       collected,
     );
@@ -851,6 +875,7 @@ function validateTypedEvidenceRecord(record, expected) {
       "target",
       "commit",
       "artifact",
+      "releaseInputs",
       "assertionId",
       "platform",
       "tool",
@@ -870,6 +895,20 @@ function validateTypedEvidenceRecord(record, expected) {
     ["filename", "size", "sha256"],
     `${expected.target} typed evidence artifact`,
   );
+  rejectUnsupportedProperties(
+    record.releaseInputs,
+    requiredStagedFiles,
+    `${expected.target} typed evidence release inputs`,
+  );
+  for (const filename of requiredStagedFiles) {
+    if (
+      record.releaseInputs?.[filename] !== expected.releaseInputs[filename]
+    ) {
+      throw new Error(
+        `${expected.target} typed evidence record release-input binding does not match: ${filename}`,
+      );
+    }
+  }
   if (
     record.target !== expected.target ||
     record.commit !== expected.commit ||
@@ -947,6 +986,7 @@ async function verifyEvidenceFiles(
       assertionId: reference.assertionId,
       platform: reference.platform,
       checkType: reference.checkType,
+      releaseInputs: binding.releaseInputs,
     });
     verified.push({ filename, file, sha256: reference.sha256 });
   }
@@ -1014,6 +1054,7 @@ async function validateTarget(options, target, commit) {
   }
   const references = validateEvidence(evidence, {
     target: target.name,
+    targetConfig: target,
     commit,
     product: metadata.product,
     artifactFilename: path.basename(artifact),
@@ -1021,6 +1062,12 @@ async function validateTarget(options, target, commit) {
     artifactSha256,
     platforms: target.platforms,
   });
+  const releaseInputs = Object.fromEntries(
+    requiredStagedFiles.map((filename) => [
+      filename,
+      stagingChecksums.get(filename),
+    ]),
+  );
   const evidenceFiles = await verifyEvidenceFiles(
     evidenceFile,
     target.name,
@@ -1032,6 +1079,7 @@ async function validateTarget(options, target, commit) {
         size: artifactDetails.size,
         sha256: artifactSha256,
       },
+      releaseInputs,
     },
   );
   const inventoryFile = path.join(input, "DEPENDENCY-INVENTORY.json");
