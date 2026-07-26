@@ -16,6 +16,9 @@ bundle formats, and target-specific private Node runtimes.
 
 The remaining authoritative inputs are:
 
+- `release/release-notes.md`, containing the exact product/version heading and
+  the required status, platform, browser, X compatibility, and manual-upgrade
+  disclosures;
 - `package-lock.json`, including exact JavaScript versions, package
   integrities, and license expressions;
 - `src-tauri/Cargo.lock`, including exact Rust versions and crate checksums;
@@ -29,6 +32,11 @@ The remaining authoritative inputs are:
   private Node executable for the native target. Windows x64 resources also
   contain only the pinned `sqlite3.exe` helper required by Field Theory's
   Chromium-cookie reader.
+
+The command rejects release notes whose first heading does not exactly match
+the configured product name and version, or which omit the unofficial status,
+macOS or Windows support, Chrome, Edge, Brave, Chromium, or Firefox support,
+best-effort X compatibility, or manual upgrade instructions.
 
 The release-input command performs no downloads. It reopens each pinned Node
 or SQLite archive left in the preparation cache, verifies its archive digest,
@@ -61,7 +69,8 @@ npm run tauri -- build --target universal-apple-darwin --bundles dmg
 The output is `release-inputs/macos-universal`. It contains both macOS private
 Node runtimes (`darwin-arm64` and `darwin-x64`), the frontend build, Field
 Theory bridge resources, `RELEASE-METADATA.json`,
-`DEPENDENCY-INVENTORY.json`, `THIRD-PARTY-NOTICES.md`, and `SHA256SUMS`.
+`RELEASE-NOTES.md`, `DEPENDENCY-INVENTORY.json`,
+`THIRD-PARTY-NOTICES.md`, and `SHA256SUMS`.
 It also contains `NATIVE-BUILD-COMMAND.txt`; that checksummed file is generated
 from the declared `rustTarget` and `bundleFormat` and must contain the exact
 Tauri command shown above. Run that command from the checkout root on the
@@ -107,15 +116,19 @@ npm run release:inputs -- \
 ```
 
 Run the same command twice against the same checkout and prepared resource
-tree. `RELEASE-METADATA.json`, `DEPENDENCY-INVENTORY.json`,
-`THIRD-PARTY-NOTICES.md`, and `SHA256SUMS` must be byte-identical. Before the
-native package build:
+tree. `RELEASE-METADATA.json`, `RELEASE-NOTES.md`,
+`DEPENDENCY-INVENTORY.json`, `THIRD-PARTY-NOTICES.md`, and `SHA256SUMS` must
+be byte-identical. `RELEASE-METADATA.json` records the source note's SHA-256,
+while `SHA256SUMS` covers the staged copy. These are deterministic input
+checksums, not the final installer hashes produced after native packaging and
+signing. Before the native package build:
 
 1. verify every line in `SHA256SUMS`;
 2. inspect the dependency inventory and notices;
-3. confirm the release metadata names the expected commit, version, native
-   target, bundle format, native build command, bundled runtimes, and toolchain
-   versions;
+3. inspect `RELEASE-NOTES.md` and confirm the release metadata names the
+   expected commit, version, native target, bundle format, native build
+   command, bundled runtimes, toolchain versions, and source release-note
+   checksum;
 4. confirm `NATIVE-BUILD-COMMAND.txt` selects the same target and bundle format
    before running it on the native host;
 5. keep credentials outside the checkout, staged inputs, process arguments,

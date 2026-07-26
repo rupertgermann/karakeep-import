@@ -218,6 +218,86 @@ async function requireNonempty(file, description = "resource") {
   }
 }
 
+function validateReleaseNotes(content, product) {
+  const expectedHeading = `# ${product.name} ${product.version}`;
+  if (content.split(/\r?\n/, 1)[0] !== expectedHeading) {
+    throw new Error(`Release notes heading must be exactly: ${expectedHeading}`);
+  }
+
+  const headings = [...content.matchAll(/^## ([^\r\n]+)\r?$/gm)];
+  const sections = new Map(
+    headings.map((heading, index) => [
+      heading[1],
+      content.slice(
+        heading.index + heading[0].length,
+        headings[index + 1]?.index ?? content.length,
+      ),
+    ]),
+  );
+  const hasLine = (section, line) =>
+    sections.get(section)?.split(/\r?\n/).includes(line) ?? false;
+  const normalizedSection = (section) =>
+    sections.get(section)?.replace(/\s+/g, " ").trim() ?? "";
+  const disclosures = [
+    [
+      "unofficial status",
+      normalizedSection("Status").includes(
+        `${product.name} is an unofficial community application.`,
+      ),
+    ],
+    [
+      "macOS support",
+      hasLine(
+        "Platform support",
+        "- macOS 12 Monterey or newer on Apple Silicon and Intel",
+      ),
+    ],
+    [
+      "Windows support",
+      hasLine(
+        "Platform support",
+        "- Windows 10 version 1803 or newer and Windows 11 on x86-64",
+      ),
+    ],
+    ...[
+      "Google Chrome",
+      "Microsoft Edge",
+      "Brave",
+      "Chromium",
+      "Firefox",
+    ].map((browser) => [
+      `${browser} support`,
+      hasLine("Browser support", `- ${browser}`),
+    ]),
+    [
+      "best-effort X compatibility",
+      normalizedSection("X compatibility").includes(
+        "Bookmark acquisition from X is best-effort",
+      ),
+    ],
+    [
+      "manual upgrade instructions",
+      [
+        "Updates are manual.",
+        `Quit ${product.name}`,
+        "download the new installer",
+        "GitHub Releases page",
+        "SHA-256 checksum",
+        "run the installer",
+      ].every((instruction) =>
+        normalizedSection("Upgrading").includes(instruction)
+      ),
+    ],
+  ];
+  for (const [description, isPresent] of disclosures) {
+    if (!isPresent) {
+      throw new Error(
+        `Release notes are missing required disclosure: ${description}`,
+      );
+    }
+  }
+}
+
 async function regularFiles(root) {
   const files = [];
   async function visit(directory) {
@@ -279,7 +359,9 @@ function isPlaceholderCredential(value) {
 
 async function validateNoSecrets(roots) {
   for (const root of roots) {
-    for (const file of await regularFiles(root)) {
+    const details = await stat(root);
+    const files = details.isFile() ? [root] : await regularFiles(root);
+    for (const file of files) {
       const bytes = await readFile(file);
       const content = bytes.toString("utf8").replaceAll("\0", "");
       const assignments = content.matchAll(
@@ -399,6 +481,12 @@ async function validateInputs(
   ) {
     throw new Error("Release product identity does not match Tauri configuration.");
   }
+  const releaseNotesFile = path.join(root, "release", "release-notes.md");
+  await requireNonempty(releaseNotesFile, "release notes");
+  validateReleaseNotes(
+    await readFile(releaseNotesFile, "utf8"),
+    config.product,
+  );
 
   const vendorManifestFile = path.join(
     root,
@@ -609,6 +697,7 @@ async function validateInputs(
     sqliteRuntimes,
     vendorManifestFile,
     bridgeLockFile,
+    releaseNotesFile,
     resources,
     components,
   };
@@ -620,6 +709,7 @@ async function copyInputs(
   resources,
   runtimeTargets,
   sqliteRuntimes,
+  releaseNotesFile,
 ) {
   await cp(path.join(root, "dist"), path.join(output, "frontend"), {
     recursive: true,
@@ -628,6 +718,7 @@ async function copyInputs(
     path.join(root, "src-tauri", "tauri.conf.json"),
     path.join(output, "tauri.conf.json"),
   );
+  await cp(releaseNotesFile, path.join(output, "RELEASE-NOTES.md"));
   await cp(
     path.join(resources, "fieldtheory"),
     path.join(output, "resources", "fieldtheory"),
@@ -806,17 +897,22 @@ async function prepare(options) {
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   try {
-    await validateNoSecrets([validated.resources]);
+    await validateNoSecrets([
+      validated.resources,
+      validated.releaseNotesFile,
+    ]);
     await copyInputs(
       root,
       output,
       validated.resources,
       validated.targetConfig.nodeRuntimes,
       validated.sqliteRuntimes,
+      validated.releaseNotesFile,
     );
     await validateNoSecrets([
       path.join(output, "resources"),
       path.join(output, "frontend"),
+      path.join(output, "RELEASE-NOTES.md"),
     ]);
   } catch (error) {
     await rm(output, { recursive: true, force: true });
@@ -863,6 +959,7 @@ async function prepare(options) {
       path.join(root, "src-tauri", "Cargo.lock"),
       path.join(root, "src-tauri", "tauri.conf.json"),
       configFile,
+      validated.releaseNotesFile,
       validated.vendorManifestFile,
       rustInventoryFile,
     ]),

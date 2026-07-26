@@ -25,6 +25,41 @@ const rustInventoryScript = path.resolve(
   "..",
   "generate-rust-dependency-inventory.mjs",
 );
+const releaseNotes = `# Karakeep Transfer 0.1.0
+
+## Status
+
+Karakeep Transfer is an unofficial community application. It is not affiliated
+with Karakeep, X, or Field Theory.
+
+## Platform support
+
+- macOS 12 Monterey or newer on Apple Silicon and Intel
+- Windows 10 version 1803 or newer and Windows 11 on x86-64
+
+## Browser support
+
+Browser-cookie acquisition supports:
+
+- Google Chrome
+- Microsoft Edge
+- Brave
+- Chromium
+- Firefox
+
+## X compatibility
+
+Bookmark acquisition from X is best-effort because it relies on private X
+interfaces through Field Theory. Changes by X can temporarily interrupt new
+acquisitions. Previously retained snapshots remain available when new
+acquisition is unavailable.
+
+## Upgrading
+
+Updates are manual. Quit Karakeep Transfer, download the new installer from the
+GitHub Releases page, compare its SHA-256 checksum with the value published for
+that release, and run the installer.
+`;
 
 function commandVersion(command, args, prefix = "") {
   return spawnSync(command, args, { encoding: "utf8" })
@@ -226,6 +261,7 @@ async function createRepositoryFixture() {
       },
     },
   });
+  await writeFile(path.join(root, "release", "release-notes.md"), releaseNotes);
   await writeJson(path.join(root, "cargo-metadata.json"), {
     packages: [
       {
@@ -394,6 +430,136 @@ test("same pinned macOS inputs produce byte-identical release metadata", async (
       firstDigest: await treeDigest(first),
       secondDigest: await treeDigest(first),
     },
+  );
+});
+
+test("release notes are staged, checksummed, and bound to release metadata", async () => {
+  const root = await createRepositoryFixture();
+  const output = path.join(root, "out");
+  const source = path.join(root, "release", "release-notes.md");
+
+  const result = run(root, "macos-universal", output);
+  assert.equal(result.status, 0, result.stderr);
+
+  const staged = path.join(output, "RELEASE-NOTES.md");
+  assert.equal(await readFile(staged, "utf8"), releaseNotes);
+
+  const metadata = JSON.parse(
+    await readFile(path.join(output, "RELEASE-METADATA.json"), "utf8"),
+  );
+  assert.deepEqual(
+    metadata.inputs.find(({ path: inputPath }) =>
+      inputPath === "release/release-notes.md"
+    ),
+    {
+      path: "release/release-notes.md",
+      sha256: await sha256(source),
+    },
+  );
+
+  assert.match(
+    await readFile(path.join(output, "SHA256SUMS"), "utf8"),
+    new RegExp(`^${await sha256(staged)}  RELEASE-NOTES\\.md$`, "m"),
+  );
+});
+
+test("release notes must name the exact configured product and version", async () => {
+  const root = await createRepositoryFixture();
+  const notes = path.join(root, "release", "release-notes.md");
+  await writeFile(notes, releaseNotes.replace("0.1.0", "0.2.0"));
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.match(
+    result.stderr,
+    /Release notes heading must be exactly: # Karakeep Transfer 0\.1\.0/,
+  );
+});
+
+test("release notes reject a missing required disclosure", async () => {
+  for (const [disclosure, omitted] of [
+    ["unofficial status", "unofficial"],
+    ["macOS support", "macOS"],
+    ["Windows support", "Windows"],
+    ["Google Chrome support", "Google Chrome"],
+    ["Microsoft Edge support", "Microsoft Edge"],
+    ["Brave support", "Brave"],
+    ["Chromium support", "Chromium"],
+    ["Firefox support", "Firefox"],
+    ["best-effort X compatibility", "best-effort"],
+    ["manual upgrade instructions", "Updates are manual."],
+  ]) {
+    const root = await createRepositoryFixture();
+    const notes = path.join(root, "release", "release-notes.md");
+    await writeFile(notes, releaseNotes.replaceAll(omitted, ""));
+
+    const result = run(root, "macos-universal", path.join(root, "out"));
+
+    assert.match(
+      result.stderr,
+      new RegExp(`Release notes are missing required disclosure: ${disclosure}`),
+      disclosure,
+    );
+  }
+});
+
+test("release note disclosures must be affirmative, sectioned, and actionable", async () => {
+  for (const [disclosure, invalidNotes] of [
+    [
+      "Windows support",
+      releaseNotes.replace(
+        "- Windows 10 version 1803 or newer and Windows 11 on x86-64",
+        "- Windows is unsupported",
+      ),
+    ],
+    [
+      "Firefox support",
+      releaseNotes.replace("- Firefox", "- Firefox is unsupported"),
+    ],
+    [
+      "best-effort X compatibility",
+      releaseNotes
+        .replace("Bookmark acquisition from X is best-effort", "X may change")
+        .replace("Updates are manual.", "Updates are manual and best-effort."),
+    ],
+    [
+      "manual upgrade instructions",
+      releaseNotes.replace(
+        "download the new installer from the\nGitHub Releases page, ",
+        "",
+      ),
+    ],
+  ]) {
+    const root = await createRepositoryFixture();
+    await writeFile(
+      path.join(root, "release", "release-notes.md"),
+      invalidNotes,
+    );
+
+    const result = run(root, "macos-universal", path.join(root, "out"));
+
+    assert.match(
+      result.stderr,
+      new RegExp(`Release notes are missing required disclosure: ${disclosure}`),
+      disclosure,
+    );
+  }
+});
+
+test("secret-like values in release notes are rejected before staging", async () => {
+  const root = await createRepositoryFixture();
+  const output = path.join(root, "out");
+  await writeFile(
+    path.join(root, "release", "release-notes.md"),
+    `${releaseNotes}\nAuthorization: Bearer live-secret-that-must-not-ship\n`,
+  );
+
+  const result = run(root, "macos-universal", output);
+
+  assert.match(result.stderr, /Forbidden secret-like value/);
+  await assert.rejects(
+    readFile(path.join(output, "RELEASE-NOTES.md")),
+    { code: "ENOENT" },
   );
 });
 
