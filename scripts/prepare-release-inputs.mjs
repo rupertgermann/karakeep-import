@@ -289,7 +289,7 @@ async function validateNoSecrets(roots) {
         /\bBearer\s+([A-Za-z0-9._~+/-]{8,})/gi,
       );
       const cookieValues = content.matchAll(
-        /\b(?:auth_token|ct0)=([^;\s"'\\]{8,})/gi,
+        /\b(?:auth_token|ct0)=(?!\$\{)([^;\s"'\\]{8,})/gi,
       );
       for (const match of [...assignments, ...bearers, ...cookieValues]) {
         if (!isPlaceholderCredential(match[1])) {

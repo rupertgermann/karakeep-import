@@ -718,6 +718,27 @@ test("X cookie-header values in packaged resources are rejected", async () => {
   );
 });
 
+test("dynamic X cookie-header construction in packaged source is allowed", async () => {
+  const root = await createRepositoryFixture();
+  await writeFile(
+    path.join(
+      root,
+      "src-tauri",
+      "resources",
+      "fieldtheory",
+      "bridge",
+      "node_modules",
+      "fieldtheory",
+      "cookie-builder.js",
+    ),
+    "const cookie = `ct0=${cleanCt0}; auth_token=${sanitizeCookieValue('auth_token', authToken)}`;\n",
+  );
+
+  const result = run(root, "macos-universal", path.join(root, "out"));
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
 test("password-equivalent values in unstaged Tauri resources are rejected", async () => {
   const root = await createRepositoryFixture();
   await writeFile(
