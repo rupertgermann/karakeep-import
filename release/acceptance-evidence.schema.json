@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rupertgermann/karakeep-import/release/acceptance-evidence.schema.json",
+  "title": "Karakeep Transfer native release acceptance evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "target",
+    "commit",
+    "product",
+    "artifact",
+    "gates"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "target": {
+      "enum": [
+        "macos-universal",
+        "windows-x64"
+      ]
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "identifier",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identifier": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256"
+      ],
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "native baseline",
+        "clean install",
+        "no system runtime",
+        "five-browser matrix",
+        "X transfer",
+        "File transfer",
+        "signature",
+        "platform verification"
+      ],
+      "properties": {
+        "native baseline": {
+          "const": "PASS"
+        },
+        "clean install": {
+          "const": "PASS"
+        },
+        "no system runtime": {
+          "const": "PASS"
+        },
+        "five-browser matrix": {
+          "const": "PASS"
+        },
+        "X transfer": {
+          "const": "PASS"
+        },
+        "File transfer": {
+          "const": "PASS"
+        },
+        "signature": {
+          "const": "PASS"
+        },
+        "platform verification": {
+          "const": "PASS"
+        }
+      }
+    }
+  }
+}
