@@ -9,12 +9,16 @@
     "target",
     "commit",
     "product",
+    "testedAt",
+    "checkout",
     "artifact",
+    "signingIdentities",
+    "platforms",
     "gates"
   ],
   "properties": {
     "schemaVersion": {
-      "const": 1
+      "const": 2
     },
     "target": {
       "enum": [
@@ -49,16 +53,61 @@
         }
       }
     },
+    "testedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "checkout": {
+      "$ref": "#/$defs/passWithEvidence"
+    },
     "artifact": {
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "filename",
+        "size",
         "sha256"
       ],
       "properties": {
+        "filename": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,191}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
         "sha256": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "signingIdentities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/signingIdentity"
+      }
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 2,
+      "maxProperties": 2,
+      "properties": {
+        "macos-arm64": {
+          "$ref": "#/$defs/passWithEvidence"
+        },
+        "macos-x86_64-native": {
+          "$ref": "#/$defs/passWithEvidence"
+        },
+        "windows-10-x64": {
+          "$ref": "#/$defs/passWithEvidence"
+        },
+        "windows-11-x64": {
+          "$ref": "#/$defs/passWithEvidence"
         }
       }
     },
@@ -77,30 +126,160 @@
       ],
       "properties": {
         "native baseline": {
-          "const": "PASS"
+          "$ref": "#/$defs/passWithEvidence"
         },
         "clean install": {
-          "const": "PASS"
+          "$ref": "#/$defs/passWithEvidence"
         },
         "no system runtime": {
-          "const": "PASS"
+          "$ref": "#/$defs/passWithEvidence"
         },
         "five-browser matrix": {
-          "const": "PASS"
+          "$ref": "#/$defs/passWithEvidence"
         },
         "X transfer": {
-          "const": "PASS"
+          "$ref": "#/$defs/passWithEvidence"
         },
         "File transfer": {
-          "const": "PASS"
+          "$ref": "#/$defs/passWithEvidence"
         },
         "signature": {
-          "const": "PASS"
+          "$ref": "#/$defs/passWithEvidence"
         },
         "platform verification": {
-          "const": "PASS"
+          "$ref": "#/$defs/passWithEvidence"
         }
       }
     }
-  }
+  },
+  "$defs": {
+    "evidenceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "sha256"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "not": {
+            "pattern": "^[Aa][Cc][Cc][Ee][Pp][Tt][Aa][Nn][Cc][Ee]-[Ee][Vv][Ii][Dd][Ee][Nn][Cc][Ee]\\.[Jj][Ss][Oo][Nn]$"
+          }
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "signingIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "subject",
+        "stableIdentifier",
+        "certificateSha256",
+        "timestampStatus",
+        "evidence"
+      ],
+      "properties": {
+        "scope": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "stableIdentifier": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
+        },
+        "certificateSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "timestampStatus": {
+          "const": "PASS"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceReferences"
+        }
+      }
+    },
+    "evidenceReferences": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/evidenceReference"
+      }
+    },
+    "passWithEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evidence"
+      ],
+      "properties": {
+        "status": {
+          "const": "PASS"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceReferences"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "target": {
+            "const": "macos-universal"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "then": {
+        "properties": {
+          "platforms": {
+            "required": [
+              "macos-arm64",
+              "macos-x86_64-native"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "target": {
+            "const": "windows-x64"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "then": {
+        "properties": {
+          "platforms": {
+            "required": [
+              "windows-10-x64",
+              "windows-11-x64"
+            ]
+          }
+        }
+      }
+    }
+  ]
 }

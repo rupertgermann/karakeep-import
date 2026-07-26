@@ -43,6 +43,10 @@ const gateNames = [
   "signature",
   "platform verification",
 ];
+const platformNames = {
+  "macos-universal": ["macos-arm64", "macos-x86_64-native"],
+  "windows-x64": ["windows-10-x64", "windows-11-x64"],
+};
 const releaseNotes = Buffer.from(
   "# Karakeep Transfer 0.1.0\n\nOffline release candidate.\n",
 );
@@ -58,6 +62,22 @@ async function writeJson(file, value) {
 
 async function readJson(file) {
   return JSON.parse(await readFile(file, "utf8"));
+}
+
+function pass(evidence) {
+  return { status: "PASS", evidence: [evidence] };
+}
+
+async function writeArtifact(file, target) {
+  if (target === "macos-universal") {
+    const content = Buffer.alloc(1024);
+    content.write("koly", content.length - 512, "ascii");
+    await writeFile(file, content);
+    return;
+  }
+  const content = Buffer.alloc(1024);
+  content.write("MZ", 0, "ascii");
+  await writeFile(file, content);
 }
 
 function git(root, args) {
@@ -88,6 +108,27 @@ async function writeStagedInputs(directory, target, commit) {
     commit,
     sourceDateEpoch: 1750000000,
     target,
+    rustTarget:
+      target === "macos-universal"
+        ? "universal-apple-darwin"
+        : "x86_64-pc-windows-msvc",
+    bundleFormat: target === "macos-universal" ? "dmg" : "nsis",
+    nativeBuildCommand: `build ${target}`,
+    nodeRuntimes:
+      target === "macos-universal"
+        ? ["darwin-arm64", "darwin-x64"]
+        : ["win-x64"],
+    buildToolchains: {
+      node: "22.20.0",
+      npm: "10.9.3",
+      rust: "1.93.0",
+    },
+    inputs: [
+      {
+        path: "release/release-inputs.json",
+        sha256: "b".repeat(64),
+      },
+    ],
   });
   await writeFile(path.join(directory, "RELEASE-NOTES.md"), releaseNotes);
   await writeJson(path.join(directory, "DEPENDENCY-INVENTORY.json"), {
@@ -138,8 +179,8 @@ async function createFixture(t, { repositoryFiles = [] } = {}) {
     "Karakeep.Transfer_0.1.0_x64-setup.exe",
   );
   await mkdir(artifacts);
-  await writeFile(macosArtifact, "signed macOS installer\n");
-  await writeFile(windowsArtifact, "signed Windows installer\n");
+  await writeArtifact(macosArtifact, "macos-universal");
+  await writeArtifact(windowsArtifact, "windows-x64");
 
   const evidence = path.join(temporary, "evidence");
   const macosEvidence = path.join(evidence, "macos-universal.json");
@@ -149,13 +190,55 @@ async function createFixture(t, { repositoryFiles = [] } = {}) {
     ["macos-universal", macosArtifact, macosEvidence],
     ["windows-x64", windowsArtifact, windowsEvidence],
   ]) {
+    const verificationFile = path.join(
+      evidence,
+      `${target}-native-verification.txt`,
+    );
+    await writeFile(
+      verificationFile,
+      `${target} sanitized native verification\n`,
+    );
+    const reference = {
+      file: path.basename(verificationFile),
+      sha256: await sha256(verificationFile),
+    };
+    const artifactDetails = await stat(artifact);
+    const signingScopes =
+      target === "macos-universal"
+        ? ["application-and-dmg"]
+        : ["installer", "application", "bundled-node", "bundled-sqlite"];
     await writeJson(output, {
-      schemaVersion: 1,
+      schemaVersion: 2,
       target,
       commit,
       product,
-      artifact: { sha256: await sha256(artifact) },
-      gates: Object.fromEntries(gateNames.map((gate) => [gate, "PASS"])),
+      testedAt: "2026-07-26T12:00:00Z",
+      checkout: pass(reference),
+      artifact: {
+        filename: path.basename(artifact),
+        size: artifactDetails.size,
+        sha256: await sha256(artifact),
+      },
+      signingIdentities: signingScopes.map((scope) => ({
+        scope,
+        subject:
+          target === "macos-universal"
+            ? "Developer ID Application: Example Organization"
+            : "CN=Example Organization",
+        stableIdentifier:
+          target === "macos-universal"
+            ? "ABCDE12345"
+            : "0123456789ABCDEF0123456789ABCDEF01234567",
+        certificateSha256: "a".repeat(64),
+        timestampStatus: "PASS",
+        evidence: [reference],
+      })),
+      platforms: Object.fromEntries(
+        platformNames[target].map((platform) => [platform, pass(reference)]),
+      ),
+      gates: Object.fromEntries(
+        gateNames.map((gate) => [gate, pass(reference)]),
+      ),
     });
   }
 
@@ -209,13 +292,33 @@ async function assertRejected(fixture, pattern, description) {
 test("acceptance evidence schema fixes the exact required PASS gates", async () => {
   const schema = await readJson(evidenceSchemaFile);
 
+  assert.equal(schema.properties.schemaVersion.const, 2);
+  assert.ok(schema.required.includes("testedAt"));
+  assert.ok(schema.required.includes("signingIdentities"));
+  assert.equal(schema.properties.signingIdentities.minItems, 1);
+  assert.equal(
+    schema.properties.signingIdentities.items.$ref,
+    "#/$defs/signingIdentity",
+  );
   assert.deepEqual(schema.properties.gates.required, gateNames);
   assert.equal(schema.properties.gates.additionalProperties, false);
+  assert.deepEqual(schema.$defs.evidenceReference.properties.file.not, {
+    pattern:
+      "^[Aa][Cc][Cc][Ee][Pp][Tt][Aa][Nn][Cc][Ee]-[Ee][Vv][Ii][Dd][Ee][Nn][Cc][Ee]\\.[Jj][Ss][Oo][Nn]$",
+  });
   for (const gate of gateNames) {
     assert.deepEqual(schema.properties.gates.properties[gate], {
-      const: "PASS",
+      $ref: "#/$defs/passWithEvidence",
     });
   }
+  assert.deepEqual(
+    schema.allOf[0].then.properties.platforms.required,
+    platformNames["macos-universal"],
+  );
+  assert.deepEqual(
+    schema.allOf[1].then.properties.platforms.required,
+    platformNames["windows-x64"],
+  );
 });
 
 test("finalizes two verified native candidates into one offline release directory", async (t) => {
@@ -229,7 +332,7 @@ test("finalizes two verified native candidates into one offline release director
     "macos-universal",
     "windows-x64",
   ]);
-  assert.equal(
+  assert.deepEqual(
     await readFile(
       path.join(
         fixture.output,
@@ -237,11 +340,10 @@ test("finalizes two verified native candidates into one offline release director
         "macos-universal",
         path.basename(fixture.macosArtifact),
       ),
-      "utf8",
     ),
-    "signed macOS installer\n",
+    await readFile(fixture.macosArtifact),
   );
-  assert.equal(
+  assert.deepEqual(
     await readFile(
       path.join(
         fixture.output,
@@ -249,9 +351,8 @@ test("finalizes two verified native candidates into one offline release director
         "windows-x64",
         path.basename(fixture.windowsArtifact),
       ),
-      "utf8",
     ),
-    "signed Windows installer\n",
+    await readFile(fixture.windowsArtifact),
   );
   assert.deepEqual(
     await readFile(path.join(fixture.output, "RELEASE-NOTES.md")),
@@ -260,7 +361,24 @@ test("finalizes two verified native candidates into one offline release director
   for (const target of ["macos-universal", "windows-x64"]) {
     assert.deepEqual(
       await readdir(path.join(fixture.output, "targets", target)),
-      ["DEPENDENCY-INVENTORY.json", "THIRD-PARTY-NOTICES.md"],
+      [
+        "DEPENDENCY-INVENTORY.json",
+        "RELEASE-METADATA.json",
+        "THIRD-PARTY-NOTICES.md",
+      ],
+    );
+    assert.deepEqual(
+      await readFile(
+        path.join(fixture.output, "targets", target, "RELEASE-METADATA.json"),
+      ),
+      await readFile(
+        path.join(
+          target === "macos-universal"
+            ? fixture.macosInput
+            : fixture.windowsInput,
+          "RELEASE-METADATA.json",
+        ),
+      ),
     );
     assert.equal(
       await readFile(
@@ -275,16 +393,21 @@ test("finalizes two verified native candidates into one offline release director
       `# ${target} notices\n`,
     );
   }
-  assert.deepEqual(
-    await readdir(path.join(fixture.output, "acceptance-evidence")),
-    ["macos-universal.json", "windows-x64.json"],
-  );
+  for (const target of ["macos-universal", "windows-x64"]) {
+    assert.deepEqual(
+      await readdir(
+        path.join(fixture.output, "acceptance-evidence", target),
+      ),
+      ["acceptance-evidence.json", `${target}-native-verification.txt`],
+    );
+  }
 
   const metadata = JSON.parse(
     await readFile(path.join(fixture.output, "RELEASE-METADATA.json"), "utf8"),
   );
   assert.deepEqual(metadata.product, product);
   assert.equal(metadata.commit, fixture.commit);
+  assert.equal(metadata.sourceDateEpoch, 1750000000);
   assert.equal(
     metadata.targets["macos-universal"].artifact.sha256,
     await sha256(fixture.macosArtifact),
@@ -293,13 +416,32 @@ test("finalizes two verified native candidates into one offline release director
     metadata.targets["windows-x64"].artifact.sha256,
     await sha256(fixture.windowsArtifact),
   );
+  for (const [target, input] of [
+    ["macos-universal", fixture.macosInput],
+    ["windows-x64", fixture.windowsInput],
+  ]) {
+    const copiedMetadata = path.join(
+      fixture.output,
+      "targets",
+      target,
+      "RELEASE-METADATA.json",
+    );
+    assert.deepEqual(metadata.targets[target].releaseMetadata, {
+      path: `targets/${target}/RELEASE-METADATA.json`,
+      sha256: await sha256(copiedMetadata),
+    });
+    assert.equal(
+      (await readJson(copiedMetadata)).sourceDateEpoch,
+      1750000000,
+    );
+  }
 
   const checksumLines = (
     await readFile(path.join(fixture.output, "SHA256SUMS"), "utf8")
   )
     .trim()
     .split("\n");
-  assert.equal(checksumLines.length, 10);
+  assert.equal(checksumLines.length, 14);
   assert.ok(
     checksumLines.some((line) => line.endsWith("  RELEASE-METADATA.json")),
   );
@@ -312,6 +454,23 @@ test("finalizes two verified native candidates into one offline release director
       match[2],
     );
   }
+});
+
+test("rejects the legacy self-asserted PASS-only evidence shape", async (t) => {
+  const fixture = await createFixture(t);
+  await writeJson(fixture.macosEvidence, {
+    schemaVersion: 1,
+    target: "macos-universal",
+    commit: fixture.commit,
+    product,
+    artifact: { sha256: await sha256(fixture.macosArtifact) },
+    gates: Object.fromEntries(gateNames.map((gate) => [gate, "PASS"])),
+  });
+
+  await assertRejected(
+    fixture,
+    /macos-universal evidence has an unsupported schema/,
+  );
 });
 
 test("rejects a staging tree whose SHA256SUMS no longer matches", async (t) => {
@@ -401,7 +560,24 @@ test("requires both staged targets to name the same product and version", async 
   );
 });
 
-test("rejects evidence whose release identity or artifact SHA does not match", async (t) => {
+test("requires both staged targets to name the same source date epoch", async (t) => {
+  const fixture = await createFixture(t);
+  const metadataFile = path.join(
+    fixture.windowsInput,
+    "RELEASE-METADATA.json",
+  );
+  const metadata = await readJson(metadataFile);
+  metadata.sourceDateEpoch += 1;
+  await writeJson(metadataFile, metadata);
+  await refreshStagingChecksums(fixture.windowsInput);
+
+  await assertRejected(
+    fixture,
+    /Staged release source date epoch does not match across targets/,
+  );
+});
+
+test("rejects evidence whose release or artifact identity does not match", async (t) => {
   for (const [description, mutate, pattern] of [
     [
       "target",
@@ -425,6 +601,20 @@ test("rejects evidence whose release identity or artifact SHA does not match", a
       /macos-universal evidence product does not match/,
     ],
     [
+      "artifact filename",
+      (evidence) => {
+        evidence.artifact.filename = "different-installer.dmg";
+      },
+      /macos-universal evidence artifact filename does not match/,
+    ],
+    [
+      "artifact size",
+      (evidence) => {
+        evidence.artifact.size += 1;
+      },
+      /macos-universal evidence artifact size does not match/,
+    ],
+    [
       "artifact SHA-256",
       (evidence) => {
         evidence.artifact.sha256 = "0".repeat(64);
@@ -444,14 +634,147 @@ test("requires every named native acceptance gate to be exactly PASS", async (t)
   for (const gate of gateNames) {
     const fixture = await createFixture(t);
     const evidence = await readJson(fixture.windowsEvidence);
-    evidence.gates[gate] = "pass";
+    evidence.gates[gate].status = "FAIL";
     await writeJson(fixture.windowsEvidence, evidence);
 
     await assertRejected(
       fixture,
-      new RegExp(`windows-x64 evidence gate is not PASS: ${gate}`),
+      new RegExp(`windows-x64 evidence gate ${gate} is not PASS`),
       gate,
     );
+  }
+});
+
+test("requires a UTC test timestamp and public signing identities", async (t) => {
+  for (const [description, mutate, pattern] of [
+    [
+      "missing timestamp",
+      (evidence) => {
+        delete evidence.testedAt;
+      },
+      /macos-universal evidence test timestamp is not a valid UTC date-time/,
+    ],
+    [
+      "non-UTC timestamp",
+      (evidence) => {
+        evidence.testedAt = "2026-07-26T12:00:00+02:00";
+      },
+      /macos-universal evidence test timestamp is not a valid UTC date-time/,
+    ],
+    [
+      "missing identities",
+      (evidence) => {
+        delete evidence.signingIdentities;
+      },
+      /macos-universal evidence requires signing identities/,
+    ],
+    [
+      "missing identity digest",
+      (evidence) => {
+        delete evidence.signingIdentities[0].certificateSha256;
+      },
+      /macos-universal evidence signing identity certificate SHA-256 is invalid/,
+    ],
+    [
+      "missing timestamp attestation",
+      (evidence) => {
+        evidence.signingIdentities[0].timestampStatus = "UNAVAILABLE";
+      },
+      /macos-universal evidence signing identity timestamp status is not PASS/,
+    ],
+  ]) {
+    const fixture = await createFixture(t);
+    const evidence = await readJson(fixture.macosEvidence);
+    mutate(evidence);
+    await writeJson(fixture.macosEvidence, evidence);
+    await assertRejected(fixture, pattern, description);
+  }
+});
+
+test("requires the exact native platform set with referenced PASS evidence", async (t) => {
+  const fixture = await createFixture(t);
+  const evidence = await readJson(fixture.windowsEvidence);
+  delete evidence.platforms["windows-11-x64"];
+  await writeJson(fixture.windowsEvidence, evidence);
+
+  await assertRejected(
+    fixture,
+    /windows-x64 evidence platforms do not match the required native set/,
+  );
+});
+
+test("requires every attestation to contain referenced evidence", async (t) => {
+  const fixture = await createFixture(t);
+  const evidence = await readJson(fixture.macosEvidence);
+  evidence.gates["X transfer"].evidence = [];
+  await writeJson(fixture.macosEvidence, evidence);
+
+  await assertRejected(
+    fixture,
+    /macos-universal evidence gate X transfer requires evidence references/,
+  );
+});
+
+test("rejects missing, modified, unsafe, and private-looking evidence files", async (t) => {
+  {
+    const fixture = await createFixture(t);
+    const evidence = await readJson(fixture.macosEvidence);
+    const reference = evidence.checkout.evidence[0];
+    await rm(path.join(path.dirname(fixture.macosEvidence), reference.file));
+    await assertRejected(
+      fixture,
+      /Required macos-universal referenced evidence .* is missing/,
+      "missing referenced file",
+    );
+  }
+  {
+    const fixture = await createFixture(t);
+    const evidence = await readJson(fixture.macosEvidence);
+    const reference = evidence.checkout.evidence[0];
+    await writeFile(
+      path.join(path.dirname(fixture.macosEvidence), reference.file),
+      "modified verification\n",
+    );
+    await assertRejected(
+      fixture,
+      /macos-universal referenced evidence SHA-256 mismatch/,
+      "wrong referenced digest",
+    );
+  }
+  for (const filename of [
+    "../outside.txt",
+    "alice-profile.txt",
+    "acceptance-evidence.json",
+    "Acceptance-Evidence.JSON",
+  ]) {
+    const fixture = await createFixture(t);
+    const evidence = await readJson(fixture.macosEvidence);
+    evidence.gates.signature.evidence[0].file = filename;
+    await writeJson(fixture.macosEvidence, evidence);
+    await assertRejected(
+      fixture,
+      /macos-universal evidence reference filename is unsafe or private-looking/,
+      filename,
+    );
+  }
+});
+
+test("rejects plain-text files posing as native installers", async (t) => {
+  for (const [target, artifactName, pattern] of [
+    [
+      "macos-universal",
+      "macosArtifact",
+      /macos-universal signed artifact does not have the required native installer format/,
+    ],
+    [
+      "windows-x64",
+      "windowsArtifact",
+      /windows-x64 signed artifact does not have the required native installer format/,
+    ],
+  ]) {
+    const fixture = await createFixture(t);
+    await writeFile(fixture[artifactName], `plain text ${target}\n`);
+    await assertRejected(fixture, pattern, target);
   }
 });
 
@@ -473,6 +796,24 @@ test("rejects evidence properties that its schema does not allow", async (t) => 
       "artifact",
       (evidence) => {
         evidence.artifact.path = "/private/signed-installer.dmg";
+      },
+    ],
+    [
+      "clean checkout",
+      (evidence) => {
+        evidence.checkout.note = "unsupported";
+      },
+    ],
+    [
+      "signing identity",
+      (evidence) => {
+        evidence.signingIdentities[0].privateKey = "unsupported";
+      },
+    ],
+    [
+      "gate signature reference",
+      (evidence) => {
+        evidence.gates.signature.evidence[0].size = 123;
       },
     ],
     [
@@ -522,6 +863,22 @@ test("rejects symlinked artifact and evidence inputs", async (t) => {
       fixture,
       /Required macos-universal acceptance evidence is not a non-empty regular file/,
       "symlinked evidence",
+    );
+  }
+  {
+    const fixture = await createFixture(t);
+    const evidence = await readJson(fixture.macosEvidence);
+    const reference = evidence.checkout.evidence[0];
+    const evidenceDirectory = path.dirname(fixture.macosEvidence);
+    const referenced = path.join(evidenceDirectory, reference.file);
+    const real = path.join(evidenceDirectory, "native-verification-source.txt");
+    await writeFile(real, await readFile(referenced));
+    await rm(referenced);
+    await symlink(real, referenced);
+    await assertRejected(
+      fixture,
+      /Required macos-universal referenced evidence .* is not a non-empty regular file/,
+      "symlinked referenced evidence",
     );
   }
 });

@@ -33,7 +33,7 @@ browser GUI instructions.
 | macOS native record is `ACCEPTED` with no `FAIL` or `UNAVAILABLE` required row | UNAVAILABLE | Template not executed |
 | Windows native record is `ACCEPTED` with no `FAIL` or `UNAVAILABLE` required row | UNAVAILABLE | Template not executed |
 | Both native records identify the same full source commit and application version | UNAVAILABLE | Template not executed |
-| Release metadata for both platforms identifies that same commit, version, and source date | UNAVAILABLE | Template not executed |
+| Release metadata for both platforms identifies that same commit, version, and source date epoch | UNAVAILABLE | Template not executed |
 | Platform-specific metadata differs only where the native target, bundle, or runtime inventory requires it | UNAVAILABLE | Template not executed |
 | Accepted source checkout is clean and exactly matches the release tag | UNAVAILABLE | Template not executed |
 | Accepted source contains `karakeep-import.py` and its command-line tests and documentation | UNAVAILABLE | Template not executed |
@@ -55,7 +55,7 @@ files cannot overwrite each other during upload.
 | macOS release metadata | Accepted commit/version; expected macOS-only target fields | UNAVAILABLE | Template not executed |
 | Windows release metadata | Accepted commit/version; expected Windows-only target fields | UNAVAILABLE | Template not executed |
 | Dependency inventories | Shared components match; platform-only runtimes match each accepted package | UNAVAILABLE | Template not executed |
-| Third-party notices | Byte-identical between platforms and complete for every shipped component | UNAVAILABLE | Template not executed |
+| Third-party notices | Each target's notice matches its own inventory; both target files are retained | UNAVAILABLE | Template not executed |
 | Release notes | Byte-identical between platforms and match the reviewed release text | UNAVAILABLE | Template not executed |
 | Final checksum file | Contains the final post-signing hash for every uploaded asset | UNAVAILABLE | Template not executed |
 
@@ -70,6 +70,11 @@ The release notes must state:
 Generate final checksums after signing, notarization, stapling, and
 Authenticode timestamping. Checksums produced for unsigned staging inputs do
 not satisfy this gate.
+
+Third-party notices are target-specific and are not expected to be
+byte-identical. The macOS notice covers both bundled Node architectures; the
+Windows notice covers its bundled Node and SQLite executables. Verify each
+notice against its own dependency inventory and retain both reviewed files.
 
 ## Pre-publication review
 

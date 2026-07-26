@@ -26,12 +26,14 @@ const targets = [
     inputOption: "macos-input",
     artifactOption: "macos-artifact",
     evidenceOption: "macos-evidence",
+    platforms: ["macos-arm64", "macos-x86_64-native"],
   },
   {
     name: "windows-x64",
     inputOption: "windows-input",
     artifactOption: "windows-artifact",
     evidenceOption: "windows-evidence",
+    platforms: ["windows-10-x64", "windows-11-x64"],
   },
 ];
 const requiredGates = [
@@ -107,10 +109,28 @@ async function requireFile(file, description) {
       `Required ${description} is not a non-empty regular file: ${file}`,
     );
   }
+  return details;
 }
 
 async function sha256(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
+}
+
+async function requireArtifactMagic(file, target) {
+  const content = await readFile(file);
+  const valid =
+    target === "macos-universal"
+      ? content.length >= 512 &&
+        content.subarray(content.length - 512, content.length - 508).equals(
+          Buffer.from("koly"),
+        )
+      : content.length >= 2 &&
+        content.subarray(0, 2).equals(Buffer.from("MZ"));
+  if (!valid) {
+    throw new Error(
+      `${target} signed artifact does not have the required native installer format.`,
+    );
+  }
 }
 
 async function regularFiles(root) {
@@ -250,13 +270,184 @@ function rejectUnsupportedProperties(value, allowed, description) {
   }
 }
 
+function safeArtifactFilename(filename, target) {
+  if (
+    typeof filename !== "string" ||
+    filename.length > 192 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._ -]*$/.test(filename) ||
+    path.posix.basename(filename) !== filename ||
+    path.win32.basename(filename) !== filename
+  ) {
+    throw new Error(`${target} evidence artifact filename is unsafe.`);
+  }
+  const extension = target === "macos-universal" ? ".dmg" : ".exe";
+  if (!filename.toLowerCase().endsWith(extension)) {
+    throw new Error(
+      `${target} evidence artifact filename does not have the expected extension.`,
+    );
+  }
+  return filename;
+}
+
+function safeEvidenceFilename(filename, target) {
+  const privateLooking =
+    /(?:^|[._-])(?:api[-_]?key|cookie|credential|email|home|password|private|profile|secret|session|temp|tmp|user)(?:[._-]|$)/i;
+  const generatedFilenames = new Set(["acceptance-evidence.json"]);
+  if (
+    typeof filename !== "string" ||
+    filename.length > 128 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(filename) ||
+    path.posix.basename(filename) !== filename ||
+    path.win32.basename(filename) !== filename ||
+    privateLooking.test(filename) ||
+    generatedFilenames.has(filename.toLowerCase())
+  ) {
+    throw new Error(`${target} evidence reference filename is unsafe or private-looking.`);
+  }
+  return filename;
+}
+
+function collectEvidenceReferences(references, target, description, collected) {
+  if (!Array.isArray(references) || references.length === 0) {
+    throw new Error(`${target} evidence ${description} requires evidence references.`);
+  }
+  for (const reference of references) {
+    rejectUnsupportedProperties(
+      reference,
+      ["file", "sha256"],
+      `${target} evidence ${description} reference`,
+    );
+    const filename = safeEvidenceFilename(reference?.file, target);
+    if (
+      typeof reference.sha256 !== "string" ||
+      !/^[a-f0-9]{64}$/.test(reference.sha256)
+    ) {
+      throw new Error(
+        `${target} evidence ${description} reference has an invalid SHA-256.`,
+      );
+    }
+    const previous = collected.get(filename);
+    if (previous && previous !== reference.sha256) {
+      throw new Error(
+        `${target} evidence reference has conflicting SHA-256 values: ${filename}`,
+      );
+    }
+    collected.set(filename, reference.sha256);
+  }
+}
+
+function validatePassWithEvidence(value, target, description, collected) {
+  rejectUnsupportedProperties(
+    value,
+    ["status", "evidence"],
+    `${target} evidence ${description}`,
+  );
+  if (value?.status !== "PASS") {
+    throw new Error(`${target} evidence ${description} is not PASS.`);
+  }
+  collectEvidenceReferences(
+    value.evidence,
+    target,
+    description,
+    collected,
+  );
+}
+
+function validateSigningIdentity(identity, target, collected) {
+  rejectUnsupportedProperties(
+    identity,
+    [
+      "scope",
+      "subject",
+      "stableIdentifier",
+      "certificateSha256",
+      "timestampStatus",
+      "evidence",
+    ],
+    `${target} evidence signing identity`,
+  );
+  if (
+    typeof identity?.scope !== "string" ||
+    !/^[a-z0-9][a-z0-9-]{1,63}$/.test(identity.scope)
+  ) {
+    throw new Error(`${target} evidence signing identity scope is invalid.`);
+  }
+  if (
+    typeof identity.subject !== "string" ||
+    identity.subject.trim() !== identity.subject ||
+    identity.subject.length === 0 ||
+    identity.subject.length > 256 ||
+    /[\r\n]/.test(identity.subject) ||
+    /(?:\/Users\/|\/home\/|[A-Za-z]:\\Users\\)/i.test(identity.subject)
+  ) {
+    throw new Error(`${target} evidence signing identity subject is invalid.`);
+  }
+  if (
+    typeof identity.stableIdentifier !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/.test(
+      identity.stableIdentifier,
+    )
+  ) {
+    throw new Error(
+      `${target} evidence signing identity stable identifier is invalid.`,
+    );
+  }
+  if (
+    typeof identity.certificateSha256 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(identity.certificateSha256)
+  ) {
+    throw new Error(
+      `${target} evidence signing identity certificate SHA-256 is invalid.`,
+    );
+  }
+  if (identity.timestampStatus !== "PASS") {
+    throw new Error(
+      `${target} evidence signing identity timestamp status is not PASS.`,
+    );
+  }
+  collectEvidenceReferences(
+    identity.evidence,
+    target,
+    "signing identity",
+    collected,
+  );
+}
+
+function validateSigningIdentities(identities, target, collected) {
+  if (!Array.isArray(identities) || identities.length === 0) {
+    throw new Error(`${target} evidence requires signing identities.`);
+  }
+  const scopes = new Set();
+  for (const identity of identities) {
+    validateSigningIdentity(identity, target, collected);
+    if (scopes.has(identity.scope)) {
+      throw new Error(
+        `${target} evidence has a duplicate signing identity scope: ${identity.scope}`,
+      );
+    }
+    scopes.add(identity.scope);
+  }
+}
+
 function validateEvidence(evidence, expected) {
+  const collected = new Map();
   rejectUnsupportedProperties(
     evidence,
-    ["schemaVersion", "target", "commit", "product", "artifact", "gates"],
+    [
+      "schemaVersion",
+      "target",
+      "commit",
+      "product",
+      "testedAt",
+      "checkout",
+      "artifact",
+      "signingIdentities",
+      "platforms",
+      "gates",
+    ],
     `${expected.target} evidence root`,
   );
-  if (evidence.schemaVersion !== 1) {
+  if (evidence.schemaVersion !== 2) {
     throw new Error(`${expected.target} evidence has an unsupported schema.`);
   }
   if (evidence.target !== expected.target) {
@@ -273,13 +464,67 @@ function validateEvidence(evidence, expected) {
   if (!isDeepStrictEqual(evidence.product, expected.product)) {
     throw new Error(`${expected.target} evidence product does not match.`);
   }
+  if (
+    typeof evidence.testedAt !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(
+      evidence.testedAt,
+    ) ||
+    Number.isNaN(Date.parse(evidence.testedAt))
+  ) {
+    throw new Error(
+      `${expected.target} evidence test timestamp is not a valid UTC date-time.`,
+    );
+  }
   rejectUnsupportedProperties(
     evidence.artifact,
-    ["sha256"],
+    ["filename", "size", "sha256"],
     `${expected.target} evidence artifact`,
   );
+  const artifactFilename = safeArtifactFilename(
+    evidence.artifact?.filename,
+    expected.target,
+  );
+  if (artifactFilename !== expected.artifactFilename) {
+    throw new Error(`${expected.target} evidence artifact filename does not match.`);
+  }
+  if (evidence.artifact?.size !== expected.artifactSize) {
+    throw new Error(`${expected.target} evidence artifact size does not match.`);
+  }
   if (evidence.artifact?.sha256 !== expected.artifactSha256) {
     throw new Error(`${expected.target} evidence artifact SHA-256 does not match.`);
+  }
+  validatePassWithEvidence(
+    evidence.checkout,
+    expected.target,
+    "clean checkout",
+    collected,
+  );
+  validateSigningIdentities(
+    evidence.signingIdentities,
+    expected.target,
+    collected,
+  );
+  rejectUnsupportedProperties(
+    evidence.platforms,
+    expected.platforms,
+    `${expected.target} evidence platforms`,
+  );
+  const platformNames = Object.keys(evidence.platforms ?? {});
+  if (
+    platformNames.length !== expected.platforms.length ||
+    expected.platforms.some((platform) => !platformNames.includes(platform))
+  ) {
+    throw new Error(
+      `${expected.target} evidence platforms do not match the required native set.`,
+    );
+  }
+  for (const platform of expected.platforms) {
+    validatePassWithEvidence(
+      evidence.platforms[platform],
+      expected.target,
+      `platform ${platform}`,
+      collected,
+    );
   }
   rejectUnsupportedProperties(
     evidence.gates,
@@ -294,17 +539,36 @@ function validateEvidence(evidence, expected) {
     throw new Error(`${expected.target} evidence gates do not match the required set.`);
   }
   for (const gate of requiredGates) {
-    if (evidence.gates[gate] !== "PASS") {
-      throw new Error(`${expected.target} evidence gate is not PASS: ${gate}`);
-    }
+    validatePassWithEvidence(
+      evidence.gates[gate],
+      expected.target,
+      `gate ${gate}`,
+      collected,
+    );
   }
+  return collected;
+}
+
+async function verifyEvidenceFiles(evidenceFile, target, references) {
+  const verified = [];
+  for (const [filename, digest] of references) {
+    const file = path.join(path.dirname(evidenceFile), filename);
+    await requireFile(file, `${target} referenced evidence ${filename}`);
+    const actual = await sha256(file);
+    if (actual !== digest) {
+      throw new Error(`${target} referenced evidence SHA-256 mismatch: ${filename}`);
+    }
+    verified.push({ filename, file, sha256: digest });
+  }
+  return verified;
 }
 
 async function validateTarget(options, target, commit) {
   const input = requireOption(options, target.inputOption);
   await verifyStagingChecksums(input, target.name);
+  const metadataFile = path.join(input, "RELEASE-METADATA.json");
   const metadata = await readJson(
-    path.join(input, "RELEASE-METADATA.json"),
+    metadataFile,
     `${target.name} release metadata`,
   );
   if (metadata.schemaVersion !== 1) {
@@ -316,10 +580,22 @@ async function validateTarget(options, target, commit) {
   if (metadata.commit !== commit) {
     throw new Error(`${target.name} release metadata commit does not match HEAD.`);
   }
+  if (
+    !Number.isSafeInteger(metadata.sourceDateEpoch) ||
+    metadata.sourceDateEpoch <= 0
+  ) {
+    throw new Error(
+      `${target.name} release metadata source date epoch is invalid.`,
+    );
+  }
   validateProduct(metadata.product);
 
   const artifact = requireOption(options, target.artifactOption);
-  await requireFile(artifact, `${target.name} signed artifact`);
+  const artifactDetails = await requireFile(
+    artifact,
+    `${target.name} signed artifact`,
+  );
+  await requireArtifactMagic(artifact, target.name);
   const artifactSha256 = await sha256(artifact);
   const evidenceFile = requireOption(options, target.evidenceOption);
   await requireFile(evidenceFile, `${target.name} acceptance evidence`);
@@ -327,21 +603,32 @@ async function validateTarget(options, target, commit) {
     evidenceFile,
     `${target.name} acceptance evidence`,
   );
-  validateEvidence(evidence, {
+  const references = validateEvidence(evidence, {
     target: target.name,
     commit,
     product: metadata.product,
+    artifactFilename: path.basename(artifact),
+    artifactSize: artifactDetails.size,
     artifactSha256,
+    platforms: target.platforms,
   });
+  const evidenceFiles = await verifyEvidenceFiles(
+    evidenceFile,
+    target.name,
+    references,
+  );
 
   return {
     target: target.name,
     input,
     metadata,
+    metadataFile,
+    metadataSha256: await sha256(metadataFile),
     artifact,
     artifactSha256,
     evidenceFile,
     evidenceSha256: await sha256(evidenceFile),
+    evidenceFiles,
   };
 }
 
@@ -380,9 +667,13 @@ async function assemble(output, commit, product, candidates, releaseNotes) {
         candidate.target,
         path.basename(candidate.artifact),
       );
-      const evidencePath = path.posix.join(
+      const evidenceDirectory = path.posix.join(
         "acceptance-evidence",
-        `${candidate.target}.json`,
+        candidate.target,
+      );
+      const evidencePath = path.posix.join(
+        evidenceDirectory,
+        "acceptance-evidence.json",
       );
       const inventoryPath = path.posix.join(
         "targets",
@@ -394,11 +685,17 @@ async function assemble(output, commit, product, candidates, releaseNotes) {
         candidate.target,
         "THIRD-PARTY-NOTICES.md",
       );
+      const releaseMetadataPath = path.posix.join(
+        "targets",
+        candidate.target,
+        "RELEASE-METADATA.json",
+      );
       for (const relative of [
         artifactPath,
         evidencePath,
         inventoryPath,
         noticesPath,
+        releaseMetadataPath,
       ]) {
         await mkdir(path.dirname(path.join(staging, relative)), {
           recursive: true,
@@ -406,6 +703,18 @@ async function assemble(output, commit, product, candidates, releaseNotes) {
       }
       await cp(candidate.artifact, path.join(staging, artifactPath));
       await cp(candidate.evidenceFile, path.join(staging, evidencePath));
+      const finalEvidenceFiles = [];
+      for (const evidence of candidate.evidenceFiles) {
+        const relative = path.posix.join(
+          evidenceDirectory,
+          evidence.filename,
+        );
+        await cp(evidence.file, path.join(staging, relative));
+        finalEvidenceFiles.push({
+          path: relative,
+          sha256: evidence.sha256,
+        });
+      }
       await cp(
         path.join(candidate.input, "DEPENDENCY-INVENTORY.json"),
         path.join(staging, inventoryPath),
@@ -414,6 +723,7 @@ async function assemble(output, commit, product, candidates, releaseNotes) {
         path.join(candidate.input, "THIRD-PARTY-NOTICES.md"),
         path.join(staging, noticesPath),
       );
+      await cp(candidate.metadataFile, path.join(staging, releaseMetadataPath));
       finalTargets[candidate.target] = {
         artifact: {
           path: artifactPath,
@@ -422,8 +732,13 @@ async function assemble(output, commit, product, candidates, releaseNotes) {
         acceptanceEvidence: {
           path: evidencePath,
           sha256: candidate.evidenceSha256,
+          files: finalEvidenceFiles,
         },
         dependencyInventory: inventoryPath,
+        releaseMetadata: {
+          path: releaseMetadataPath,
+          sha256: candidate.metadataSha256,
+        },
         thirdPartyNotices: noticesPath,
       };
     }
@@ -435,6 +750,7 @@ async function assemble(output, commit, product, candidates, releaseNotes) {
           schemaVersion: 1,
           product,
           commit,
+          sourceDateEpoch: candidates[0].metadata.sourceDateEpoch,
           releaseNotes: {
             path: "RELEASE-NOTES.md",
             sha256: createHash("sha256").update(releaseNotes).digest("hex"),
@@ -467,6 +783,9 @@ async function finalize(options) {
   const [macos, windows] = candidates;
   if (!isDeepStrictEqual(macos.metadata.product, windows.metadata.product)) {
     throw new Error("Staged release product or version does not match across targets.");
+  }
+  if (macos.metadata.sourceDateEpoch !== windows.metadata.sourceDateEpoch) {
+    throw new Error("Staged release source date epoch does not match across targets.");
   }
   const macosNotes = await readFile(path.join(macos.input, "RELEASE-NOTES.md"));
   const windowsNotes = await readFile(
