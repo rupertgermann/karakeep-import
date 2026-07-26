@@ -66,7 +66,10 @@ npm run release:inputs -- --target macos-universal
 npm run release:build-candidate -- --input release-inputs/macos-universal
 ```
 
-The output is `release-inputs/macos-universal`. It contains both macOS private
+The output is `release-inputs/macos-universal`. Re-running preparation may
+replace only that exact default target directory. A custom `--output` must be
+a new, absent directory inside the checkout; protected paths and symlinked
+paths are rejected. It contains both macOS private
 Node runtimes (`darwin-arm64` and `darwin-x64`), the frontend build, Field
 Theory bridge resources, `RELEASE-METADATA.json`,
 `RELEASE-NOTES.md`, `DEPENDENCY-INVENTORY.json`,
@@ -75,9 +78,14 @@ It also contains `NATIVE-BUILD-COMMAND.txt`; that checksummed file invokes the
 tracked release-build wrapper shown above. The wrapper requires a clean
 checkout whose `HEAD` equals `RELEASE-METADATA.json`, verifies every
 staged regular file is covered by `SHA256SUMS`, rejects symlinks and a
-non-macOS host, derives the Tauri target and bundle format from staged
-metadata, and supplies an absolute staged-input Tauri override. Run it from
-the checkout root on the controlled macOS release machine.
+non-macOS host, rebuilds the tracked frontend locally, and prepares a fresh,
+unique canonical staging tree. It requires the supplied staging tree to have
+the same paths, bytes, and supported file modes as that canonical tree before
+deriving the Tauri target and bundle format from staged metadata and supplying
+an absolute staged-input Tauri override. The temporary canonical tree is
+removed after comparison; it does not download or regenerate private runtime
+resources. Run it from the checkout root on the controlled macOS release
+machine.
 
 ## Windows x64 inputs
 
@@ -108,8 +116,9 @@ installer-validation procedure.
 
 ## Reproducibility and inspection
 
-The command derives `commit` and `sourceDateEpoch` from `HEAD`. A caller may
-pass full, explicit values for a reproduction:
+The command derives `commit` and `sourceDateEpoch` from a clean `HEAD` and
+fails outside a Git checkout. Optional explicit values are accepted only when
+they exactly match that checkout state:
 
 ```bash
 npm run release:inputs -- \
@@ -132,9 +141,10 @@ signing. Before the native package build:
    expected commit, version, native target, bundle format, native build
    command, bundled runtimes, toolchain versions, and source release-note
    checksum;
-4. run `NATIVE-BUILD-COMMAND.txt` from the native host; the wrapper derives the
-   target and bundle format from checked staged metadata and never rebuilds or
-   downloads staged frontend/resources;
+4. run `NATIVE-BUILD-COMMAND.txt` from the native host; the wrapper rebuilds
+   the tracked frontend, recreates canonical release inputs locally without
+   downloading private runtimes, and packages only after an exact comparison
+   with the supplied staging tree;
 5. keep credentials outside the checkout, staged inputs, process arguments,
    and logs.
 

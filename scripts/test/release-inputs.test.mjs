@@ -8,6 +8,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import os from "node:os";
@@ -128,8 +129,12 @@ async function createSqliteArchive(cache, executableContent) {
   };
 }
 
-async function createRepositoryFixture() {
+async function createRepositoryFixture({ git = true } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "release-inputs-test-"));
+  await writeFile(
+    path.join(root, ".gitignore"),
+    "release-inputs/\nout*/\ngenerated-rust-dependencies.json\nnode-archive-cache/\n",
+  );
   const nodeArchiveCache = path.join(root, "node-archive-cache");
   await mkdir(nodeArchiveCache, { recursive: true });
   const nodeVersion = "22.20.0";
@@ -361,10 +366,39 @@ async function createRepositoryFixture() {
     path.join(resources, "THIRD_PARTY_NOTICES.md"),
     "# Field Theory notices\n",
   );
+  if (git) {
+    for (const args of [
+      ["init", "-q"],
+      ["config", "user.email", "release-test@example.invalid"],
+      ["config", "user.name", "Release Test"],
+      ["add", "."],
+      ["commit", "-qm", "fixture"],
+    ]) {
+      const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+      assert.equal(result.status, 0, result.stderr);
+    }
+  }
   return root;
 }
 
-function run(root, target, output) {
+function commitFixtureChanges(root) {
+  const status = spawnSync("git", ["status", "--porcelain=v1"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (status.status === 0 && status.stdout.trim()) {
+    const add = spawnSync("git", ["add", "-A"], { cwd: root, encoding: "utf8" });
+    assert.equal(add.status, 0, add.stderr);
+    const commit = spawnSync("git", ["commit", "-qm", "fixture update"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(commit.status, 0, commit.stderr);
+  }
+}
+
+function run(root, target, output, { allowDirty = false } = {}) {
+  if (!allowDirty) commitFixtureChanges(root);
   return spawnSync(
     process.execPath,
     [
@@ -377,10 +411,6 @@ function run(root, target, output) {
       output,
       "--cargo-metadata",
       path.join(root, "cargo-metadata.json"),
-      "--commit",
-      "0123456789abcdef0123456789abcdef01234567",
-      "--source-date-epoch",
-      "1750000000",
       "--node-archive-cache",
       path.join(root, "node-archive-cache"),
     ],
@@ -1094,19 +1124,45 @@ test("Rust dependency inventory generation is deterministic and excludes app cod
 
 test("release metadata refuses a dirty Git checkout", async () => {
   const root = await createRepositoryFixture();
-  for (const args of [
-    ["init", "-q"],
-    ["config", "user.email", "release-test@example.invalid"],
-    ["config", "user.name", "Release Test"],
-    ["add", "."],
-    ["commit", "-qm", "fixture"],
-  ]) {
-    const git = spawnSync("git", args, { cwd: root, encoding: "utf8" });
-    assert.equal(git.status, 0, git.stderr);
-  }
   await writeFile(path.join(root, "dist", "index.html"), "dirty build\n");
+
+  const result = run(root, "macos-universal", path.join(root, "out"), {
+    allowDirty: true,
+  });
+
+  assert.match(result.stderr, /Release checkout must be clean/);
+});
+
+test("custom release output never replaces an existing checkout directory", async () => {
+  const root = await createRepositoryFixture();
+  const output = path.join(root, "custom-output");
+  await mkdir(output);
+  await writeFile(path.join(output, "keep.txt"), "must survive\n");
+
+  const result = run(root, "macos-universal", output);
+
+  assert.match(result.stderr, /Custom release output must be a new absent directory/);
+  assert.equal(await readFile(path.join(output, "keep.txt"), "utf8"), "must survive\n");
+});
+
+test("custom release output cannot target protected or symlinked checkout paths", async () => {
+  const root = await createRepositoryFixture();
+  const protectedOutput = path.join(root, ".git", "release-output");
+  const protectedResult = run(root, "macos-universal", protectedOutput);
+  assert.match(protectedResult.stderr, /protected checkout path/);
+
+  const outside = await mkdtemp(path.join(os.tmpdir(), "release-output-link-"));
+  const link = path.join(root, "release-inputs", "linked");
+  await mkdir(path.dirname(link), { recursive: true });
+  await symlink(outside, link);
+  const linkedResult = run(root, "macos-universal", path.join(link, "output"));
+  assert.match(linkedResult.stderr, /may not traverse a symlink/);
+});
+
+test("release preparation fails closed outside a real Git checkout", async () => {
+  const root = await createRepositoryFixture({ git: false });
 
   const result = run(root, "macos-universal", path.join(root, "out"));
 
-  assert.match(result.stderr, /Release checkout must be clean/);
+  assert.match(result.stderr, /Could not inspect release checkout/);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, chmod, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -38,12 +38,25 @@ async function fixture(target = "macos-universal") {
   const root = await (await import("node:fs/promises")).mkdtemp(
     path.join(os.tmpdir(), "release-candidate-test-"),
   );
-  await writeFile(path.join(root, ".gitignore"), "release-inputs/\n");
+  await writeFile(path.join(root, ".gitignore"), "release-inputs/\ncanonical/\ndist/\n");
+  await writeFile(
+    path.join(root, "package.json"),
+    `${JSON.stringify({ type: "module", scripts: { build: "node build.mjs" } })}\n`,
+  );
+  await writeFile(
+    path.join(root, "build.mjs"),
+    'import { mkdir, writeFile } from "node:fs/promises";\nawait mkdir("dist", { recursive: true });\nawait writeFile("dist/index.html", "built\\n");\n',
+  );
+  await mkdir(path.join(root, "scripts"), { recursive: true });
+  await writeFile(
+    path.join(root, "scripts", "prepare-release-inputs.mjs"),
+    'import { cp, mkdir } from "node:fs/promises";\nimport path from "node:path";\nconst args = new Map(process.argv.slice(2).reduce((pairs, value, index, values) => index % 2 ? pairs : [...pairs, [value, values[index + 1]]], []));\nconst target = args.get("--target");\nconst output = args.get("--output");\nawait mkdir(path.dirname(output), { recursive: true });\nawait cp(path.join(process.cwd(), "canonical", target), output, { recursive: true });\n',
+  );
   for (const args of [
     ["init", "-q"],
     ["config", "user.email", "release-test@example.invalid"],
     ["config", "user.name", "Release Test"],
-    ["add", ".gitignore"],
+    ["add", "."],
     ["commit", "-qm", "fixture"],
   ]) {
     const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
@@ -53,17 +66,18 @@ async function fixture(target = "macos-universal") {
     cwd: root,
     encoding: "utf8",
   }).stdout.trim();
+  const canonical = path.join(root, "canonical", target);
   const input = path.join(root, "release-inputs", target);
-  await mkdir(path.join(input, "frontend"), { recursive: true });
-  await mkdir(path.join(input, "resources"), { recursive: true });
-  await writeFile(path.join(input, "frontend", "index.html"), "staged frontend\n");
-  await writeFile(path.join(input, "resources", "runtime.txt"), "staged resource\n");
-  await writeFile(path.join(input, "RELEASE-NOTES.md"), "staged notes\n");
-  await writeFile(path.join(input, "DEPENDENCY-INVENTORY.json"), "{}\n");
-  await writeFile(path.join(input, "THIRD-PARTY-NOTICES.md"), "staged notices\n");
-  await writeFile(path.join(input, "NATIVE-BUILD-COMMAND.txt"), "tracked wrapper\n");
+  await mkdir(path.join(canonical, "frontend"), { recursive: true });
+  await mkdir(path.join(canonical, "resources"), { recursive: true });
+  await writeFile(path.join(canonical, "frontend", "index.html"), "staged frontend\n");
+  await writeFile(path.join(canonical, "resources", "runtime.txt"), "staged resource\n");
+  await writeFile(path.join(canonical, "RELEASE-NOTES.md"), "staged notes\n");
+  await writeFile(path.join(canonical, "DEPENDENCY-INVENTORY.json"), "{}\n");
+  await writeFile(path.join(canonical, "THIRD-PARTY-NOTICES.md"), "staged notices\n");
+  await writeFile(path.join(canonical, "NATIVE-BUILD-COMMAND.txt"), "tracked wrapper\n");
   await writeFile(
-    path.join(input, "RELEASE-METADATA.json"),
+    path.join(canonical, "RELEASE-METADATA.json"),
     `${JSON.stringify({
       schemaVersion: 1,
       commit,
@@ -73,7 +87,8 @@ async function fixture(target = "macos-universal") {
       bundleFormat: target === "windows-x64" ? "nsis" : "dmg",
     }, null, 2)}\n`,
   );
-  await writeChecksums(input);
+  await writeChecksums(canonical);
+  await cp(canonical, input, { recursive: true });
   return { root, input, commit };
 }
 
@@ -120,6 +135,15 @@ test("verified plan rejects tampered staged files", async () => {
 
   const result = run(root, input);
   assert.match(result.stderr, /Staged checksum mismatch: resources\/runtime.txt/);
+});
+
+test("verified plan rejects a stage whose attacker rewrites SHA256SUMS", async () => {
+  const { root, input } = await fixture();
+  await writeFile(path.join(input, "resources", "runtime.txt"), "attacker replacement\n");
+  await writeChecksums(input);
+
+  const result = run(root, input);
+  assert.match(result.stderr, /Canonical staging differs: resources\/runtime\.txt/);
 });
 
 test("verified plan rejects a release target on the wrong native host", async () => {

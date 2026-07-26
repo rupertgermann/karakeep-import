@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdtemp, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -63,7 +63,12 @@ async function stagedFiles(input) {
         throw new Error(`Staged inputs must not contain symlinks: ${path.relative(input, file)}`);
       }
       if (details.isDirectory()) await visit(file);
-      else if (details.isFile()) files.set(path.relative(input, file).split(path.sep).join("/"), file);
+      else if (details.isFile()) {
+        files.set(path.relative(input, file).split(path.sep).join("/"), {
+          file,
+          mode: details.mode & 0o777,
+        });
+      }
       else throw new Error(`Unsupported staged input: ${path.relative(input, file)}`);
     }
   }
@@ -95,7 +100,7 @@ async function verifyChecksums(input) {
     if (!match || seen.has(match?.[2])) throw new Error("SHA256SUMS is malformed.");
     seen.add(match[2]);
     const file = stagedPath(input, match[2]);
-    if (files.get(match[2]) !== file || (await sha256(file)) !== match[1]) {
+    if (files.get(match[2])?.file !== file || (await sha256(file)) !== match[1]) {
       throw new Error(`Staged checksum mismatch: ${match[2]}`);
     }
   }
@@ -105,6 +110,115 @@ async function verifyChecksums(input) {
       throw new Error(`Staged file is missing from SHA256SUMS: ${relative}`);
     }
   }
+}
+
+function canonicalDifference(relative) {
+  throw new Error(`Canonical staging differs: ${relative}`);
+}
+
+async function requireCanonicalMatch(suppliedInput, canonicalInput) {
+  const supplied = await stagedTree(suppliedInput);
+  const canonical = await stagedTree(canonicalInput);
+  const paths = [...new Set([...supplied.keys(), ...canonical.keys()])].sort(
+    (left, right) => {
+      if (left === "SHA256SUMS") return 1;
+      if (right === "SHA256SUMS") return -1;
+      return left.localeCompare(right);
+    },
+  );
+  for (const relative of paths) {
+    const actual = supplied.get(relative);
+    const expected = canonical.get(relative);
+    if (!actual || !expected) canonicalDifference(relative);
+    if (actual.type !== expected.type) canonicalDifference(relative);
+    if (
+      actual.type === "file" &&
+      (await sha256(actual.file)) !== (await sha256(expected.file))
+    ) {
+      canonicalDifference(relative);
+    }
+    if (process.platform !== "win32" && actual.mode !== expected.mode) {
+      canonicalDifference(relative);
+    }
+  }
+}
+
+async function stagedTree(input) {
+  if ((await lstat(input)).isSymbolicLink()) {
+    throw new Error("Staged inputs must not contain symlinks: .");
+  }
+  const entries = new Map();
+  async function visit(directory, relative = ".") {
+    const details = await lstat(directory);
+    entries.set(relative, { type: "directory", mode: details.mode & 0o777 });
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      const child = relative === "." ? entry.name : `${relative}/${entry.name}`;
+      const childDetails = await lstat(file);
+      if (childDetails.isSymbolicLink()) {
+        throw new Error(`Staged inputs must not contain symlinks: ${child}`);
+      }
+      if (childDetails.isDirectory()) await visit(file, child);
+      else if (childDetails.isFile()) {
+        entries.set(child, {
+          type: "file",
+          file,
+          mode: childDetails.mode & 0o777,
+        });
+      } else throw new Error(`Unsupported staged input: ${child}`);
+    }
+  }
+  await visit(input);
+  return entries;
+}
+
+function verificationOutput() {
+  return path.join(root, "release-inputs", `.verify-${randomUUID()}`);
+}
+
+function safeVerificationOutput(output) {
+  const parent = path.join(root, "release-inputs");
+  return (
+    path.dirname(output) === parent &&
+    /^\.verify-[0-9a-f-]{36}$/.test(path.basename(output))
+  );
+}
+
+function rebuildFrontend() {
+  const command = process.platform === "win32" ? "npm.cmd" : "npm";
+  const result = spawnSync(command, ["run", "build"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `Could not rebuild frontend for canonical staging: ${result.stderr.trim()}`,
+    );
+  }
+}
+
+async function canonicalStaging(metadata, output) {
+  if (!safeVerificationOutput(output)) {
+    throw new Error("Canonical staging output is invalid.");
+  }
+  rebuildFrontend();
+  const result = spawnSync(
+    process.execPath,
+    [
+      path.join(root, "scripts", "prepare-release-inputs.mjs"),
+      "--target",
+      metadata.target,
+      "--output",
+      output,
+    ],
+    { cwd: root, encoding: "utf8" },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`Could not prepare canonical release inputs: ${result.stderr.trim()}`);
+  }
+  return output;
 }
 
 function nativeHost(target) {
@@ -141,6 +255,15 @@ async function verifiedPlan(options) {
   }
   const expectedHost = nativeHost(metadata.target);
   if (process.platform !== expectedHost) throw new Error(`Staged ${metadata.target} release must run on ${expectedHost}.`);
+  const canonical = verificationOutput();
+  try {
+    await canonicalStaging(metadata, canonical);
+    await requireCanonicalMatch(input, canonical);
+  } finally {
+    if (safeVerificationOutput(canonical)) {
+      await rm(canonical, { recursive: true, force: true });
+    }
+  }
   return planFor(input, metadata, options.noSign);
 }
 

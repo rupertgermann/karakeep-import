@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
   chmod,
   cp,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -820,13 +821,54 @@ async function normalizeOutput(output, epoch) {
   await visit(output);
 }
 
-function safeOutput(root, output) {
-  const resolved = path.resolve(output);
+async function outputDirectory(root, target, requestedOutput) {
+  const defaultOutput = path.join(root, "release-inputs", target);
+  const isDefault =
+    requestedOutput === undefined ||
+    path.resolve(requestedOutput) === path.resolve(defaultOutput);
+  const resolved = path.resolve(requestedOutput ?? defaultOutput);
   const relative = path.relative(path.resolve(root), resolved);
   if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("Release output must be a dedicated directory inside the checkout.");
   }
-  return resolved;
+  const protectedSegments = new Set([
+    ".git",
+    "dist",
+    "node_modules",
+    "release",
+    "src-tauri",
+    "vendor",
+  ]);
+  if (!isDefault && relative.split(path.sep).some((part) => protectedSegments.has(part))) {
+    throw new Error("Custom release output may not be inside a protected checkout path.");
+  }
+  let candidate = root;
+  for (const part of relative.split(path.sep)) {
+    try {
+      if ((await lstat(candidate)).isSymbolicLink()) {
+        throw new Error(`Release output path may not traverse a symlink: ${candidate}`);
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    candidate = path.join(candidate, part);
+  }
+  try {
+    if ((await lstat(candidate)).isSymbolicLink()) {
+      throw new Error(`Release output path may not traverse a symlink: ${candidate}`);
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  try {
+    await lstat(resolved);
+    if (!isDefault) {
+      throw new Error("Custom release output must be a new absent directory.");
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  return { output: resolved, replace: isDefault };
 }
 
 function gitState(root) {
@@ -836,7 +878,7 @@ function gitState(root) {
     { cwd: root, encoding: "utf8" },
   );
   if (status.status !== 0) {
-    return null;
+    throw new Error("Could not inspect release checkout.");
   }
   if (status.stdout.trim()) {
     throw new Error("Release checkout must be clean before metadata is generated.");
@@ -852,7 +894,12 @@ function gitState(root) {
   if (head.status !== 0 || epoch.status !== 0) {
     throw new Error("Could not resolve release commit metadata.");
   }
-  return { commit: head.stdout.trim(), sourceDateEpoch: epoch.stdout.trim() };
+  const commit = head.stdout.trim();
+  const sourceDateEpoch = epoch.stdout.trim();
+  if (!/^[a-f0-9]{40}$/.test(commit) || !/^[1-9][0-9]*$/.test(sourceDateEpoch)) {
+    throw new Error("Release commit metadata is invalid.");
+  }
+  return { commit, sourceDateEpoch };
 }
 
 async function prepare(options) {
@@ -863,24 +910,22 @@ async function prepare(options) {
   if (!target) {
     throw new Error("--target is required.");
   }
-  const output = safeOutput(
-    root,
-    options.output ?? path.join(root, "release-inputs", target),
-  );
-  const repository = gitState(root);
-  const commit = options.commit ?? repository?.commit;
-  const sourceDateEpoch = Number(
-    options["source-date-epoch"] ?? repository?.sourceDateEpoch,
-  );
-  if (!/^[a-f0-9]{40}$/.test(commit)) {
-    throw new Error("Release commit must be a full Git SHA.");
+  if (!/^[A-Za-z0-9._-]+$/.test(target)) {
+    throw new Error("Release target is invalid.");
   }
-  if (repository && commit !== repository.commit) {
+  const { output, replace } = await outputDirectory(root, target, options.output);
+  const repository = gitState(root);
+  if (options.commit && options.commit !== repository.commit) {
     throw new Error("Release commit must match the checkout HEAD.");
   }
-  if (!Number.isSafeInteger(sourceDateEpoch) || sourceDateEpoch <= 0) {
-    throw new Error("Source date epoch must be a positive integer.");
+  if (
+    options["source-date-epoch"] &&
+    options["source-date-epoch"] !== repository.sourceDateEpoch
+  ) {
+    throw new Error("Source date epoch must match the checkout HEAD.");
   }
+  const commit = repository.commit;
+  const sourceDateEpoch = Number(repository.sourceDateEpoch);
   const rustInventoryFile = path.resolve(
     options["cargo-metadata"] ??
       path.join(root, "release", "rust-dependencies.json"),
@@ -897,7 +942,9 @@ async function prepare(options) {
     nodeArchiveCache,
   );
 
-  await rm(output, { recursive: true, force: true });
+  if (replace) {
+    await rm(output, { recursive: true, force: true });
+  }
   await mkdir(output, { recursive: true });
   try {
     await validateNoSecrets([
