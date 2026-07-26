@@ -22,6 +22,10 @@ The accepted source commit and version must match the values in the staged
 `RELEASE-METADATA.json` and the signed application bundle. Recompute the DMG
 SHA-256 after signing, notarization, and stapling.
 
+The machine-readable companion uses schema version 3. Each required row and
+both native architecture columns need their own typed JSON evidence record.
+Do not reuse one command transcript or result file across assertions.
+
 ## Artifact and signing evidence
 
 Run verification against the final DMG and the application copied from that

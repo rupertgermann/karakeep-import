@@ -18,7 +18,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": 2
+      "const": 3
     },
     "target": {
       "enum": [
@@ -91,6 +91,9 @@
         "$ref": "#/$defs/signingIdentity"
       }
     },
+    "applicationPayload": {
+      "$ref": "#/$defs/passWithEvidence"
+    },
     "platforms": {
       "type": "object",
       "additionalProperties": false,
@@ -158,12 +161,14 @@
       "additionalProperties": false,
       "required": [
         "file",
-        "sha256"
+        "sha256",
+        "assertionId",
+        "platform"
       ],
       "properties": {
         "file": {
           "type": "string",
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,122}\\.json$",
           "not": {
             "pattern": "^[Aa][Cc][Cc][Ee][Pp][Tt][Aa][Nn][Cc][Ee]-[Ee][Vv][Ii][Dd][Ee][Nn][Cc][Ee]\\.[Jj][Ss][Oo][Nn]$"
           }
@@ -171,6 +176,19 @@
         "sha256": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
+        },
+        "assertionId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9:_-]{2,127}$"
+        },
+        "platform": {
+          "enum": [
+            "target-wide",
+            "macos-arm64",
+            "macos-x86_64-native",
+            "windows-10-x64",
+            "windows-11-x64"
+          ]
         }
       }
     },
@@ -179,6 +197,7 @@
       "additionalProperties": false,
       "required": [
         "scope",
+        "assertionId",
         "subject",
         "stableIdentifier",
         "certificateSha256",
@@ -189,6 +208,10 @@
         "scope": {
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+        },
+        "assertionId": {
+          "type": "string",
+          "pattern": "^signing-identity:[a-z0-9][a-z0-9-]{1,63}$"
         },
         "subject": {
           "type": "string",
@@ -234,6 +257,90 @@
           "$ref": "#/$defs/evidenceReferences"
         }
       }
+    },
+    "typedEvidenceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "target",
+        "commit",
+        "artifact",
+        "assertionId",
+        "platform",
+        "tool",
+        "checkType",
+        "status",
+        "resultSummary"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "target": {
+          "enum": [
+            "macos-universal",
+            "windows-x64"
+          ]
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "filename",
+            "size",
+            "sha256"
+          ],
+          "properties": {
+            "filename": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,191}$"
+            },
+            "size": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        "assertionId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9:_-]{2,127}$"
+        },
+        "platform": {
+          "enum": [
+            "target-wide",
+            "macos-arm64",
+            "macos-x86_64-native",
+            "windows-10-x64",
+            "windows-11-x64"
+          ]
+        },
+        "tool": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{1,63}$"
+        },
+        "checkType": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+        },
+        "status": {
+          "const": "PASS"
+        },
+        "resultSummary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\r\\n]+$"
+        }
+      }
     }
   },
   "allOf": [
@@ -249,6 +356,11 @@
         ]
       },
       "then": {
+        "not": {
+          "required": [
+            "applicationPayload"
+          ]
+        },
         "properties": {
           "platforms": {
             "required": [
@@ -271,6 +383,9 @@
         ]
       },
       "then": {
+        "required": [
+          "applicationPayload"
+        ],
         "properties": {
           "platforms": {
             "required": [

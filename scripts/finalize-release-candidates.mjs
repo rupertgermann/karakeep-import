@@ -46,6 +46,16 @@ const requiredGates = [
   "signature",
   "platform verification",
 ];
+const gateAssertionIds = {
+  "native baseline": "gate:native-baseline",
+  "clean install": "gate:clean-install",
+  "no system runtime": "gate:no-system-runtime",
+  "five-browser matrix": "gate:five-browser-matrix",
+  "X transfer": "gate:x-transfer",
+  "File transfer": "gate:file-transfer",
+  signature: "gate:signature",
+  "platform verification": "gate:platform-verification",
+};
 const requiredStagedFiles = [
   "DEPENDENCY-INVENTORY.json",
   "RELEASE-METADATA.json",
@@ -116,19 +126,228 @@ async function sha256(file) {
   return createHash("sha256").update(await readFile(file)).digest("hex");
 }
 
-async function requireArtifactMagic(file, target) {
+function boundedRange(offset, length, boundary) {
+  const limit = BigInt(boundary);
+  return length > 0n && offset <= limit && length <= limit - offset;
+}
+
+function coherentUdifChecksum(content, trailer, offset) {
+  const type = content.readUInt32BE(trailer + offset);
+  const bits = content.readUInt32BE(trailer + offset + 4);
+  return (
+    (type === 0 && bits === 0) ||
+    (type === 2 && bits === 32) ||
+    (type > 0 &&
+      type !== 2 &&
+      type <= 0xffff &&
+      bits > 0 &&
+      bits <= 1024 &&
+      bits % 8 === 0)
+  );
+}
+
+function coherentUdif(content) {
+  if (content.length < 1024) {
+    return false;
+  }
+  const trailer = content.length - 512;
+  if (
+    !content.subarray(trailer, trailer + 4).equals(Buffer.from("koly")) ||
+    content.readUInt32BE(trailer + 4) !== 4 ||
+    content.readUInt32BE(trailer + 8) !== 512
+  ) {
+    return false;
+  }
+
+  const dataOffset = content.readBigUInt64BE(trailer + 24);
+  const dataLength = content.readBigUInt64BE(trailer + 32);
+  const resourceOffset = content.readBigUInt64BE(trailer + 40);
+  const resourceLength = content.readBigUInt64BE(trailer + 48);
+  const xmlOffset = content.readBigUInt64BE(trailer + 216);
+  const xmlLength = content.readBigUInt64BE(trailer + 224);
+  if (
+    !boundedRange(dataOffset, dataLength, trailer) ||
+    !boundedRange(xmlOffset, xmlLength, trailer) ||
+    dataOffset + dataLength > xmlOffset ||
+    (resourceLength > 0n &&
+      !boundedRange(resourceOffset, resourceLength, trailer))
+  ) {
+    return false;
+  }
+
+  const segmentNumber = content.readUInt32BE(trailer + 56);
+  const segmentCount = content.readUInt32BE(trailer + 60);
+  if (
+    (segmentNumber === 0) !== (segmentCount === 0) ||
+    segmentNumber > segmentCount
+  ) {
+    return false;
+  }
+
+  const sectorCount = content.readBigUInt64BE(trailer + 492);
+  const codeSignatureOffset = content.readBigUInt64BE(trailer + 296);
+  const codeSignatureLength = content.readBigUInt64BE(trailer + 304);
+  if (
+    sectorCount === 0n ||
+    sectorCount > BigInt(Math.floor(Number.MAX_SAFE_INTEGER / 512)) ||
+    ((codeSignatureOffset === 0n) !== (codeSignatureLength === 0n)) ||
+    (codeSignatureLength > 0n &&
+      !boundedRange(codeSignatureOffset, codeSignatureLength, trailer)) ||
+    !coherentUdifChecksum(content, trailer, 80) ||
+    !coherentUdifChecksum(content, trailer, 352)
+  ) {
+    return false;
+  }
+
+  const plist = content.subarray(
+    Number(xmlOffset),
+    Number(xmlOffset + xmlLength),
+  );
+  let plistText;
+  try {
+    plistText = new TextDecoder("utf-8", { fatal: true })
+      .decode(plist)
+      .trimStart();
+  } catch {
+    return false;
+  }
+  return (
+    (plistText.startsWith("<?xml") || plistText.startsWith("<plist")) &&
+    plistText.includes("<plist") &&
+    plistText.includes("<key>resource-fork</key>") &&
+    plistText.includes("<key>blkx</key>")
+  );
+}
+
+function powerOfTwo(value) {
+  return value > 0 && (value & (value - 1)) === 0;
+}
+
+function coherentPeNsis(content) {
+  if (
+    content.length < 512 ||
+    !content.subarray(0, 2).equals(Buffer.from("MZ"))
+  ) {
+    return false;
+  }
+  const peOffset = content.readUInt32LE(0x3c);
+  if (
+    peOffset < 0x40 ||
+    peOffset > content.length - 24 ||
+    !content.subarray(peOffset, peOffset + 4).equals(Buffer.from("PE\0\0"))
+  ) {
+    return false;
+  }
+
+  const coffOffset = peOffset + 4;
+  const numberOfSections = content.readUInt16LE(coffOffset + 2);
+  const optionalSize = content.readUInt16LE(coffOffset + 16);
+  const characteristics = content.readUInt16LE(coffOffset + 18);
+  const optionalOffset = coffOffset + 20;
+  const sectionTable = optionalOffset + optionalSize;
+  if (
+    content.readUInt16LE(coffOffset) !== 0x14c ||
+    (characteristics & 0x0002) === 0 ||
+    numberOfSections === 0 ||
+    numberOfSections > 96 ||
+    optionalSize < 96 ||
+    sectionTable > content.length - numberOfSections * 40 ||
+    content.readUInt16LE(optionalOffset) !== 0x10b
+  ) {
+    return false;
+  }
+
+  const sectionAlignment = content.readUInt32LE(optionalOffset + 32);
+  const fileAlignment = content.readUInt32LE(optionalOffset + 36);
+  const sizeOfImage = content.readUInt32LE(optionalOffset + 56);
+  const sizeOfHeaders = content.readUInt32LE(optionalOffset + 60);
+  const directoryCount = content.readUInt32LE(optionalOffset + 92);
+  if (
+    !powerOfTwo(fileAlignment) ||
+    fileAlignment < 512 ||
+    fileAlignment > 65536 ||
+    sectionAlignment < fileAlignment ||
+    sizeOfHeaders % fileAlignment !== 0 ||
+    sizeOfHeaders < sectionTable + numberOfSections * 40 ||
+    sizeOfHeaders > content.length ||
+    sizeOfImage <= sizeOfHeaders ||
+    directoryCount > 16 ||
+    optionalSize < 96 + directoryCount * 8
+  ) {
+    return false;
+  }
+
+  let rawEnd = sizeOfHeaders;
+  let previousVirtualAddress = 0;
+  for (let index = 0; index < numberOfSections; index += 1) {
+    const section = sectionTable + index * 40;
+    const virtualSize = content.readUInt32LE(section + 8);
+    const virtualAddress = content.readUInt32LE(section + 12);
+    const rawSize = content.readUInt32LE(section + 16);
+    const rawOffset = content.readUInt32LE(section + 20);
+    if (
+      virtualSize === 0 ||
+      virtualAddress < previousVirtualAddress ||
+      virtualAddress % sectionAlignment !== 0 ||
+      virtualAddress + Math.max(virtualSize, rawSize) > sizeOfImage ||
+      (rawSize > 0 &&
+        (rawSize % fileAlignment !== 0 ||
+          rawOffset < sizeOfHeaders ||
+          rawOffset % fileAlignment !== 0 ||
+          rawOffset > content.length - rawSize))
+    ) {
+      return false;
+    }
+    previousVirtualAddress = virtualAddress;
+    rawEnd = Math.max(rawEnd, rawOffset + rawSize);
+  }
+
+  let overlayBoundary = content.length;
+  if (directoryCount > 4) {
+    const certificateOffset = content.readUInt32LE(optionalOffset + 128);
+    const certificateLength = content.readUInt32LE(optionalOffset + 132);
+    if (
+      (certificateOffset === 0) !== (certificateLength === 0) ||
+      (certificateLength > 0 &&
+        (certificateOffset < rawEnd + 28 ||
+          certificateOffset > content.length - certificateLength))
+    ) {
+      return false;
+    }
+    if (certificateLength > 0) {
+      overlayBoundary = certificateOffset;
+    }
+  }
+  const headerOffset = rawEnd;
+  if (
+    headerOffset > overlayBoundary - 28 ||
+    content.readUInt32LE(headerOffset + 4) !== 0xdeadbeef ||
+    !content
+      .subarray(headerOffset + 8, headerOffset + 20)
+      .equals(Buffer.from("NullsoftInst"))
+  ) {
+    return false;
+  }
+  const flags = content.readUInt32LE(headerOffset);
+  const headerLength = content.readUInt32LE(headerOffset + 20);
+  const followingLength = content.readUInt32LE(headerOffset + 24);
+  return (
+    (flags & ~0xf) === 0 &&
+    headerLength > 0 &&
+    followingLength >= 28 &&
+    followingLength <= overlayBoundary - headerOffset
+  );
+}
+
+async function requireArtifactStructure(file, target) {
   const content = await readFile(file);
   const valid =
     target === "macos-universal"
-      ? content.length >= 512 &&
-        content.subarray(content.length - 512, content.length - 508).equals(
-          Buffer.from("koly"),
-        )
-      : content.length >= 2 &&
-        content.subarray(0, 2).equals(Buffer.from("MZ"));
+      ? coherentUdif(content)
+      : coherentPeNsis(content);
   if (!valid) {
     throw new Error(
-      `${target} signed artifact does not have the required native installer format.`,
+      `${target} signed artifact does not have a coherent native installer structure.`,
     );
   }
 }
@@ -297,6 +516,7 @@ function safeEvidenceFilename(filename, target) {
     typeof filename !== "string" ||
     filename.length > 128 ||
     !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(filename) ||
+    !filename.toLowerCase().endsWith(".json") ||
     path.posix.basename(filename) !== filename ||
     path.win32.basename(filename) !== filename ||
     privateLooking.test(filename) ||
@@ -307,14 +527,21 @@ function safeEvidenceFilename(filename, target) {
   return filename;
 }
 
-function collectEvidenceReferences(references, target, description, collected) {
+function collectEvidenceReferences(
+  references,
+  target,
+  description,
+  expected,
+  collected,
+) {
   if (!Array.isArray(references) || references.length === 0) {
     throw new Error(`${target} evidence ${description} requires evidence references.`);
   }
+  const coveredPlatforms = new Set();
   for (const reference of references) {
     rejectUnsupportedProperties(
       reference,
-      ["file", "sha256"],
+      ["file", "sha256", "assertionId", "platform"],
       `${target} evidence ${description} reference`,
     );
     const filename = safeEvidenceFilename(reference?.file, target);
@@ -326,17 +553,48 @@ function collectEvidenceReferences(references, target, description, collected) {
         `${target} evidence ${description} reference has an invalid SHA-256.`,
       );
     }
-    const previous = collected.get(filename);
-    if (previous && previous !== reference.sha256) {
+    if (reference.assertionId !== expected.assertionId) {
       throw new Error(
-        `${target} evidence reference has conflicting SHA-256 values: ${filename}`,
+        `${target} evidence ${description} reference assertion does not match.`,
       );
     }
-    collected.set(filename, reference.sha256);
+    if (!expected.platforms.includes(reference.platform)) {
+      throw new Error(
+        `${target} evidence ${description} reference platform does not match.`,
+      );
+    }
+    if (
+      [...collected.keys()].some(
+        (collectedFilename) =>
+          collectedFilename.toLowerCase() === filename.toLowerCase(),
+      )
+    ) {
+      throw new Error(
+        `${target} evidence file is reused across assertions: ${filename}`,
+      );
+    }
+    coveredPlatforms.add(reference.platform);
+    collected.set(filename, {
+      ...reference,
+      checkType: expected.checkType,
+    });
+  }
+  if (
+    expected.platforms.some((platform) => !coveredPlatforms.has(platform))
+  ) {
+    throw new Error(
+      `${target} evidence ${description} does not cover every required platform.`,
+    );
   }
 }
 
-function validatePassWithEvidence(value, target, description, collected) {
+function validatePassWithEvidence(
+  value,
+  target,
+  description,
+  expected,
+  collected,
+) {
   rejectUnsupportedProperties(
     value,
     ["status", "evidence"],
@@ -349,6 +607,7 @@ function validatePassWithEvidence(value, target, description, collected) {
     value.evidence,
     target,
     description,
+    expected,
     collected,
   );
 }
@@ -358,6 +617,7 @@ function validateSigningIdentity(identity, target, collected) {
     identity,
     [
       "scope",
+      "assertionId",
       "subject",
       "stableIdentifier",
       "certificateSha256",
@@ -371,6 +631,12 @@ function validateSigningIdentity(identity, target, collected) {
     !/^[a-z0-9][a-z0-9-]{1,63}$/.test(identity.scope)
   ) {
     throw new Error(`${target} evidence signing identity scope is invalid.`);
+  }
+  const assertionId = `signing-identity:${identity.scope}`;
+  if (identity.assertionId !== assertionId) {
+    throw new Error(
+      `${target} evidence signing identity assertion does not match its scope.`,
+    );
   }
   if (
     typeof identity.subject !== "string" ||
@@ -409,6 +675,11 @@ function validateSigningIdentity(identity, target, collected) {
     identity.evidence,
     target,
     "signing identity",
+    {
+      assertionId,
+      platforms: ["target-wide"],
+      checkType: "signing-identity",
+    },
     collected,
   );
 }
@@ -444,10 +715,11 @@ function validateEvidence(evidence, expected) {
       "signingIdentities",
       "platforms",
       "gates",
+      ...(expected.target === "windows-x64" ? ["applicationPayload"] : []),
     ],
     `${expected.target} evidence root`,
   );
-  if (evidence.schemaVersion !== 2) {
+  if (evidence.schemaVersion !== 3) {
     throw new Error(`${expected.target} evidence has an unsupported schema.`);
   }
   if (evidence.target !== expected.target) {
@@ -497,6 +769,11 @@ function validateEvidence(evidence, expected) {
     evidence.checkout,
     expected.target,
     "clean checkout",
+    {
+      assertionId: "checkout:clean",
+      platforms: ["target-wide"],
+      checkType: "clean-checkout",
+    },
     collected,
   );
   validateSigningIdentities(
@@ -504,6 +781,19 @@ function validateEvidence(evidence, expected) {
     expected.target,
     collected,
   );
+  if (expected.target === "windows-x64") {
+    validatePassWithEvidence(
+      evidence.applicationPayload,
+      expected.target,
+      "x64 application payload",
+      {
+        assertionId: "application-payload:windows-x64",
+        platforms: ["target-wide"],
+        checkType: "x64-application-payload",
+      },
+      collected,
+    );
+  }
   rejectUnsupportedProperties(
     evidence.platforms,
     expected.platforms,
@@ -523,6 +813,11 @@ function validateEvidence(evidence, expected) {
       evidence.platforms[platform],
       expected.target,
       `platform ${platform}`,
+      {
+        assertionId: `platform:${platform}`,
+        platforms: [platform],
+        checkType: "native-platform",
+      },
       collected,
     );
   }
@@ -539,26 +834,127 @@ function validateEvidence(evidence, expected) {
     throw new Error(`${expected.target} evidence gates do not match the required set.`);
   }
   for (const gate of requiredGates) {
+    const assertionId = gateAssertionIds[gate];
     validatePassWithEvidence(
       evidence.gates[gate],
       expected.target,
       `gate ${gate}`,
+      {
+        assertionId,
+        platforms: gate === "signature" ? ["target-wide"] : expected.platforms,
+        checkType: assertionId.slice("gate:".length),
+      },
       collected,
     );
   }
   return collected;
 }
 
-async function verifyEvidenceFiles(evidenceFile, target, references) {
+function validateTypedEvidenceRecord(record, expected) {
+  rejectUnsupportedProperties(
+    record,
+    [
+      "schemaVersion",
+      "target",
+      "commit",
+      "artifact",
+      "assertionId",
+      "platform",
+      "tool",
+      "checkType",
+      "status",
+      "resultSummary",
+    ],
+    `${expected.target} typed evidence record`,
+  );
+  if (record?.schemaVersion !== 1) {
+    throw new Error(
+      `${expected.target} referenced evidence ${expected.filename} is not a typed evidence record.`,
+    );
+  }
+  rejectUnsupportedProperties(
+    record.artifact,
+    ["filename", "size", "sha256"],
+    `${expected.target} typed evidence artifact`,
+  );
+  if (
+    record.target !== expected.target ||
+    record.commit !== expected.commit ||
+    !isDeepStrictEqual(record.artifact, expected.artifact)
+  ) {
+    throw new Error(
+      `${expected.target} typed evidence record release or artifact binding does not match: ${expected.filename}`,
+    );
+  }
+  if (
+    record.assertionId !== expected.assertionId ||
+    record.platform !== expected.platform
+  ) {
+    throw new Error(
+      `${expected.target} typed evidence record assertion or platform does not match: ${expected.filename}`,
+    );
+  }
+  if (
+    typeof record.tool !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._+-]{1,63}$/.test(record.tool) ||
+    record.checkType !== expected.checkType ||
+    record.status !== "PASS"
+  ) {
+    throw new Error(
+      `${expected.target} typed evidence record check did not PASS: ${expected.filename}`,
+    );
+  }
+  if (
+    typeof record.resultSummary !== "string" ||
+    record.resultSummary.trim() !== record.resultSummary ||
+    record.resultSummary.length === 0 ||
+    record.resultSummary.length > 512 ||
+    /[\r\n]/.test(record.resultSummary) ||
+    /(?:api[-_ ]?key|authorization|bearer|cookie|credential|email|password|private[-_ ]?key|secret|session)/i.test(
+      record.resultSummary,
+    ) ||
+    /(?:\/Users\/|\/home\/|[A-Za-z]:\\Users\\|https?:\/\/|file:\/\/|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/i.test(
+      record.resultSummary,
+    )
+  ) {
+    throw new Error(
+      `${expected.target} typed evidence record result summary is not sanitized: ${expected.filename}`,
+    );
+  }
+}
+
+async function verifyEvidenceFiles(
+  evidenceFile,
+  target,
+  references,
+  binding,
+) {
   const verified = [];
-  for (const [filename, digest] of references) {
+  for (const [filename, reference] of references) {
     const file = path.join(path.dirname(evidenceFile), filename);
     await requireFile(file, `${target} referenced evidence ${filename}`);
     const actual = await sha256(file);
-    if (actual !== digest) {
+    if (actual !== reference.sha256) {
       throw new Error(`${target} referenced evidence SHA-256 mismatch: ${filename}`);
     }
-    verified.push({ filename, file, sha256: digest });
+    let record;
+    try {
+      record = JSON.parse(await readFile(file, "utf8"));
+    } catch {
+      throw new Error(
+        `${target} referenced evidence ${filename} is not a typed evidence record.`,
+      );
+    }
+    validateTypedEvidenceRecord(record, {
+      target,
+      commit: binding.commit,
+      artifact: binding.artifact,
+      filename,
+      assertionId: reference.assertionId,
+      platform: reference.platform,
+      checkType: reference.checkType,
+    });
+    verified.push({ filename, file, sha256: reference.sha256 });
   }
   return verified;
 }
@@ -595,7 +991,7 @@ async function validateTarget(options, target, commit) {
     artifact,
     `${target.name} signed artifact`,
   );
-  await requireArtifactMagic(artifact, target.name);
+  await requireArtifactStructure(artifact, target.name);
   const artifactSha256 = await sha256(artifact);
   const evidenceFile = requireOption(options, target.evidenceOption);
   await requireFile(evidenceFile, `${target.name} acceptance evidence`);
@@ -616,6 +1012,14 @@ async function validateTarget(options, target, commit) {
     evidenceFile,
     target.name,
     references,
+    {
+      commit,
+      artifact: {
+        filename: path.basename(artifact),
+        size: artifactDetails.size,
+        sha256: artifactSha256,
+      },
+    },
   );
 
   return {

@@ -22,6 +22,14 @@ The accepted source commit and version must match the values in the staged
 `RELEASE-METADATA.json`, installer metadata, and installed application.
 Recompute the installer SHA-256 after Authenticode signing and timestamping.
 
+The pinned Tauri/NSIS installer bootstrapper is a PE32 i386 executable. That is
+the expected installer structure and does not make the installed application
+32-bit. The machine-readable schema version 3 record separately requires the
+typed `application-payload:windows-x64` assertion for the installed application
+and bundled runtime payload. Each required row and both Windows baseline
+columns need distinct typed JSON evidence; do not reuse one transcript across
+assertions.
+
 ## Artifact and Authenticode evidence
 
 Run verification against the final NSIS installer and every executable shipped
