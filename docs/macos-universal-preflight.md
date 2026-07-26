@@ -7,7 +7,7 @@ and the complete supported-browser matrix remain release gates.
 
 ## Tested source and host
 
-- Implementation commit: `8cdffb6e1363836111c0b91a3fc57f335316f828`
+- Implementation commit: `d9cc4ee80956f9826cf70ab0e5578bbeb2ba9365`
 - Branch: `feat/karakeep-transfer-mvp`
 - Host: macOS 14.8.7 on Apple Silicon
 - Rust: 1.93.0
@@ -15,7 +15,7 @@ and the complete supported-browser matrix remain release gates.
 - Bundled private Node.js: 22.20.0
 - Bundled Field Theory: 1.3.22
 
-The build used the target-specific command generated in
+The build used only local inputs and the target-specific command generated in
 `release-inputs/macos-universal/NATIVE-BUILD-COMMAND.txt`:
 
 ```bash
@@ -34,12 +34,12 @@ DMG script in the controlled local macOS environment completed successfully.
 | Declared macOS baseline | PASS | Both Mach-O slices report `minos 12.0`. |
 | Universal DMG integrity | PASS | `hdiutil verify` reported a valid disk image. |
 | DMG installation layout | PASS | A read-only mount contained `Karakeep Transfer.app` and the `/Applications` link. |
-| Isolated application launch | PASS | The app copied from the mounted DMG remained running when opened through LaunchServices. |
-| Guided first screen | PASS | The packaged app showed the ready desktop bridge and Step 1, **Connect Karakeep**, rather than stopping at an intro-only screen. |
+| Isolated application launch | PASS | LaunchServices accepted and opened the final local app bundle. |
+| Guided first screen | PASS | The retained packaged visual preflight and final UI tests show the ready desktop bridge and Step 1, **Connect Karakeep**, rather than stopping at an intro-only screen. |
 | Private runtime packaging | PASS | The app contains arm64 and x86-64 Node executables, Field Theory, its bridge, checksums, licenses, and notices. |
-| No separately installed Node requirement | PASS | With `PATH=/nonexistent`, the packaged arm64 Node executable started the packaged bridge and returned a protocol-v1 browser discovery result. |
+| No separately installed Node requirement | PASS | With `PATH=/nonexistent` and an empty home directory, the packaged arm64 Node executable started the packaged bridge and returned a protocol-v1 browser discovery result. |
 | Browser/profile discovery | PASS | The packaged bridge discovered three installed supported browsers and seven profiles; names and paths were not retained. |
-| Intel slice execution on this host | PASS | `arch -x86_64` kept the universal app running under Rosetta. This is not native Intel-host evidence. |
+| Intel runtime execution on this host | PASS | `arch -x86_64` ran the final packaged x86-64 Node runtime under Rosetta and reported version 22.20.0. This is not native Intel-host evidence. |
 | Developer ID signature | FAIL | `codesign` reported an ad-hoc linker signature, no Team Identifier, and no sealed resources. The local keychain contains no valid code-signing identity. |
 | Gatekeeper execution assessment | FAIL | `spctl` did not accept the unsigned app. |
 | Apple notarization and stapling | UNAVAILABLE | Notarization cannot proceed without a Developer ID identity and notarization credentials. |
@@ -51,7 +51,7 @@ DMG script in the controlled local macOS environment completed successfully.
 The unsigned DMG SHA-256 was:
 
 ```text
-d5e77db6a4991ef8ce5d290711f85128e73b4f2a046ca81880c7a9cd612fadb0
+3ed13b525a7d31411f366941a52b5601f8fc7599dd9b5632a3c5a354ad5d082e
 ```
 
 That checksum identifies only this unsigned development artifact. It must not
