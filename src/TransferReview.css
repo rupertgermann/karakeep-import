@@ -173,6 +173,45 @@
   transform: translate(-50%, -50%);
 }
 
+.transfer-review__options {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 0 1.25rem;
+  padding: 1rem 1.25rem 1.25rem;
+  border: 1px solid #cdd6cb;
+  border-radius: 0.75rem;
+}
+
+.transfer-review__options legend {
+  padding: 0 0.4rem;
+  font-weight: 600;
+}
+
+.transfer-review__options label {
+  font-size: 0.95rem;
+}
+
+.transfer-review__options input[type="text"],
+.transfer-review__options input[type="number"],
+.transfer-review__options select {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #cdd6cb;
+  border-radius: 0.5rem;
+  background: #fff;
+  font: inherit;
+}
+
+.transfer-review__option {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.transfer-review__options:disabled {
+  opacity: 0.6;
+}
+
 @media (max-width: 620px) {
   .transfer-review {
     border-radius: 1.25rem;

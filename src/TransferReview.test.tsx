@@ -2,10 +2,11 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import TransferReview from "./TransferReview";
-import type {
-  TransferPreview,
-  TransferProgress,
-  TransferResult,
+import {
+  defaultTransferOptions,
+  type TransferPreview,
+  type TransferProgress,
+  type TransferResult,
 } from "./workflow";
 
 const preview: TransferPreview = {
@@ -40,6 +41,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -55,6 +58,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -70,6 +75,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -85,6 +92,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={{ ...preview, folders: [] }}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -99,6 +108,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={onChooseAnotherSource}
       />,
@@ -117,6 +128,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={onStart}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -132,6 +145,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -148,6 +163,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -162,6 +179,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -178,6 +197,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -194,6 +215,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={vi.fn()}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -211,6 +234,8 @@ describe("TransferReview", () => {
       <TransferReview
         phase="preview"
         preview={preview}
+        options={defaultTransferOptions}
+        onOptionsChange={vi.fn()}
         onStart={onStart}
         onChooseAnotherSource={vi.fn()}
       />,
@@ -333,5 +358,103 @@ describe("TransferReview", () => {
     );
 
     expect(onChooseAnotherSource).toHaveBeenCalledOnce();
+  });
+});
+
+describe("TransferReview transfer options", () => {
+  function renderOptions(
+    options = defaultTransferOptions,
+    onOptionsChange = vi.fn(),
+  ) {
+    render(
+      <TransferReview
+        phase="preview"
+        preview={{ ...preview, preservedTimestamps: 9 }}
+        options={options}
+        onOptionsChange={onOptionsChange}
+        onStart={vi.fn()}
+        onChooseAnotherSource={vi.fn()}
+      />,
+    );
+    return onOptionsChange;
+  }
+
+  it("reports how many pending records keep their source timestamp", () => {
+    renderOptions();
+
+    expect(screen.getByLabelText("Transfer summary")).toHaveTextContent(
+      "Timestamps preserved9",
+    );
+  });
+
+  it.each([
+    ["Attach source tags", "includeDefaultTags"],
+    ["Attach tags from the export", "includeExportTags"],
+    ["Include source titles", "includeTitles"],
+    ["Include source notes", "includeNotes"],
+  ])("suppresses %s independently", (label, key) => {
+    const onOptionsChange = renderOptions();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: label }));
+
+    expect(onOptionsChange).toHaveBeenCalledWith({
+      ...defaultTransferOptions,
+      [key]: false,
+    });
+  });
+
+  it("collects extra tags once the field is left", () => {
+    const onOptionsChange = renderOptions();
+    const field = screen.getByLabelText("Extra tags");
+
+    fireEvent.change(field, { target: { value: " Imported , , archive " } });
+    expect(onOptionsChange).not.toHaveBeenCalled();
+    fireEvent.blur(field);
+
+    expect(onOptionsChange).toHaveBeenCalledWith({
+      ...defaultTransferOptions,
+      extraTags: ["Imported", "archive"],
+    });
+  });
+
+  it("chooses the source field that becomes the creation date", () => {
+    const onOptionsChange = renderOptions();
+
+    fireEvent.change(screen.getByLabelText("Creation date"), {
+      target: { value: "bookmarkedAt" },
+    });
+
+    expect(onOptionsChange).toHaveBeenCalledWith({
+      ...defaultTransferOptions,
+      timestampField: "bookmarkedAt",
+    });
+  });
+
+  it("caps the run at a positive limit and treats anything else as uncapped", () => {
+    const onOptionsChange = renderOptions();
+    const field = screen.getByLabelText("Limit this run to");
+
+    fireEvent.change(field, { target: { value: "10" } });
+    fireEvent.change(field, { target: { value: "0" } });
+
+    expect(onOptionsChange.mock.calls.map(([options]) => options.limit)).toEqual(
+      [10, null],
+    );
+  });
+
+  it("locks the options while a changed preview is being prepared", () => {
+    render(
+      <TransferReview
+        phase="preview"
+        preview={preview}
+        options={defaultTransferOptions}
+        optionsBusy
+        onOptionsChange={vi.fn()}
+        onStart={vi.fn()}
+        onChooseAnotherSource={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("Extra tags")).toBeDisabled();
   });
 });

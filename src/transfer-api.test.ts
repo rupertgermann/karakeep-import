@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { defaultTransferOptions } from "./workflow";
+
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   listen: vi.fn(),
@@ -54,14 +56,16 @@ describe("transfer desktop API", () => {
   ])("previews the $label through one command", async ({ source }) => {
     mocks.invoke.mockResolvedValue(preview);
 
-    const actual = await transferApi.previewTransfer(source);
+    const actual = await transferApi.previewTransfer(source, defaultTransferOptions);
 
     expect({
       actual,
       invokeCalls: mocks.invoke.mock.calls,
     }).toEqual({
       actual: preview,
-      invokeCalls: [["preview_transfer", { source }]],
+      invokeCalls: [
+        ["preview_transfer", { source, options: defaultTransferOptions }],
+      ],
     });
   });
 
@@ -78,6 +82,7 @@ describe("transfer desktop API", () => {
     const request = {
       deliveryId: "delivery-1",
       source: { kind: "x" as const },
+      options: defaultTransferOptions,
     };
 
     const cleanup = await transferApi.startDelivery(request, vi.fn());
@@ -108,6 +113,7 @@ describe("transfer desktop API", () => {
           path: "/private/selected/bookmarks.jsonl",
           format: "fieldTheoryJsonl",
         },
+        options: defaultTransferOptions,
       },
       vi.fn(),
     );
@@ -121,6 +127,7 @@ describe("transfer desktop API", () => {
           path: "/private/selected/bookmarks.jsonl",
           format: "fieldTheoryJsonl",
         },
+        options: defaultTransferOptions,
       },
     });
   });
@@ -134,7 +141,11 @@ describe("transfer desktop API", () => {
     mocks.invoke.mockResolvedValue(undefined);
     const onEvent = vi.fn();
     await transferApi.startDelivery(
-      { deliveryId: "delivery-filtered", source: { kind: "x" } },
+      {
+        deliveryId: "delivery-filtered",
+        source: { kind: "x" },
+        options: defaultTransferOptions,
+      },
       onEvent,
     );
 
@@ -179,7 +190,11 @@ describe("transfer desktop API", () => {
     mocks.invoke.mockResolvedValue(undefined);
     const events: DeliveryEvent[] = [];
     await transferApi.startDelivery(
-      { deliveryId: "delivery-safe", source: { kind: "x" } },
+      {
+        deliveryId: "delivery-safe",
+        source: { kind: "x" },
+        options: defaultTransferOptions,
+      },
       (event) => events.push(event),
     );
 
@@ -302,7 +317,11 @@ describe("transfer desktop API", () => {
     mocks.invoke.mockResolvedValue(undefined);
     const onEvent = vi.fn();
     await transferApi.startDelivery(
-      { deliveryId: "delivery-invalid", source: { kind: "x" } },
+      {
+        deliveryId: "delivery-invalid",
+        source: { kind: "x" },
+        options: defaultTransferOptions,
+      },
       onEvent,
     );
 
@@ -353,7 +372,11 @@ describe("transfer desktop API", () => {
     mocks.invoke.mockResolvedValue(undefined);
     const onEvent = vi.fn();
     await transferApi.startDelivery(
-      { deliveryId: "delivery-error", source: { kind: "x" } },
+      {
+        deliveryId: "delivery-error",
+        source: { kind: "x" },
+        options: defaultTransferOptions,
+      },
       onEvent,
     );
 
@@ -399,6 +422,7 @@ describe("transfer desktop API", () => {
         {
           deliveryId: "delivery-error",
           source: { kind: "x" },
+          options: defaultTransferOptions,
         },
         vi.fn(),
       ),

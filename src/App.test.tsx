@@ -7,7 +7,11 @@ import type {
   FileSourceApi,
   XAcquisitionApi,
 } from "./desktop-api";
-import type { SettingsApi } from "./settings-api";
+import {
+  DEFAULT_TRANSFER_PREFERENCES,
+  type SettingsApi,
+} from "./settings-api";
+import { defaultTransferOptions } from "./workflow";
 import type { DeliveryEvent, TransferApi } from "./transfer-api";
 
 type AppApi = DesktopApi & FileSourceApi;
@@ -22,6 +26,12 @@ const rememberedDestination = {
 
 function settingsApi(): SettingsApi {
   return {
+    transferPreferences: vi
+      .fn()
+      .mockResolvedValue(DEFAULT_TRANSFER_PREFERENCES),
+    saveTransferPreferences: vi
+      .fn()
+      .mockImplementation((settings) => Promise.resolve(settings)),
     inspectPrivateData: vi.fn().mockResolvedValue({
       dataDirectory: "/Application Support/Karakeep Transfer",
       snapshotBytes: 0,
@@ -233,6 +243,101 @@ describe("Karakeep Transfer shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("re-previews and delivers with a changed transfer option", async () => {
+    const filePreview = {
+      format: "fieldTheoryJsonl" as const,
+      bookmarks: [
+        {
+          sourceId: "1",
+          url: "https://x.com/example/status/1",
+          title: "Saved post",
+          note: "Post text",
+          createdAt: "2024-01-02T03:04:05Z",
+          tags: ["Reading"],
+          folders: ["Reading"],
+        },
+      ],
+    };
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        selectFileSource: vi
+          .fn()
+          .mockResolvedValue("/private/selected/bookmarks.jsonl"),
+        previewFileSource: vi.fn().mockResolvedValue(filePreview),
+      },
+    );
+    const destination = {
+      serverUrl: rememberedDestination.serverUrl,
+      userId: rememberedDestination.userId,
+      userName: rememberedDestination.displayName,
+    };
+    const deliveryApi = transferApi({
+      previewTransfer: vi
+        .fn()
+        .mockImplementation(async (_source, options) => ({
+          approvalId: options.limit === 1 ? "file-approval-2" : "file-approval-1",
+          total: 3,
+          pending: options.limit === 1 ? 1 : 3,
+          previouslyDelivered: 0,
+          folders: ["Reading"],
+          destination,
+        })),
+      startDelivery: vi.fn().mockResolvedValue(() => {}),
+    });
+
+    render(
+      <App
+        desktopApi={api}
+        transferApi={deliveryApi}
+        createDeliveryId={() => "delivery-limited"}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use a bookmark file" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose and preview file" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue with 1 bookmark" }),
+    );
+    await screen.findByRole("heading", { name: "Review this transfer" });
+
+    fireEvent.change(screen.getByLabelText("Limit this run to"), {
+      target: { value: "1" },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Transfer summary")).toHaveTextContent(
+        "Pending1",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start transfer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm transfer" }));
+
+    await waitFor(() =>
+      expect(deliveryApi.startDelivery).toHaveBeenCalledWith(
+        {
+          approvalId: "file-approval-2",
+          deliveryId: "delivery-limited",
+          source: {
+            kind: "file",
+            path: "/private/selected/bookmarks.jsonl",
+            format: "fieldTheoryJsonl",
+          },
+          options: { ...defaultTransferOptions, limit: 1 },
+        },
+        expect.any(Function),
+      ),
+    );
+  });
+
   it("previews and delivers a selected file through the guided transfer", async () => {
     const filePreview = {
       format: "fieldTheoryJsonl" as const,
@@ -305,11 +410,14 @@ describe("Karakeep Transfer shell", () => {
     expect(
       await screen.findByRole("heading", { name: "Review this transfer" }),
     ).toBeInTheDocument();
-    expect(deliveryApi.previewTransfer).toHaveBeenCalledWith({
-      kind: "file",
-      path: "/private/selected/bookmarks.jsonl",
-      format: "fieldTheoryJsonl",
-    });
+    expect(deliveryApi.previewTransfer).toHaveBeenCalledWith(
+      {
+        kind: "file",
+        path: "/private/selected/bookmarks.jsonl",
+        format: "fieldTheoryJsonl",
+      },
+      defaultTransferOptions,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Start transfer" }));
     fireEvent.click(
@@ -325,6 +433,7 @@ describe("Karakeep Transfer shell", () => {
             path: "/private/selected/bookmarks.jsonl",
             format: "fieldTheoryJsonl",
           },
+          options: defaultTransferOptions,
         },
         expect.any(Function),
       ),
@@ -1183,6 +1292,7 @@ describe("Karakeep Transfer shell", () => {
         {
           deliveryId: "delivery-x",
           source: { kind: "x" },
+          options: defaultTransferOptions,
         },
         expect.any(Function),
       ),

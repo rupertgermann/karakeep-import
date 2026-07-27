@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import Settings from "./Settings";
 import {
+  DEFAULT_TRANSFER_PREFERENCES,
   DELETE_LOCAL_TRANSFER_DATA,
   FORGET_KARAKEEP_CONNECTION,
   REPLACE_X_SOURCE,
@@ -33,6 +34,12 @@ const diagnostics: DiagnosticsExport = {
 
 function createSettingsApi(): SettingsApi {
   return {
+    transferPreferences: vi
+      .fn()
+      .mockResolvedValue(DEFAULT_TRANSFER_PREFERENCES),
+    saveTransferPreferences: vi
+      .fn()
+      .mockImplementation((settings) => Promise.resolve(settings)),
     inspectPrivateData: vi.fn().mockResolvedValue({
       dataDirectory: "/Application Support/Karakeep Transfer",
       snapshotBytes: 1_024,
@@ -378,6 +385,115 @@ describe("Settings", () => {
     ).toHaveAttribute(
       "href",
       "https://github.com/rupertgermann/karakeep-import/releases/latest",
+    );
+  });
+});
+
+describe("Settings source tags and delivery tuning", () => {
+  it("shows no selected source tag until one is chosen", async () => {
+    const api = createSettingsApi();
+    render(<Settings api={api} />);
+
+    const twitter = await screen.findByRole("checkbox", {
+      name: "twitter, for X bookmarks",
+    });
+
+    expect(twitter).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", {
+        name: "fieldtheory, the internal acquisition name",
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("checkbox", { name: "chrome, for Chrome bookmark files" }),
+    ).not.toBeChecked();
+  });
+
+  it("saves a chosen source tag", async () => {
+    const api = createSettingsApi();
+    render(<Settings api={api} />);
+
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: "fieldtheory, the internal acquisition name",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.saveTransferPreferences).toHaveBeenCalledWith({
+        ...DEFAULT_TRANSFER_PREFERENCES,
+        defaultTags: {
+          ...DEFAULT_TRANSFER_PREFERENCES.defaultTags,
+          fieldTheory: true,
+        },
+      }),
+    );
+  });
+
+  it("shows the shipped delivery tuning and saves a change", async () => {
+    const api = createSettingsApi();
+    render(<Settings api={api} />);
+
+    expect(await screen.findByLabelText("Workers")).toHaveValue(4);
+    expect(screen.getByLabelText("Requests per second")).toHaveValue(4);
+    expect(screen.getByLabelText("Request timeout in seconds")).toHaveValue(20);
+    expect(screen.getByLabelText("Maximum retries")).toHaveValue(5);
+
+    fireEvent.change(screen.getByLabelText("Workers"), {
+      target: { value: "2" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save delivery tuning" }),
+    );
+
+    await waitFor(() =>
+      expect(api.saveTransferPreferences).toHaveBeenCalledWith({
+        ...DEFAULT_TRANSFER_PREFERENCES,
+        deliveryTuning: {
+          ...DEFAULT_TRANSFER_PREFERENCES.deliveryTuning,
+          workers: 2,
+        },
+      }),
+    );
+  });
+
+  it("rejects out of range tuning without storing it", async () => {
+    const api = createSettingsApi();
+    render(<Settings api={api} />);
+    const workers = await screen.findByLabelText("Workers");
+
+    fireEvent.change(workers, { target: { value: "0" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save delivery tuning" }),
+    );
+    fireEvent.submit(workers.closest("form") as HTMLFormElement);
+
+    expect(workers).toBeInvalid();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "must be greater than zero",
+    );
+    expect(api.saveTransferPreferences).not.toHaveBeenCalled();
+  });
+
+  it("accepts zero retries", async () => {
+    const api = createSettingsApi();
+    render(<Settings api={api} />);
+
+    fireEvent.change(await screen.findByLabelText("Maximum retries"), {
+      target: { value: "0" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Save delivery tuning" }),
+    );
+
+    await waitFor(() =>
+      expect(api.saveTransferPreferences).toHaveBeenCalledWith({
+        ...DEFAULT_TRANSFER_PREFERENCES,
+        deliveryTuning: {
+          ...DEFAULT_TRANSFER_PREFERENCES.deliveryTuning,
+          maxRetries: 0,
+        },
+      }),
     );
   });
 });

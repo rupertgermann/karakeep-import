@@ -28,10 +28,12 @@ import {
   type TransferApi,
   type TransferSourceRequest,
 } from "./transfer-api";
-import type {
-  TransferPreview,
-  TransferProgress,
-  TransferResult,
+import {
+  defaultTransferOptions,
+  type TransferOptions,
+  type TransferPreview,
+  type TransferProgress,
+  type TransferResult,
 } from "./workflow";
 
 type AppDesktopApi = DesktopApi & FileSourceApi;
@@ -248,6 +250,10 @@ export default function App({
     initialWorkflowState,
   );
   const [showSettings, setShowSettings] = useState(false);
+  const [transferOptions, setTransferOptions] = useState<TransferOptions>(
+    defaultTransferOptions,
+  );
+  const [repreviewing, setRepreviewing] = useState(false);
   const {
     destination,
     sourceMode,
@@ -297,7 +303,31 @@ export default function App({
   function chooseAnotherSource() {
     activeDelivery.current?.unlisten?.();
     activeDelivery.current = null;
+    setTransferOptions(defaultTransferOptions);
     dispatch({ type: "source.reset" });
+  }
+
+  /// A changed option changes what would be delivered, so the reviewed preview
+  /// is replaced before it can be confirmed.
+  async function changeTransferOptions(options: TransferOptions) {
+    setTransferOptions(options);
+    if (!deliverySource) return;
+    setRepreviewing(true);
+    try {
+      dispatch({
+        type: "preview.ready",
+        preview: await transferApi.previewTransfer(deliverySource, options),
+        source: deliverySource,
+      });
+    } catch {
+      dispatch({
+        type: "preview.failed",
+        message:
+          "The transfer preview could not be prepared for those options.",
+      });
+    } finally {
+      setRepreviewing(false);
+    }
   }
 
   async function prepareFileTransfer(selection: FileSourceSelection) {
@@ -310,7 +340,7 @@ export default function App({
     try {
       dispatch({
         type: "preview.ready",
-        preview: await transferApi.previewTransfer(source),
+        preview: await transferApi.previewTransfer(source, transferOptions),
         source,
       });
     } catch {
@@ -380,6 +410,7 @@ export default function App({
             : {}),
           deliveryId,
           source: deliverySource,
+          options: transferOptions,
         },
         (event) => handleDeliveryEvent(deliveryId, preview, event),
       );
@@ -615,6 +646,9 @@ export default function App({
         <TransferReview
           phase="preview"
           preview={transferPreview}
+          options={transferOptions}
+          optionsBusy={repreviewing}
+          onOptionsChange={(options) => void changeTransferOptions(options)}
           onStart={() => void startDelivery()}
           onChooseAnotherSource={chooseAnotherSource}
         />

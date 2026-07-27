@@ -82,7 +82,45 @@ export interface ManualUpdateCheckResult {
   executesUpdate: false;
 }
 
+/** The source marker tags a transfer attaches, chosen once in Settings. */
+export interface SourceDefaultTags {
+  twitter: boolean;
+  fieldTheory: boolean;
+  chrome: boolean;
+}
+
+/** Advanced delivery tuning. Values apply to the next run that is started. */
+export interface DeliveryTuning {
+  workers: number;
+  requestsPerSecond: number;
+  timeoutSeconds: number;
+  maxRetries: number;
+}
+
+export interface TransferPreferences {
+  defaultTags: SourceDefaultTags;
+  deliveryTuning: DeliveryTuning;
+}
+
+export const DEFAULT_TRANSFER_PREFERENCES: TransferPreferences = Object.freeze({
+  defaultTags: Object.freeze({
+    twitter: false,
+    fieldTheory: false,
+    chrome: false,
+  }),
+  deliveryTuning: Object.freeze({
+    workers: 4,
+    requestsPerSecond: 4,
+    timeoutSeconds: 20,
+    maxRetries: 5,
+  }),
+});
+
 export interface SettingsApi {
+  transferPreferences(): Promise<TransferPreferences>;
+  saveTransferPreferences(
+    settings: TransferPreferences,
+  ): Promise<TransferPreferences>;
   inspectPrivateData(): Promise<PrivateDataSummary>;
   replaceXSource(
     confirmation: ReplaceXSourceConfirmation,
@@ -97,6 +135,10 @@ export interface SettingsApi {
 }
 
 export const settingsDesktopApi: SettingsApi = {
+  transferPreferences: () =>
+    invoke<TransferPreferences>("transfer_preferences"),
+  saveTransferPreferences: (settings) =>
+    invoke<TransferPreferences>("save_transfer_preferences", { settings }),
   inspectPrivateData: () =>
     invoke<PrivateDataSummary>("inspect_private_transfer_data"),
   replaceXSource: (confirmation) =>

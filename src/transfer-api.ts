@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type { FileSourceFormat } from "./desktop-api";
 import type {
+  TransferOptions,
   TransferPreview,
   TransferProgress,
   TransferResult,
@@ -20,6 +21,7 @@ export interface StartDeliveryRequest {
   approvalId?: string;
   deliveryId: string;
   source: TransferSourceRequest;
+  options: TransferOptions;
 }
 
 export type DeliveryFailureCode =
@@ -53,7 +55,10 @@ export type DeliveryEvent =
     };
 
 export interface TransferApi {
-  previewTransfer(source: TransferSourceRequest): Promise<TransferPreview>;
+  previewTransfer(
+    source: TransferSourceRequest,
+    options: TransferOptions,
+  ): Promise<TransferPreview>;
   startDelivery(
     request: StartDeliveryRequest,
     onEvent: (event: DeliveryEvent) => void,
@@ -70,8 +75,8 @@ const failureCodes = new Set<DeliveryFailureCode>([
 ]);
 
 export const transferApi: TransferApi = {
-  previewTransfer: (source) =>
-    invoke<TransferPreview>("preview_transfer", { source }),
+  previewTransfer: (source, options) =>
+    invoke<TransferPreview>("preview_transfer", { source, options }),
 
   startDelivery: async (request, onEvent) => {
     const unlisten = await listen<unknown>("delivery", ({ payload }) => {

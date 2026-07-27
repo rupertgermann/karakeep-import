@@ -120,3 +120,25 @@
     gap: 0.2rem;
   }
 }
+
+.settings-option {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.35rem 0;
+}
+
+.settings-tuning p {
+  display: grid;
+  gap: 0.3rem;
+  max-width: 22rem;
+  margin: 0 0 0.75rem;
+}
+
+.settings-tuning input {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #cdd6cb;
+  border-radius: 0.5rem;
+  background: #fff;
+  font: inherit;
+}

@@ -1,15 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import {
+  DEFAULT_TRANSFER_PREFERENCES,
   DELETE_LOCAL_TRANSFER_DATA,
   FORGET_KARAKEEP_CONNECTION,
   REPLACE_X_SOURCE,
   settingsDesktopApi,
   type ComponentVersions,
+  type DeliveryTuning,
   type ForgetKarakeepConnectionConfirmation,
   type ManualUpdateCheckResult,
   type PrivateDataSummary,
   type SettingsApi,
+  type SourceDefaultTags,
+  type TransferPreferences,
 } from "./settings-api";
 import "./Settings.css";
 
@@ -39,14 +43,22 @@ export default function Settings({
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preferences, setPreferences] = useState<TransferPreferences>(
+    DEFAULT_TRANSFER_PREFERENCES,
+  );
 
   useEffect(() => {
     let active = true;
-    Promise.all([api.inspectPrivateData(), api.versionInformation()]).then(
-      ([nextPrivateData, nextVersions]) => {
+    Promise.all([
+      api.inspectPrivateData(),
+      api.versionInformation(),
+      api.transferPreferences(),
+    ]).then(
+      ([nextPrivateData, nextVersions, nextPreferences]) => {
         if (active) {
           setPrivateData(nextPrivateData);
           setVersions(nextVersions);
+          setPreferences(nextPreferences);
         }
       },
       () => {
@@ -105,6 +117,24 @@ export default function Settings({
       await onForgetKarakeepConnection(FORGET_KARAKEEP_CONNECTION);
       setStatus("The Karakeep connection was forgotten.");
     });
+  }
+
+  /// Preferences are stored as a whole, so a rejected value leaves every
+  /// stored value alone.
+  function savePreferences(next: TransferPreferences) {
+    setPreferences(next);
+    return runAction(async () => {
+      setPreferences(await api.saveTransferPreferences(next));
+      setStatus("Settings were saved and apply to the next transfer run.");
+    });
+  }
+
+  function saveDefaultTags(defaultTags: SourceDefaultTags) {
+    return savePreferences({ ...preferences, defaultTags });
+  }
+
+  function saveDeliveryTuning(deliveryTuning: DeliveryTuning) {
+    return savePreferences({ ...preferences, deliveryTuning });
   }
 
   function exportDiagnostics() {
@@ -202,6 +232,51 @@ export default function Settings({
         ) : null}
       </section>
 
+      <section aria-labelledby="default-tags-title">
+        <h3 id="default-tags-title">Source tags</h3>
+        <p>
+          Choose the marker tags a transfer attaches to every bookmark from a
+          source. None is attached unless you select it here.
+        </p>
+        <DefaultTagToggle
+          label="twitter, for X bookmarks"
+          checked={preferences.defaultTags.twitter}
+          busy={busy}
+          onChange={(twitter) =>
+            void saveDefaultTags({ ...preferences.defaultTags, twitter })
+          }
+        />
+        <DefaultTagToggle
+          label="fieldtheory, the internal acquisition name"
+          checked={preferences.defaultTags.fieldTheory}
+          busy={busy}
+          onChange={(fieldTheory) =>
+            void saveDefaultTags({ ...preferences.defaultTags, fieldTheory })
+          }
+        />
+        <DefaultTagToggle
+          label="chrome, for Chrome bookmark files"
+          checked={preferences.defaultTags.chrome}
+          busy={busy}
+          onChange={(chrome) =>
+            void saveDefaultTags({ ...preferences.defaultTags, chrome })
+          }
+        />
+      </section>
+
+      <section aria-labelledby="tuning-title">
+        <h3 id="tuning-title">Advanced delivery tuning</h3>
+        <p>
+          These values change delivery speed, not what lands in Karakeep. A
+          change applies to the next run you start.
+        </p>
+        <DeliveryTuningForm
+          tuning={preferences.deliveryTuning}
+          busy={busy}
+          onSave={(tuning) => void saveDeliveryTuning(tuning)}
+        />
+      </section>
+
       <section aria-labelledby="diagnostics-title">
         <h3 id="diagnostics-title">Diagnostics</h3>
         <p>
@@ -271,6 +346,110 @@ export default function Settings({
         />
       ) : null}
     </section>
+  );
+}
+
+function DefaultTagToggle({
+  label,
+  checked,
+  busy,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  busy: boolean;
+  onChange(checked: boolean): void;
+}) {
+  return (
+    <label className="settings-option">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={busy}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      {label}
+    </label>
+  );
+}
+
+const tuningFields = [
+  { key: "workers", label: "Workers", min: 1, step: 1 },
+  {
+    key: "requestsPerSecond",
+    label: "Requests per second",
+    min: 0.1,
+    step: 0.1,
+  },
+  { key: "timeoutSeconds", label: "Request timeout in seconds", min: 1, step: 1 },
+  { key: "maxRetries", label: "Maximum retries", min: 0, step: 1 },
+] as const;
+
+function DeliveryTuningForm({
+  tuning,
+  busy,
+  onSave,
+}: {
+  tuning: DeliveryTuning;
+  busy: boolean;
+  onSave(tuning: DeliveryTuning): void;
+}) {
+  const [draft, setDraft] = useState(tuning);
+  const [rejected, setRejected] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(tuning);
+  }, [tuning]);
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (
+      draft.workers < 1 ||
+      draft.requestsPerSecond <= 0 ||
+      draft.timeoutSeconds < 1 ||
+      draft.maxRetries < 0 ||
+      [
+        draft.workers,
+        draft.requestsPerSecond,
+        draft.timeoutSeconds,
+        draft.maxRetries,
+      ].some((value) => !Number.isFinite(value))
+    ) {
+      setRejected(
+        "Workers, requests per second, and timeout must be greater than zero, and retries cannot be negative.",
+      );
+      return;
+    }
+    setRejected(null);
+    onSave(draft);
+  }
+
+  return (
+    <form className="settings-tuning" onSubmit={submit}>
+      {tuningFields.map((field) => (
+        <p key={field.key}>
+          <label htmlFor={`tuning-${field.key}`}>{field.label}</label>
+          <input
+            id={`tuning-${field.key}`}
+            type="number"
+            min={field.min}
+            step={field.step}
+            disabled={busy}
+            value={draft[field.key]}
+            onChange={(event) =>
+              setDraft({
+                ...draft,
+                [field.key]: Number(event.target.value),
+              })
+            }
+          />
+        </p>
+      ))}
+      {rejected ? <p role="alert">{rejected}</p> : null}
+      <button type="submit" disabled={busy}>
+        Save delivery tuning
+      </button>
+    </form>
   );
 }
 

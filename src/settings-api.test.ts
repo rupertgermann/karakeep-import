@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import {
+  DEFAULT_TRANSFER_PREFERENCES,
   DELETE_LOCAL_TRANSFER_DATA,
   REPLACE_X_SOURCE,
   SIGNED_RELEASES_URL,
@@ -107,5 +108,31 @@ describe("settings desktop API", () => {
     await expect(settingsDesktopApi.manualUpdateCheck()).rejects.toThrow(
       "The update destination is not allowlisted.",
     );
+  });
+});
+
+describe("transfer preferences", () => {
+  it("reads the stored preferences through one command", async () => {
+    mocks.invoke.mockResolvedValue(DEFAULT_TRANSFER_PREFERENCES);
+
+    const preferences = await settingsDesktopApi.transferPreferences();
+
+    expect(preferences).toEqual(DEFAULT_TRANSFER_PREFERENCES);
+    expect(mocks.invoke).toHaveBeenCalledWith("transfer_preferences");
+  });
+
+  it("saves preferences as a whole and returns what was stored", async () => {
+    const settings = {
+      ...DEFAULT_TRANSFER_PREFERENCES,
+      defaultTags: { twitter: true, fieldTheory: false, chrome: true },
+    };
+    mocks.invoke.mockResolvedValue(settings);
+
+    const saved = await settingsDesktopApi.saveTransferPreferences(settings);
+
+    expect(saved).toEqual(settings);
+    expect(mocks.invoke).toHaveBeenCalledWith("save_transfer_preferences", {
+      settings,
+    });
   });
 });
