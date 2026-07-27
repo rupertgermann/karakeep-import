@@ -204,14 +204,7 @@ impl DeliveryCoordinator {
         ledger: SharedSqliteLedger,
         config: DeliveryConfig,
     ) -> Result<Self, DeliveryCoordinatorError> {
-        if config.max_concurrency == 0
-            || !config.requests_per_second.is_finite()
-            || config.requests_per_second <= 0.0
-        {
-            return Err(DeliveryCoordinatorError::for_code(
-                DeliveryCoordinatorErrorCode::InvalidConfiguration,
-            ));
-        }
+        validate_config(&config)?;
         Ok(Self {
             ledger,
             config,
@@ -223,8 +216,9 @@ impl DeliveryCoordinator {
         &self,
         preview: &FileSourcePreview,
         destination: &DestinationIdentity,
+        limit: Option<usize>,
     ) -> Result<TransferPreviewCounts, DeliveryCoordinatorError> {
-        preview_delivery_counts(preview, &self.ledger, destination).map_err(|_| {
+        preview_delivery_counts(preview, &self.ledger, destination, limit).map_err(|_| {
             DeliveryCoordinatorError::for_code(DeliveryCoordinatorErrorCode::LedgerUnavailable)
         })
     }
@@ -243,7 +237,14 @@ impl DeliveryCoordinator {
         events: Arc<dyn DeliveryEventSink>,
     ) -> Result<DeliveryTerminalEvent, DeliveryCoordinatorError> {
         Ok(self
-            .prepare_run(api, delivery_id, preview, destination, events)?
+            .prepare_run(
+                api,
+                delivery_id,
+                preview,
+                destination,
+                events,
+                self.config.clone(),
+            )?
             .execute())
     }
 
@@ -259,12 +260,14 @@ impl DeliveryCoordinator {
         preview: FileSourcePreview,
         destination: DestinationIdentity,
         events: Arc<dyn DeliveryEventSink>,
+        config: DeliveryConfig,
     ) -> Result<DeliveryRun, DeliveryCoordinatorError> {
+        validate_config(&config)?;
         let cancellation = self.begin(delivery_id.clone())?;
         Ok(DeliveryRun {
             api,
             ledger: Arc::clone(&self.ledger),
-            config: self.config.clone(),
+            config,
             delivery_id: delivery_id.clone(),
             preview,
             destination,
@@ -480,6 +483,19 @@ impl ProgressSink for CoordinatorProgressSink {
                 },
             }));
     }
+}
+
+fn validate_config(config: &DeliveryConfig) -> Result<(), DeliveryCoordinatorError> {
+    if config.max_concurrency == 0
+        || !config.requests_per_second.is_finite()
+        || config.requests_per_second <= 0.0
+        || config.pending_limit == Some(0)
+    {
+        return Err(DeliveryCoordinatorError::for_code(
+            DeliveryCoordinatorErrorCode::InvalidConfiguration,
+        ));
+    }
+    Ok(())
 }
 
 fn publish_terminal(

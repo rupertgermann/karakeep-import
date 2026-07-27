@@ -227,7 +227,7 @@ fn delivery_api(server_url: String, api_key: &str, timeout: Duration) -> Arc<dyn
         })),
     );
     service
-        .delivery_api()
+        .delivery_api(timeout)
         .expect("remembered destination creates a delivery API")
 }
 
@@ -254,7 +254,7 @@ fn delivery_api_cannot_be_created_without_the_saved_vault_credential() {
         })),
     );
 
-    let error = match service.delivery_api() {
+    let error = match service.delivery_api(Duration::from_secs(20)) {
         Ok(_) => panic!("delivery requires the credential vault entry"),
         Err(error) => error,
     };
@@ -442,6 +442,7 @@ fn delivery_engine_attaches_only_tags_missing_from_an_existing_bookmark() {
                 base_delay: Duration::ZERO,
                 max_delay: Duration::ZERO,
             },
+            pending_limit: None,
         },
     )
     .expect("delivery engine");
@@ -492,6 +493,7 @@ fn partial_tag_attachment_response_is_not_recorded_as_delivered() {
                 base_delay: Duration::ZERO,
                 max_delay: Duration::ZERO,
             },
+            pending_limit: None,
         },
     )
     .expect("delivery engine");

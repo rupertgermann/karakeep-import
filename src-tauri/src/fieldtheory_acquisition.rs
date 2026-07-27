@@ -20,6 +20,7 @@ use crate::{
     file_source::{FileSourceFormat, FileSourcePreview, preview_file},
     ledger::DeliveryLedger,
     transfer::FIELD_THEORY_LEDGER_SOURCE,
+    transfer_options::TransferOptions,
 };
 
 const SNAPSHOT_FILE: &str = "bookmarks.jsonl";
@@ -234,13 +235,20 @@ impl SnapshotStore {
 
     /// Returns the retained X snapshot through the same parsed delivery seam
     /// used by one-off File Sources. The private storage path stays internal.
-    pub fn delivery_source(&self) -> Result<FileSourcePreview, SnapshotPreviewError> {
+    pub fn delivery_source(
+        &self,
+        options: &TransferOptions,
+    ) -> Result<FileSourcePreview, SnapshotPreviewError> {
         self.recover()?;
         if !self.complete_snapshot_present() {
             return Err(SnapshotPreviewError);
         }
-        preview_file(&self.snapshot_path(), FileSourceFormat::FieldTheoryJsonl)
-            .map_err(|_| SnapshotPreviewError)
+        preview_file(
+            &self.snapshot_path(),
+            FileSourceFormat::FieldTheoryJsonl,
+            options,
+        )
+        .map_err(|_| SnapshotPreviewError)
     }
 
     pub fn preview(
@@ -248,8 +256,9 @@ impl SnapshotStore {
         ledger: &DeliveryLedger,
         destination_identity: &DestinationIdentity,
         destination: DestinationPreview,
+        options: &TransferOptions,
     ) -> Result<XTransferPreview, SnapshotPreviewError> {
-        let source = self.delivery_source()?;
+        let source = self.delivery_source(options)?;
         let mut previously_delivered = 0_u64;
         let mut folder_keys = HashSet::new();
         let mut folders = Vec::new();
@@ -332,8 +341,12 @@ impl SnapshotStore {
         if !metadata.file_type().is_file() {
             return Err(SnapshotPreviewError);
         }
-        preview_file(&incoming, FileSourceFormat::FieldTheoryJsonl)
-            .map_err(|_| SnapshotPreviewError)?;
+        preview_file(
+            &incoming,
+            FileSourceFormat::FieldTheoryJsonl,
+            &TransferOptions::default(),
+        )
+        .map_err(|_| SnapshotPreviewError)?;
         set_private_file_permissions(&incoming).map_err(|_| SnapshotPreviewError)?;
 
         let state_directory = self.state_directory();
@@ -374,8 +387,12 @@ impl SnapshotStore {
     ) -> Result<(), SnapshotPreviewError> {
         let snapshot = staging.join(SNAPSHOT_FILE);
         require_private_regular_file(&snapshot)?;
-        preview_file(&snapshot, FileSourceFormat::FieldTheoryJsonl)
-            .map_err(|_| SnapshotPreviewError)?;
+        preview_file(
+            &snapshot,
+            FileSourceFormat::FieldTheoryJsonl,
+            &TransferOptions::default(),
+        )
+        .map_err(|_| SnapshotPreviewError)?;
         let state_directory = self.state_directory();
         fs::create_dir_all(&state_directory).map_err(|_| SnapshotPreviewError)?;
         set_private_directory_permissions(&state_directory).map_err(|_| SnapshotPreviewError)?;

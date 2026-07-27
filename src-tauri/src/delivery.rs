@@ -255,6 +255,9 @@ pub struct DeliveryConfig {
     pub max_concurrency: usize,
     pub requests_per_second: f64,
     pub retry: RetryPolicy,
+    /// Caps one run at the first N pending records. Records beyond the cap are
+    /// left untouched and stay eligible for a later run.
+    pub pending_limit: Option<usize>,
 }
 
 impl Default for DeliveryConfig {
@@ -263,6 +266,7 @@ impl Default for DeliveryConfig {
             max_concurrency: 4,
             requests_per_second: 4.0,
             retry: RetryPolicy::default(),
+            pending_limit: None,
         }
     }
 }
@@ -364,6 +368,10 @@ impl DeliveryEngine {
                 LedgerStatus::Pending { attempts } => attempts,
             };
             pending.push_back((index, record, prior_attempts));
+        }
+        if let Some(limit) = self.config.pending_limit {
+            pending.truncate(limit);
+            initial_totals.total = initial_totals.skipped + pending.len();
         }
 
         let worker_count = self.config.max_concurrency.min(pending.len());

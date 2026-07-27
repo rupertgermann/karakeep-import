@@ -254,6 +254,7 @@ fn fast_config() -> delivery::DeliveryConfig {
             base_delay: Duration::ZERO,
             max_delay: Duration::ZERO,
         },
+        pending_limit: None,
     }
 }
 
@@ -292,10 +293,10 @@ fn preview_counts_are_scoped_to_the_supplied_destination() {
     assert_eq!(
         (
             coordinator
-                .preview(&source, &first_destination)
+                .preview(&source, &first_destination, None)
                 .expect("first preview"),
             coordinator
-                .preview(&source, &second_destination)
+                .preview(&source, &second_destination, None)
                 .expect("second preview"),
         ),
         (
@@ -303,11 +304,13 @@ fn preview_counts_are_scoped_to_the_supplied_destination() {
                 total: 2,
                 pending: 0,
                 previously_delivered: 2,
+                preserved_timestamps: 0,
             },
             transfer::TransferPreviewCounts {
                 total: 2,
                 pending: 2,
                 previously_delivered: 0,
+                preserved_timestamps: 2,
             },
         )
     );
@@ -408,6 +411,7 @@ fn one_active_delivery_can_be_cancelled_and_reports_partial_work_totals() {
             preview(&["secret-bookmark-1", "secret-bookmark-2"]),
             destination("user-a"),
             run_events.clone(),
+            fast_config(),
         )
         .expect("delivery reserves the active slot");
     let handle = thread::spawn(move || run.execute());
@@ -421,6 +425,7 @@ fn one_active_delivery_can_be_cancelled_and_reports_partial_work_totals() {
         preview(&["other"]),
         destination("user-a"),
         Arc::new(RecordingEvents::default()),
+        fast_config(),
     ) {
         Ok(_) => panic!("a second delivery must be rejected"),
         Err(error) => error,
@@ -592,6 +597,7 @@ fn cancellation_is_available_as_soon_as_run_preparation_succeeds() {
             preview(&["not-yet-started"]),
             destination("user-a"),
             Arc::new(RecordingEvents::default()),
+            fast_config(),
         )
         .expect("run reserves active delivery");
     assert!(coordinator.is_active());
@@ -687,7 +693,7 @@ fn a_later_run_resumes_pending_records_without_exposing_failure_details() {
 
     assert_eq!(
         coordinator
-            .preview(&source, &destination)
+            .preview(&source, &destination, None)
             .expect("pending preview")
             .pending,
         1
@@ -717,7 +723,7 @@ fn a_later_run_resumes_pending_records_without_exposing_failure_details() {
     );
     assert_eq!(
         coordinator
-            .preview(&source, &destination)
+            .preview(&source, &destination, None)
             .expect("completed preview")
             .pending,
         0

@@ -108,9 +108,9 @@ fn preview_counts_are_destination_scoped_and_require_no_karakeep_client() {
 
     assert_eq!(
         (
-            preview_delivery_counts(&field_theory_preview(), &shared, &destination_a)
+            preview_delivery_counts(&field_theory_preview(), &shared, &destination_a, None)
                 .expect("first destination preview"),
-            preview_delivery_counts(&field_theory_preview(), &shared, &destination_b)
+            preview_delivery_counts(&field_theory_preview(), &shared, &destination_b, None)
                 .expect("second destination preview"),
         ),
         (
@@ -118,11 +118,13 @@ fn preview_counts_are_destination_scoped_and_require_no_karakeep_client() {
                 total: 2,
                 pending: 1,
                 previously_delivered: 1,
+                preserved_timestamps: 0,
             },
             transfer::TransferPreviewCounts {
                 total: 2,
                 pending: 2,
                 previously_delivered: 0,
+                preserved_timestamps: 1,
             },
         )
     );
@@ -165,11 +167,13 @@ fn chrome_preview_and_delivery_use_the_same_ledger_source() {
     }
 
     assert_eq!(
-        preview_delivery_counts(&preview, &shared, &destination).expect("Chrome preview counts"),
+        preview_delivery_counts(&preview, &shared, &destination, None)
+            .expect("Chrome preview counts"),
         transfer::TransferPreviewCounts {
             total: 1,
             pending: 0,
             previously_delivered: 1,
+            preserved_timestamps: 0,
         }
     );
 }

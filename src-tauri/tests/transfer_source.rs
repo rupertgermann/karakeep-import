@@ -15,9 +15,14 @@ mod file_source {
     pub use karakeep_transfer_lib::file_source::*;
 }
 
+mod transfer_options {
+    pub use karakeep_transfer_lib::transfer_options::*;
+}
+
 #[path = "../src/transfer_source.rs"]
 mod transfer_source;
 
+use transfer_options::TransferOptions;
 use transfer_source::{
     TransferSourceErrorCode, TransferSourceRequest, deduplicated_preview_folders,
     resolve_transfer_source,
@@ -62,8 +67,12 @@ fn x_request_resolves_the_private_snapshot_without_exposing_path_or_raw_fields()
     fs::write(snapshot_root.join("acquisition/source.json"), "{}\n").expect("source binding");
     let state = FieldTheoryState::bundled(temporary.path(), temporary.path());
 
-    let preview =
-        resolve_transfer_source(&TransferSourceRequest::X, &state).expect("resolved X snapshot");
+    let preview = resolve_transfer_source(
+        &TransferSourceRequest::X,
+        &state,
+        &TransferOptions::default(),
+    )
+    .expect("resolved X snapshot");
     let serialized = serde_json::to_string(&preview).expect("preview serializes");
 
     assert_eq!(preview.bookmarks[0].source_id, "1");
@@ -87,7 +96,8 @@ fn file_request_revalidates_a_regular_file_and_uses_the_requested_format() {
         format: FileSourceFormat::ChromeNetscape,
     };
 
-    let preview = resolve_transfer_source(&request, &state).expect("resolved file");
+    let preview = resolve_transfer_source(&request, &state, &TransferOptions::default())
+        .expect("resolved file");
 
     assert_eq!(preview.format, ResolvedFileSourceFormat::ChromeNetscape);
     assert_eq!(preview.bookmarks[0].url, "https://example.com/article");
@@ -110,6 +120,7 @@ fn non_file_and_unreadable_sources_have_fixed_redacted_errors() {
             format: FileSourceFormat::Auto,
         },
         &state,
+        &TransferOptions::default(),
     )
     .expect_err("directories are not File Sources");
     let missing_path = temporary.path().join("missing-secret-name.jsonl");
@@ -119,6 +130,7 @@ fn non_file_and_unreadable_sources_have_fixed_redacted_errors() {
             format: FileSourceFormat::Auto,
         },
         &state,
+        &TransferOptions::default(),
     )
     .expect_err("missing file fails");
 
@@ -153,10 +165,15 @@ fn invalid_file_and_missing_x_snapshot_errors_hide_parser_and_storage_details() 
             format: FileSourceFormat::FieldTheoryJsonl,
         },
         &state,
+        &TransferOptions::default(),
     )
     .expect_err("invalid source fails");
-    let missing_x = resolve_transfer_source(&TransferSourceRequest::X, &state)
-        .expect_err("missing X snapshot fails");
+    let missing_x = resolve_transfer_source(
+        &TransferSourceRequest::X,
+        &state,
+        &TransferOptions::default(),
+    )
+    .expect_err("missing X snapshot fails");
 
     assert_eq!(invalid.code(), TransferSourceErrorCode::InvalidFileSource);
     assert_eq!(

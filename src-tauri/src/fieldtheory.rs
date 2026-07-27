@@ -7,7 +7,10 @@ use std::{
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::{domain::DestinationIdentity, file_source::FileSourcePreview, ledger::DeliveryLedger};
+use crate::{
+    domain::DestinationIdentity, file_source::FileSourcePreview, ledger::DeliveryLedger,
+    transfer_options::TransferOptions,
+};
 
 #[path = "fieldtheory_acquisition.rs"]
 mod acquisition;
@@ -185,8 +188,11 @@ impl FieldTheoryState {
 
     /// Returns parsed retained X bookmarks for backend delivery without
     /// exposing their private storage path.
-    pub fn snapshot_delivery_source(&self) -> Result<FileSourcePreview, SnapshotPreviewError> {
-        self.snapshots.delivery_source()
+    pub fn snapshot_delivery_source(
+        &self,
+        options: &TransferOptions,
+    ) -> Result<FileSourcePreview, SnapshotPreviewError> {
+        self.snapshots.delivery_source(options)
     }
 
     pub fn has_snapshot(&self) -> bool {
@@ -200,11 +206,13 @@ impl FieldTheoryState {
     pub fn preview(
         &self,
         destination: DestinationPreview,
+        options: &TransferOptions,
     ) -> Result<XTransferPreview, SnapshotPreviewError> {
         let identity = DestinationIdentity::new(&destination.server_url, &destination.user_id)
             .map_err(|_| SnapshotPreviewError)?;
         let ledger = DeliveryLedger::open(&self.ledger_path).map_err(|_| SnapshotPreviewError)?;
-        self.snapshots.preview(&ledger, &identity, destination)
+        self.snapshots
+            .preview(&ledger, &identity, destination, options)
     }
 }
 

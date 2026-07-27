@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     fieldtheory::FieldTheoryState,
     file_source::{FileSourceFormat, FileSourcePreview, preview_file},
+    transfer_options::TransferOptions,
 };
 
 /// Identifies the source that must be revalidated immediately before preview
@@ -75,10 +76,11 @@ impl Error for TransferSourceError {}
 pub fn resolve_transfer_source(
     request: &TransferSourceRequest,
     field_theory: &FieldTheoryState,
+    options: &TransferOptions,
 ) -> Result<FileSourcePreview, TransferSourceError> {
     match request {
         TransferSourceRequest::X => field_theory
-            .snapshot_delivery_source()
+            .snapshot_delivery_source(options)
             .map_err(|_| TransferSourceError::x_source_unavailable()),
         TransferSourceRequest::File { path, format } => {
             let file = fs::File::open(path).map_err(|_| TransferSourceError::file_unreadable())?;
@@ -90,7 +92,8 @@ pub fn resolve_transfer_source(
             }
             drop(file);
 
-            preview_file(path, *format).map_err(|_| TransferSourceError::invalid_file_source())
+            preview_file(path, *format, options)
+                .map_err(|_| TransferSourceError::invalid_file_source())
         }
     }
 }

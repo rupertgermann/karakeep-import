@@ -356,7 +356,7 @@ fn unrecoverable_credential_rollback_poisoning_blocks_status_and_delivery() {
     );
     assert_eq!(
         service
-            .delivery_api()
+            .delivery_api(std::time::Duration::from_secs(20))
             .err()
             .expect("poisoned service blocks delivery")
             .code(),

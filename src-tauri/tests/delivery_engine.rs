@@ -376,6 +376,7 @@ fn fast_retry_config(max_retries: usize) -> DeliveryConfig {
             base_delay: Duration::from_secs(1),
             max_delay: Duration::from_secs(30),
         },
+        pending_limit: None,
     }
 }
 
@@ -679,6 +680,7 @@ fn request_rate_limit_is_shared_by_all_workers() {
             max_concurrency: 3,
             requests_per_second: 2.0,
             retry: RetryPolicy::default(),
+            pending_limit: None,
         },
         clock,
     )
@@ -937,4 +939,137 @@ fn progress_has_a_stable_serializable_frontend_contract() {
             }
         })
     );
+}
+
+/// Records every bookmark it is asked to create, so a test can prove which
+/// records a run actually touched.
+#[derive(Default)]
+struct CountingApi {
+    created: Mutex<Vec<String>>,
+}
+
+impl KarakeepApi for CountingApi {
+    fn ensure_bookmark(
+        &self,
+        draft: &BookmarkDraft,
+        _cancellation: &dyn RequestCancellation,
+    ) -> Result<EnsuredBookmark, ApiError> {
+        self.created.lock().unwrap().push(draft.url.clone());
+        Ok(EnsuredBookmark {
+            bookmark: KarakeepBookmark {
+                id: "bookmark".into(),
+                human_tags: Vec::new(),
+            },
+            origin: BookmarkOrigin::Created,
+        })
+    }
+
+    fn attach_tags(
+        &self,
+        _bookmark_id: &str,
+        _tags: &[String],
+        _cancellation: &dyn RequestCancellation,
+    ) -> Result<(), ApiError> {
+        Ok(())
+    }
+}
+
+fn limited_config(limit: Option<usize>) -> DeliveryConfig {
+    DeliveryConfig {
+        max_concurrency: 1,
+        pending_limit: limit,
+        ..fast_retry_config(0)
+    }
+}
+
+#[test]
+fn a_limit_caps_the_run_at_the_first_pending_records_after_skipping_delivered_ones() {
+    let ledger = Arc::new(MemoryLedger::default());
+    ledger.delivered.lock().unwrap().push("already".into());
+    let api = Arc::new(CountingApi::default());
+
+    let report = DeliveryEngine::new(api.clone(), ledger.clone(), limited_config(Some(2)))
+        .unwrap()
+        .run(
+            &VecSource(vec![
+                record("already", &[]),
+                record("first", &[]),
+                record("second", &[]),
+                record("third", &[]),
+            ]),
+            &DestinationId::new("destination"),
+            &CancellationToken::new(),
+            &NoopProgressSink,
+        )
+        .unwrap();
+
+    assert_eq!(
+        *api.created.lock().unwrap(),
+        vec![
+            "https://x.com/example/status/first".to_string(),
+            "https://x.com/example/status/second".to_string(),
+        ]
+    );
+    assert_eq!(report.totals.delivered, 2);
+    assert_eq!(report.totals.skipped, 1);
+    assert_eq!(report.totals.failed, 0);
+    assert_eq!(report.totals.cancelled, 0);
+    assert_eq!(report.totals.total, 3);
+}
+
+#[test]
+fn records_beyond_the_limit_stay_pending_for_a_later_run() {
+    let ledger = Arc::new(MemoryLedger::default());
+    let api = Arc::new(CountingApi::default());
+    let source = VecSource(vec![record("first", &[]), record("second", &[])]);
+
+    DeliveryEngine::new(api.clone(), ledger.clone(), limited_config(Some(1)))
+        .unwrap()
+        .run(
+            &source,
+            &DestinationId::new("destination"),
+            &CancellationToken::new(),
+            &NoopProgressSink,
+        )
+        .unwrap();
+    assert!(ledger.pending.lock().unwrap().is_empty());
+
+    let report = DeliveryEngine::new(api.clone(), ledger, limited_config(None))
+        .unwrap()
+        .run(
+            &source,
+            &DestinationId::new("destination"),
+            &CancellationToken::new(),
+            &NoopProgressSink,
+        )
+        .unwrap();
+
+    assert_eq!(
+        *api.created.lock().unwrap(),
+        vec![
+            "https://x.com/example/status/first".to_string(),
+            "https://x.com/example/status/second".to_string(),
+        ]
+    );
+    assert_eq!((report.totals.delivered, report.totals.skipped), (1, 1));
+}
+
+#[test]
+fn a_limit_larger_than_the_pending_count_processes_every_pending_record() {
+    let ledger = Arc::new(MemoryLedger::default());
+    let api = Arc::new(CountingApi::default());
+
+    let report = DeliveryEngine::new(api.clone(), ledger, limited_config(Some(10)))
+        .unwrap()
+        .run(
+            &VecSource(vec![record("first", &[]), record("second", &[])]),
+            &DestinationId::new("destination"),
+            &CancellationToken::new(),
+            &NoopProgressSink,
+        )
+        .unwrap();
+
+    assert_eq!(api.created.lock().unwrap().len(), 2);
+    assert_eq!(report.totals.delivered, 2);
+    assert_eq!(report.totals.total, 2);
 }

@@ -22,10 +22,12 @@ pub mod file_source;
 pub mod karakeep;
 pub mod ledger;
 pub mod operation_gate;
+pub mod preferences;
 pub mod private_data;
 pub mod redaction;
 pub mod settings;
 pub mod transfer;
+pub mod transfer_options;
 pub mod transfer_source;
 pub mod updates;
 pub mod versions;
@@ -46,6 +48,8 @@ use fieldtheory::{
     XSourceSelection, XTransferPreview,
 };
 use operation_gate::{OperationGate, OperationKind};
+use preferences::{PreferencesError, PreferencesStore, TransferPreferences};
+use transfer_options::TransferOptions;
 use transfer_source::{
     TransferSourceErrorCode, TransferSourceRequest, deduplicated_preview_folders,
     resolve_transfer_source,
@@ -281,9 +285,11 @@ fn preview_selected_file_source(
     format: file_source::FileSourceFormat,
 ) -> Result<file_source::FileSourcePreview, FileSourceCommandError> {
     selections.authorize(path)?;
-    file_source::preview_file(path, format).map_err(|_| FileSourceCommandError {
-        code: "invalidFileSource",
-        message: "The selected file is not a valid supported File Source.",
+    file_source::preview_file(path, format, &TransferOptions::default()).map_err(|_| {
+        FileSourceCommandError {
+            code: "invalidFileSource",
+            message: "The selected file is not a valid supported File Source.",
+        }
     })
 }
 
@@ -306,7 +312,10 @@ trait DestinationConnection: Send + Sync {
         input: ConnectDestinationInput,
     ) -> Result<DestinationSummary, DestinationError>;
     fn forget(&self) -> Result<(), DestinationError>;
-    fn delivery_api(&self) -> Result<Arc<dyn karakeep::KarakeepApi>, DestinationError>;
+    fn delivery_api(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<Arc<dyn karakeep::KarakeepApi>, DestinationError>;
 }
 
 impl DestinationConnection for NativeDestinationService {
@@ -325,8 +334,11 @@ impl DestinationConnection for NativeDestinationService {
         DestinationService::forget(self)
     }
 
-    fn delivery_api(&self) -> Result<Arc<dyn karakeep::KarakeepApi>, DestinationError> {
-        DestinationService::delivery_api(self)
+    fn delivery_api(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<Arc<dyn karakeep::KarakeepApi>, DestinationError> {
+        DestinationService::delivery_api(self, timeout)
     }
 }
 
@@ -544,10 +556,13 @@ fn cancel_x_acquisition(
 #[tauri::command]
 fn preview_x_snapshot(
     state: tauri::State<'_, FieldTheoryState>,
+    preferences: tauri::State<'_, PreferencesStore>,
     destination: DestinationPreview,
 ) -> Result<XTransferPreview, String> {
+    let options = TransferOptions::default()
+        .with_default_tags(preferences.load().unwrap_or_default().default_tags);
     state
-        .preview(destination)
+        .preview(destination, &options)
         .map_err(|error| error.to_string())
 }
 
@@ -565,6 +580,7 @@ struct ApprovedFileSource {
     destination: DestinationIdentity,
     preview: file_source::FileSourcePreview,
     source: TransferSourceRequest,
+    options: TransferOptions,
 }
 
 impl TransferState {
@@ -597,6 +613,7 @@ impl TransferState {
         source: &TransferSourceRequest,
         preview: &file_source::FileSourcePreview,
         destination: &DestinationIdentity,
+        options: &TransferOptions,
     ) -> Result<Option<String>, TransferCommandError> {
         if !matches!(source, TransferSourceRequest::File { .. }) {
             return Ok(None);
@@ -612,15 +629,21 @@ impl TransferState {
             destination: destination.clone(),
             preview: preview.clone(),
             source: source.clone(),
+            options: options.clone(),
         });
         Ok(Some(approval_id))
     }
 
+    /// Returns the approved preview only when the request still describes the
+    /// transfer that was reviewed. Changing a source mapping option after
+    /// review invalidates the approval exactly as changing the source or the
+    /// destination does.
     fn approved_file_preview(
         &self,
         approval_id: Option<&str>,
         source: &TransferSourceRequest,
         destination: &DestinationIdentity,
+        options: &TransferOptions,
     ) -> Result<file_source::FileSourcePreview, TransferCommandError> {
         let approved = self.approved_file_source.lock().map_err(|_| {
             TransferCommandError::for_code(TransferCommandErrorCode::DeliveryFailed)
@@ -631,6 +654,7 @@ impl TransferState {
                 Some(approved.approval_id.as_str()) == approval_id
                     && &approved.source == source
                     && &approved.destination == destination
+                    && &approved.options == options
             })
             .map(|approved| approved.preview.clone())
             .ok_or_else(|| {
@@ -678,6 +702,8 @@ struct StartDeliveryRequest {
     approval_id: Option<String>,
     delivery_id: String,
     source: TransferSourceRequest,
+    #[serde(default)]
+    options: TransferOptions,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -732,6 +758,7 @@ struct TransferPreview {
     total: usize,
     pending: usize,
     previously_delivered: usize,
+    preserved_timestamps: usize,
     folders: Vec<String>,
     destination: DestinationPreview,
 }
@@ -777,14 +804,44 @@ fn connected_destination(
     Ok((summary, identity))
 }
 
+/// Combines the per-run options chosen on the Transfer Review screen with the
+/// Settings-owned source default tags, which the frontend never supplies.
+fn run_options(
+    options: TransferOptions,
+    preferences: &PreferencesStore,
+) -> Result<TransferOptions, TransferCommandError> {
+    let stored = preferences
+        .load()
+        .map_err(|_| TransferCommandError::for_code(TransferCommandErrorCode::Unexpected))?;
+    Ok(options.with_default_tags(stored.default_tags))
+}
+
+#[tauri::command]
+fn transfer_preferences(
+    preferences: tauri::State<'_, PreferencesStore>,
+) -> Result<TransferPreferences, PreferencesError> {
+    preferences.load()
+}
+
+#[tauri::command]
+fn save_transfer_preferences(
+    preferences: tauri::State<'_, PreferencesStore>,
+    settings: TransferPreferences,
+) -> Result<TransferPreferences, PreferencesError> {
+    preferences.save(settings)
+}
+
 #[tauri::command]
 fn preview_transfer(
     source: TransferSourceRequest,
+    options: Option<TransferOptions>,
     selections: tauri::State<'_, FileSelectionState>,
     field_theory: tauri::State<'_, FieldTheoryState>,
     destination: tauri::State<'_, DestinationState>,
     transfers: tauri::State<'_, TransferState>,
+    preferences: tauri::State<'_, PreferencesStore>,
 ) -> Result<TransferPreview, TransferCommandError> {
+    let options = run_options(options.unwrap_or_default(), &preferences)?;
     let (destination_summary, destination_identity) =
         connected_destination(destination.0.as_ref())?;
     if let TransferSourceRequest::File { path, .. } = &source {
@@ -792,18 +849,20 @@ fn preview_transfer(
             TransferCommandError::for_code(TransferCommandErrorCode::SourceUnavailable)
         })?;
     }
-    let preview =
-        resolve_transfer_source(&source, &field_theory).map_err(map_transfer_source_error)?;
+    let preview = resolve_transfer_source(&source, &field_theory, &options)
+        .map_err(map_transfer_source_error)?;
     let counts = transfers
         .coordinator()?
-        .preview(&preview, &destination_identity)
+        .preview(&preview, &destination_identity, options.limit())
         .map_err(map_coordinator_error)?;
-    let approval_id = transfers.approve_file_source(&source, &preview, &destination_identity)?;
+    let approval_id =
+        transfers.approve_file_source(&source, &preview, &destination_identity, &options)?;
     Ok(TransferPreview {
         approval_id,
         total: counts.total,
         pending: counts.pending,
         previously_delivered: counts.previously_delivered,
+        preserved_timestamps: counts.preserved_timestamps,
         folders: deduplicated_preview_folders(&preview),
         destination: DestinationPreview {
             server_url: destination_summary.server_url,
@@ -820,7 +879,13 @@ fn start_delivery<R: tauri::Runtime>(
     field_theory: tauri::State<'_, FieldTheoryState>,
     destination: tauri::State<'_, DestinationState>,
     transfers: tauri::State<'_, TransferState>,
+    preferences: tauri::State<'_, PreferencesStore>,
 ) -> Result<(), TransferCommandError> {
+    let options = run_options(request.options, &preferences)?;
+    let tuning = preferences
+        .load()
+        .map_err(|_| TransferCommandError::for_code(TransferCommandErrorCode::Unexpected))?
+        .delivery_tuning;
     let delivery_id = DeliveryId::new(request.delivery_id).map_err(map_coordinator_error)?;
     let operation = transfers
         .operations
@@ -829,21 +894,33 @@ fn start_delivery<R: tauri::Runtime>(
     let (_, destination_identity) = connected_destination(destination.0.as_ref())?;
     let api = destination
         .0
-        .delivery_api()
+        .delivery_api(tuning.request_timeout())
         .map_err(map_destination_error)?;
     let preview = match &request.source {
-        TransferSourceRequest::X => resolve_transfer_source(&request.source, &field_theory)
-            .map_err(map_transfer_source_error)?,
+        TransferSourceRequest::X => {
+            resolve_transfer_source(&request.source, &field_theory, &options)
+                .map_err(map_transfer_source_error)?
+        }
         TransferSourceRequest::File { .. } => transfers.approved_file_preview(
             request.approval_id.as_deref(),
             &request.source,
             &destination_identity,
+            &options,
         )?,
     };
     let sink: Arc<dyn DeliveryEventSink> = Arc::new(TauriDeliveryEventSink(app));
     let coordinator = transfers.coordinator()?;
+    let mut config = tuning.delivery_config();
+    config.pending_limit = options.limit();
     let run = coordinator
-        .prepare_run(api, delivery_id, preview, destination_identity, sink)
+        .prepare_run(
+            api,
+            delivery_id,
+            preview,
+            destination_identity,
+            sink,
+            config,
+        )
         .map_err(map_coordinator_error)?;
     let _task = tauri::async_runtime::spawn_blocking(move || {
         let _operation = operation;
@@ -927,6 +1004,9 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
                 FileDestinationSettings::new(settings_path),
             );
             app.manage(DestinationState(Arc::new(service)));
+            app.manage(PreferencesStore::new(
+                app_data_directory.join("preferences.json"),
+            ));
             app.manage(settings::SettingsService::from_app_data_dir(
                 app_data_directory,
             ));
@@ -952,6 +1032,8 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
             cancel_x_acquisition,
             preview_x_snapshot,
             preview_transfer,
+            transfer_preferences,
+            save_transfer_preferences,
             start_delivery,
             cancel_delivery
         ])
@@ -965,6 +1047,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    use super::TransferOptions;
     use std::{
         fs,
         path::PathBuf,
@@ -1053,6 +1136,7 @@ mod tests {
 
         fn delivery_api(
             &self,
+            _timeout: std::time::Duration,
         ) -> Result<Arc<dyn super::karakeep::KarakeepApi>, super::DestinationError> {
             Ok(self.0.clone())
         }
@@ -1078,11 +1162,22 @@ mod tests {
 
         fn delivery_api(
             &self,
+            _timeout: std::time::Duration,
         ) -> Result<Arc<dyn super::karakeep::KarakeepApi>, super::DestinationError> {
             Err(super::DestinationError::for_code(
                 super::DestinationErrorCode::Authentication,
             ))
         }
+    }
+
+    /// Preferences for a test app. The file never exists, so loading returns
+    /// the shipped defaults and nothing is written.
+    fn test_preferences() -> super::PreferencesStore {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let unique = NEXT.fetch_add(1, Ordering::Relaxed);
+        super::PreferencesStore::new(
+            std::env::temp_dir().join(format!("karakeep-transfer-test-preferences-{unique}.json")),
+        )
     }
 
     fn test_transfer_state() -> super::TransferState {
@@ -1092,6 +1187,7 @@ mod tests {
     fn command_response(command: &str, body: tauri::ipc::InvokeBody) -> Result<Value, Value> {
         let directory = tempdir().expect("temporary app state");
         let app = super::configure_builder(mock_builder())
+            .manage(test_preferences())
             .manage(super::FieldTheoryState::bundled(
                 directory.path(),
                 directory.path(),
@@ -1164,6 +1260,7 @@ mod tests {
             fs::write(&source, &approved_contents).expect("selected source");
             let api = Arc::new(SuccessfulDeliveryApi::default());
             let app = super::configure_builder(mock_builder())
+                .manage(test_preferences())
                 .manage(super::FieldTheoryState::bundled(
                     directory.path(),
                     directory.path(),
@@ -1322,6 +1419,7 @@ mod tests {
         directory: &std::path::Path,
     ) {
         let app = super::configure_builder(mock_builder())
+            .manage(test_preferences())
             .manage(super::settings::SettingsService::from_app_data_dir(
                 directory,
             ))
@@ -1430,6 +1528,7 @@ mod tests {
         let snapshot_bytes = fs::metadata(&snapshot).expect("snapshot metadata").len();
         fs::write(directory.path().join("delivery-ledger.sqlite3"), b"ledger").expect("ledger");
         let app = super::configure_builder(mock_builder())
+            .manage(test_preferences())
             .manage(super::FieldTheoryState::bundled(
                 directory.path(),
                 directory.path(),
@@ -1491,6 +1590,7 @@ mod tests {
     fn rejected_destination_connection_is_retained_as_the_latest_diagnostic_failure() {
         let directory = tempdir().expect("temporary app state");
         let app = super::configure_builder(mock_builder())
+            .manage(test_preferences())
             .manage(super::FieldTheoryState::bundled(
                 directory.path(),
                 directory.path(),
@@ -1640,6 +1740,7 @@ mod tests {
         .expect("acquisition state");
         fs::write(directory.path().join("delivery-ledger.sqlite3"), b"ledger").expect("ledger");
         let app = super::configure_builder(mock_builder())
+            .manage(test_preferences())
             .manage(super::settings::SettingsService::from_app_data_dir(
                 directory.path(),
             ))
@@ -1770,6 +1871,7 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/field-theory-one.jsonl");
         let api = Arc::new(SuccessfulDeliveryApi::default());
         let app = super::configure_builder(mock_builder())
+            .manage(test_preferences())
             .manage(super::FieldTheoryState::bundled(
                 directory.path(),
                 directory.path(),
@@ -1856,6 +1958,7 @@ mod tests {
         let preview = super::file_source::preview_file(
             &path,
             super::file_source::FileSourceFormat::FieldTheoryJsonl,
+            &TransferOptions::default(),
         )
         .expect("reviewed file preview");
         let reviewed_destination =
@@ -1864,12 +1967,22 @@ mod tests {
         let other_destination = super::DestinationIdentity::new("https://other.example", "user-b")
             .expect("different destination");
         let approval = transfers
-            .approve_file_source(&source, &preview, &reviewed_destination)
+            .approve_file_source(
+                &source,
+                &preview,
+                &reviewed_destination,
+                &TransferOptions::default(),
+            )
             .expect("file approval")
             .expect("opaque approval ID");
 
         let error = transfers
-            .approved_file_preview(Some(&approval), &source, &other_destination)
+            .approved_file_preview(
+                Some(&approval),
+                &source,
+                &other_destination,
+                &TransferOptions::default(),
+            )
             .expect_err("approval cannot be reused for another destination");
 
         assert_eq!(
@@ -1905,6 +2018,7 @@ mod tests {
                     "total": 1,
                     "pending": 1,
                     "previouslyDelivered": 0,
+                    "preservedTimestamps": 1,
                     "folders": ["Reading"],
                     "destination": {
                         "serverUrl": "https://keep.example",
@@ -1928,12 +2042,13 @@ mod tests {
         let preview = super::file_source::preview_file(
             &path,
             super::file_source::FileSourceFormat::FieldTheoryJsonl,
+            &TransferOptions::default(),
         )
         .expect("reviewed file preview");
         let destination = super::DestinationIdentity::new("https://keep.example", "user-a")
             .expect("reviewed destination");
         let approval = transfers
-            .approve_file_source(&source, &preview, &destination)
+            .approve_file_source(&source, &preview, &destination, &TransferOptions::default())
             .expect("file approval")
             .expect("opaque approval ID");
 
@@ -1942,7 +2057,12 @@ mod tests {
             .expect("ephemeral file approval clears");
 
         let error = transfers
-            .approved_file_preview(Some(&approval), &source, &destination)
+            .approved_file_preview(
+                Some(&approval),
+                &source,
+                &destination,
+                &TransferOptions::default(),
+            )
             .expect_err("deleted local state cannot reuse the old approval");
         assert_eq!(
             error.code,

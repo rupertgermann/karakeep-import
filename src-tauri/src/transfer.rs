@@ -59,18 +59,26 @@ pub struct TransferPreviewCounts {
     pub total: usize,
     pub pending: usize,
     pub previously_delivered: usize,
+    /// Pending records that carry a `createdAt` under the selected timestamp
+    /// field, as the command line importer's dry run reports.
+    pub preserved_timestamps: usize,
 }
 
 pub type SharedSqliteLedger = Arc<Mutex<SqliteLedger>>;
 
+/// Counts the records a run would process. The limit is applied after
+/// previously delivered records are skipped, exactly as the delivery engine
+/// applies it, so the reviewed count matches the delivered count.
 pub fn preview_delivery_counts(
     preview: &FileSourcePreview,
     ledger: &SharedSqliteLedger,
     destination: &DestinationIdentity,
+    limit: Option<usize>,
 ) -> Result<TransferPreviewCounts, ContractLedgerError> {
     let ledger = lock_ledger(ledger)?;
     let source = ledger_source(preview.format);
     let mut previously_delivered = 0;
+    let mut pending = Vec::new();
     for bookmark in &preview.bookmarks {
         let key = bookmark_key(source, &bookmark.source_id)?;
         if ledger
@@ -79,12 +87,21 @@ pub fn preview_delivery_counts(
             .is_some()
         {
             previously_delivered += 1;
+        } else {
+            pending.push(bookmark);
         }
+    }
+    if let Some(limit) = limit {
+        pending.truncate(limit);
     }
     Ok(TransferPreviewCounts {
         total: preview.bookmarks.len(),
-        pending: preview.bookmarks.len() - previously_delivered,
+        pending: pending.len(),
         previously_delivered,
+        preserved_timestamps: pending
+            .iter()
+            .filter(|bookmark| bookmark.created_at.is_some())
+            .count(),
     })
 }
 

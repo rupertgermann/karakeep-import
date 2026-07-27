@@ -21,6 +21,7 @@ use karakeep_transfer_lib::{
     karakeep::BookmarkOrigin,
     ledger::DeliveryLedger,
     transfer::SqliteDeliveryLedgerAdapter,
+    transfer_options::{SourceDefaultTags, TransferOptions},
 };
 
 static PROCESS_ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
@@ -286,7 +287,9 @@ fn snapshot_use_restores_a_complete_prior_promotion_after_interruption() {
     .expect("previous snapshot backup");
     fs::write(state.join("source.previous.json"), "{}\n").expect("previous source backup");
 
-    let restored = store.delivery_source().expect("recovered delivery source");
+    let restored = store
+        .delivery_source(&TransferOptions::default())
+        .expect("recovered delivery source");
 
     assert_eq!(
         (
@@ -323,7 +326,9 @@ fn snapshot_use_keeps_a_fully_promoted_snapshot_and_cleans_transaction_backups()
     .expect("previous snapshot backup");
     fs::write(state.join("source.previous.json"), "{}\n").expect("previous source backup");
 
-    let retained = store.delivery_source().expect("retained delivery source");
+    let retained = store
+        .delivery_source(&TransferOptions::default())
+        .expect("retained delivery source");
 
     assert_eq!(
         (
@@ -356,7 +361,7 @@ fn first_promotion_interruption_never_exposes_a_snapshot_without_its_source_bind
         (
             store.has_snapshot(),
             store.snapshot_bytes().expect("snapshot bytes"),
-            store.delivery_source().is_err(),
+            store.delivery_source(&TransferOptions::default()).is_err(),
         ),
         (false, 0, true)
     );
@@ -688,6 +693,7 @@ fn snapshot_preview_partitions_pending_records_by_destination_without_delivery()
                 user_id: "user-7".to_string(),
                 user_name: "Reader".to_string(),
             },
+            &TransferOptions::default(),
         )
         .expect("snapshot preview");
 
@@ -721,7 +727,13 @@ fn snapshot_store_returns_the_parsed_retained_x_source_for_delivery() {
     fs::write(store.root().join("acquisition/source.json"), "{}\n").expect("source binding");
 
     let source = store
-        .delivery_source()
+        .delivery_source(&TransferOptions {
+            default_tags: SourceDefaultTags {
+                twitter: true,
+                ..SourceDefaultTags::NONE
+            },
+            ..TransferOptions::default()
+        })
         .expect("parsed retained X delivery source");
 
     assert_eq!(
@@ -755,7 +767,7 @@ fn field_theory_state_exposes_parsed_snapshot_data_without_its_private_path() {
     let state = FieldTheoryState::bundled(temporary.path(), temporary.path());
 
     let source = state
-        .snapshot_delivery_source()
+        .snapshot_delivery_source(&TransferOptions::default())
         .expect("parsed snapshot through application state");
     let serialized = serde_json::to_string(&source).expect("source serializes");
 

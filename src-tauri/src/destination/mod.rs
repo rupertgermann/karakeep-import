@@ -235,7 +235,12 @@ where
         Ok(())
     }
 
-    pub fn delivery_api(&self) -> Result<Arc<dyn KarakeepApi>, DestinationError> {
+    /// Builds a delivery client for one run. The timeout comes from the
+    /// advanced delivery tuning settings, read when the run starts.
+    pub fn delivery_api(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<Arc<dyn KarakeepApi>, DestinationError> {
         if self.unusable.load(Ordering::Acquire) {
             return Err(DestinationError::for_code(DestinationErrorCode::Storage));
         }
@@ -258,9 +263,7 @@ where
         let normalized =
             normalize_destination_url(&destination.server_url, destination.insecure_http)?;
         Ok(Arc::new(ReqwestDeliveryApi::new(
-            normalized,
-            api_key,
-            self.client.request_timeout(),
+            normalized, api_key, timeout,
         )?))
     }
 }

@@ -1,8 +1,23 @@
 use std::fs;
 
-use karakeep_transfer_lib::file_source::{
-    FileSourceFormat, ResolvedFileSourceFormat, preview_file, preview_text,
+use karakeep_transfer_lib::{
+    file_source::{FileSourceFormat, ResolvedFileSourceFormat, preview_file, preview_text},
+    transfer_options::{SourceDefaultTags, TransferOptions},
 };
+
+/// The source marker tags a person selects in Settings. These tests assert the
+/// mapping that results once they are selected; no marker tag is attached by
+/// default.
+fn source_tag_options() -> TransferOptions {
+    TransferOptions {
+        default_tags: SourceDefaultTags {
+            twitter: true,
+            field_theory: false,
+            chrome: true,
+        },
+        ..TransferOptions::default()
+    }
+}
 
 const FIELD_THEORY_ONE: &str = include_str!("fixtures/field-theory-one.jsonl");
 const FIELD_THEORY_MANY: &str = include_str!("fixtures/field-theory-many.jsonl");
@@ -11,8 +26,13 @@ const CHROME_AMBIGUOUS: &str = include_str!("fixtures/chrome-ambiguous.txt");
 
 #[test]
 fn one_field_theory_record_maps_to_a_read_only_transfer_preview() {
-    let preview = preview_text("bookmarks.jsonl", FIELD_THEORY_ONE, FileSourceFormat::Auto)
-        .expect("valid Field Theory preview");
+    let preview = preview_text(
+        "bookmarks.jsonl",
+        FIELD_THEORY_ONE,
+        FileSourceFormat::Auto,
+        &source_tag_options(),
+    )
+    .expect("valid Field Theory preview");
 
     assert_eq!(preview.format, ResolvedFileSourceFormat::FieldTheoryJsonl);
     assert_eq!(preview.bookmarks.len(), 1);
@@ -46,8 +66,13 @@ fn one_field_theory_record_maps_to_a_read_only_transfer_preview() {
 
 #[test]
 fn multiple_field_theory_records_are_previewed_in_file_order() {
-    let preview = preview_text("bookmarks.jsonl", FIELD_THEORY_MANY, FileSourceFormat::Auto)
-        .expect("valid multi-record Field Theory preview");
+    let preview = preview_text(
+        "bookmarks.jsonl",
+        FIELD_THEORY_MANY,
+        FileSourceFormat::Auto,
+        &source_tag_options(),
+    )
+    .expect("valid multi-record Field Theory preview");
 
     assert_eq!(preview.bookmarks.len(), 2);
     assert_eq!(preview.bookmarks[0].source_id, "123");
@@ -63,8 +88,13 @@ fn multiple_field_theory_records_are_previewed_in_file_order() {
 fn field_theory_folder_names_from_x_acquisition_become_folder_tags() {
     let input = r#"{"id":"folder-record","url":"https://x.com/example/status/9","folderNames":["Research","research"],"tags":["fieldtheory"]}"#;
 
-    let preview = preview_text("bookmarks.jsonl", input, FileSourceFormat::FieldTheoryJsonl)
-        .expect("valid acquired Field Theory snapshot");
+    let preview = preview_text(
+        "bookmarks.jsonl",
+        input,
+        FileSourceFormat::FieldTheoryJsonl,
+        &source_tag_options(),
+    )
+    .expect("valid acquired Field Theory snapshot");
 
     assert_eq!(
         (
@@ -80,8 +110,13 @@ fn field_theory_folder_names_from_x_acquisition_become_folder_tags() {
 
 #[test]
 fn chrome_netscape_header_is_auto_detected_and_mapped() {
-    let preview = preview_text("bookmarks-export", CHROME_BOOKMARKS, FileSourceFormat::Auto)
-        .expect("valid Chrome preview");
+    let preview = preview_text(
+        "bookmarks-export",
+        CHROME_BOOKMARKS,
+        FileSourceFormat::Auto,
+        &source_tag_options(),
+    )
+    .expect("valid Chrome preview");
 
     assert_eq!(preview.format, ResolvedFileSourceFormat::ChromeNetscape);
     assert_eq!(preview.bookmarks.len(), 1);
@@ -110,6 +145,7 @@ fn ambiguous_chrome_content_can_be_selected_explicitly() {
         "bookmarks-export.txt",
         CHROME_AMBIGUOUS,
         FileSourceFormat::ChromeNetscape,
+        &source_tag_options(),
     )
     .expect("explicit Chrome fallback");
 
@@ -131,8 +167,13 @@ fn chrome_folder_path_is_preserved_while_human_tags_are_deduplicated() {
   </DL><p>
 </DL><p>"#;
 
-    let preview = preview_text("bookmarks.html", input, FileSourceFormat::ChromeNetscape)
-        .expect("valid nested Chrome folders");
+    let preview = preview_text(
+        "bookmarks.html",
+        input,
+        FileSourceFormat::ChromeNetscape,
+        &source_tag_options(),
+    )
+    .expect("valid nested Chrome folders");
     let bookmark = &preview.bookmarks[0];
 
     assert_eq!(bookmark.folders, ["Research", "research"]);
@@ -150,6 +191,7 @@ fn field_theory_duplicate_source_ids_are_rejected() {
         "bookmarks.jsonl",
         duplicate_id,
         FileSourceFormat::FieldTheoryJsonl,
+        &source_tag_options(),
     )
     .expect_err("duplicate source ID must fail");
     assert!(
@@ -169,6 +211,7 @@ fn field_theory_duplicate_urls_are_rejected() {
         "bookmarks.jsonl",
         duplicate_url,
         FileSourceFormat::FieldTheoryJsonl,
+        &source_tag_options(),
     )
     .expect_err("duplicate URL must fail");
     assert!(
@@ -186,8 +229,13 @@ fn chrome_duplicates_are_rejected_after_view_source_normalization() {
   <DT><A HREF="view-source:https://example.com/docs">Source</A>
 </DL><p>"#;
 
-    let error = preview_text("bookmarks.html", input, FileSourceFormat::ChromeNetscape)
-        .expect_err("normalized duplicate must fail");
+    let error = preview_text(
+        "bookmarks.html",
+        input,
+        FileSourceFormat::ChromeNetscape,
+        &source_tag_options(),
+    )
+    .expect_err("normalized duplicate must fail");
 
     assert!(
         error
@@ -202,6 +250,7 @@ fn invalid_json_objects_are_rejected() {
         "bookmarks.jsonl",
         "[]\n",
         FileSourceFormat::FieldTheoryJsonl,
+        &source_tag_options(),
     )
     .expect_err("non-object JSONL value must fail");
     assert!(error.to_string().contains("line 1 is not a JSON object"));
@@ -213,6 +262,7 @@ fn non_web_chrome_urls_are_rejected() {
         "bookmarks.html",
         r#"<DL><p><DT><A HREF="javascript:alert(1)">Bookmarklet</A></DL><p>"#,
         FileSourceFormat::ChromeNetscape,
+        &source_tag_options(),
     )
     .expect_err("bookmarklet must fail");
     assert!(
@@ -231,7 +281,8 @@ fn preview_file_reads_the_selected_file_in_place_without_copying_it() {
     let before = fs::read_dir(temporary.path())
         .expect("directory is readable")
         .count();
-    let preview = preview_file(&selected, FileSourceFormat::Auto).expect("preview selected file");
+    let preview = preview_file(&selected, FileSourceFormat::Auto, &source_tag_options())
+        .expect("preview selected file");
     let after = fs::read_dir(temporary.path())
         .expect("directory remains readable")
         .count();

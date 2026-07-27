@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use url::Url;
 
-use crate::bookmark::BookmarkPreview;
+use crate::{
+    bookmark::BookmarkPreview,
+    transfer_options::{DefaultTagSource, SourceDefaultTags, TimestampField, TransferOptions},
+};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +61,7 @@ impl Error for FileSourceError {}
 pub fn preview_file(
     path: &Path,
     requested_format: FileSourceFormat,
+    options: &TransferOptions,
 ) -> Result<FileSourcePreview, FileSourceError> {
     let contents = fs::read_to_string(path).map_err(|error| {
         FileSourceError::new(format!(
@@ -69,7 +73,7 @@ pub fn preview_file(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    preview_text(file_name, &contents, requested_format)
+    preview_text(file_name, &contents, requested_format, options)
 }
 
 /// Parses and maps File Source content without contacting Karakeep.
@@ -77,11 +81,12 @@ pub fn preview_text(
     file_name: &str,
     contents: &str,
     requested_format: FileSourceFormat,
+    options: &TransferOptions,
 ) -> Result<FileSourcePreview, FileSourceError> {
     let format = resolve_format(file_name, contents, requested_format);
     let bookmarks = match format {
-        ResolvedFileSourceFormat::FieldTheoryJsonl => parse_field_theory(contents)?,
-        ResolvedFileSourceFormat::ChromeNetscape => parse_chrome(contents)?,
+        ResolvedFileSourceFormat::FieldTheoryJsonl => parse_field_theory(contents, options)?,
+        ResolvedFileSourceFormat::ChromeNetscape => parse_chrome(contents, options)?,
     };
     Ok(FileSourcePreview { format, bookmarks })
 }
@@ -116,7 +121,10 @@ fn resolve_format(
     }
 }
 
-fn parse_field_theory(contents: &str) -> Result<Vec<BookmarkPreview>, FileSourceError> {
+fn parse_field_theory(
+    contents: &str,
+    options: &TransferOptions,
+) -> Result<Vec<BookmarkPreview>, FileSourceError> {
     let mut bookmarks = Vec::new();
     let mut seen_ids = HashSet::new();
     let mut seen_urls = HashSet::new();
@@ -155,7 +163,7 @@ fn parse_field_theory(contents: &str) -> Result<Vec<BookmarkPreview>, FileSource
                 "Duplicate URL {url} on line {line_number}"
             )));
         }
-        bookmarks.push(map_field_theory(record, source_id, url));
+        bookmarks.push(map_field_theory(record, source_id, url, options));
     }
 
     Ok(bookmarks)
@@ -165,26 +173,78 @@ fn map_field_theory(
     record: &Map<String, Value>,
     source_id: String,
     url: String,
+    options: &TransferOptions,
 ) -> BookmarkPreview {
-    let exported_tags = string_array(record, "tags");
-    let folder_names = string_array(record, "folderNames");
-    let folders = deduplicate_tags(
-        exported_tags
-            .into_iter()
-            .chain(folder_names)
-            .filter(|tag| !tag.eq_ignore_ascii_case("fieldtheory")),
-    );
-    let tags =
-        deduplicate_tags(std::iter::once("twitter".to_string()).chain(folders.iter().cloned()));
+    // The internal name only reaches a library when it was asked for, whether
+    // it comes from the selected default tags or from the export's own tags.
+    let keep_internal_name = options
+        .default_tags_for(DefaultTagSource::FieldTheory)
+        .iter()
+        .any(|tag| tag == SourceDefaultTags::FIELD_THEORY_TAG);
+    let folders = if options.include_export_tags {
+        deduplicate_tags(
+            string_array(record, "tags")
+                .into_iter()
+                .chain(string_array(record, "folderNames"))
+                .filter(|tag| {
+                    keep_internal_name
+                        || !tag.eq_ignore_ascii_case(SourceDefaultTags::FIELD_THEORY_TAG)
+                }),
+        )
+    } else {
+        Vec::new()
+    };
+    let tags = compose_tags(options, DefaultTagSource::FieldTheory, &folders);
 
     BookmarkPreview {
         source_id,
         url,
-        title: make_field_theory_title(record),
-        note: make_field_theory_note(record),
-        created_at: parse_timestamp(record.get("postedAt")),
+        title: optional_mapping(options.include_titles, || make_field_theory_title(record)),
+        note: optional_mapping(options.include_notes, || make_field_theory_note(record)),
+        created_at: field_theory_timestamp(record, options.timestamp_field),
         tags,
         folders,
+    }
+}
+
+/// Composes the tag list from its three independent groups, in the order the
+/// command line importer uses, then deduplicates case-insensitively.
+fn compose_tags(
+    options: &TransferOptions,
+    source: DefaultTagSource,
+    export_tags: &[String],
+) -> Vec<String> {
+    deduplicate_tags(
+        options
+            .default_tags_for(source)
+            .into_iter()
+            .chain(options.extra_tags.iter().cloned())
+            .chain(export_tags.iter().cloned()),
+    )
+}
+
+fn optional_mapping(include: bool, map: impl FnOnce() -> String) -> String {
+    if include { map() } else { String::new() }
+}
+
+/// Resolves the selected timestamp field for a Field Theory record. A missing
+/// or unparseable value omits `createdAt` rather than failing the record.
+fn field_theory_timestamp(record: &Map<String, Value>, field: TimestampField) -> Option<String> {
+    let key = match field {
+        TimestampField::None => return None,
+        TimestampField::Source | TimestampField::PostedAt => "postedAt",
+        TimestampField::BookmarkedAt => "bookmarkedAt",
+        TimestampField::AddedAt => "addedAt",
+    };
+    parse_timestamp(record.get(key))
+}
+
+/// Resolves the selected timestamp field for a Chrome record, whose only
+/// timestamp is the `ADD_DATE` attribute.
+fn chrome_timestamp(added_at: &str, field: TimestampField) -> Option<String> {
+    match field {
+        TimestampField::Source | TimestampField::AddedAt => parse_timestamp_string(added_at),
+        TimestampField::PostedAt | TimestampField::BookmarkedAt | TimestampField::None => None,
     }
 }
 
@@ -314,8 +374,8 @@ fn make_field_theory_note(record: &Map<String, Value>) -> String {
     sections.join("\n\n")
 }
 
-#[derive(Default)]
-struct ChromeParser {
+struct ChromeParser<'a> {
+    options: &'a TransferOptions,
     bookmarks: Vec<BookmarkPreview>,
     folders: Vec<String>,
     folder_depths: Vec<bool>,
@@ -331,7 +391,19 @@ struct ChromeBookmarkCapture {
     title: String,
 }
 
-impl ChromeParser {
+impl<'a> ChromeParser<'a> {
+    fn new(options: &'a TransferOptions) -> Self {
+        Self {
+            options,
+            bookmarks: Vec::new(),
+            folders: Vec::new(),
+            folder_depths: Vec::new(),
+            pending_folder: None,
+            folder_text: None,
+            bookmark: None,
+        }
+    }
+
     fn start_tag(&mut self, name: &str, attributes: &str) {
         match name {
             "h3" => self.folder_text = Some(String::new()),
@@ -406,15 +478,17 @@ impl ChromeParser {
                 }
             ))
         })?;
-        let created_at = parse_timestamp_string(&bookmark.added_at);
-        let folders: Vec<String> = self
-            .folders
-            .iter()
-            .map(|folder| compact_text(folder))
-            .filter(|folder| !folder.is_empty())
-            .collect();
-        let tags =
-            deduplicate_tags(std::iter::once("chrome".to_string()).chain(folders.iter().cloned()));
+        let created_at = chrome_timestamp(&bookmark.added_at, self.options.timestamp_field);
+        let folders: Vec<String> = if self.options.include_export_tags {
+            self.folders
+                .iter()
+                .map(|folder| compact_text(folder))
+                .filter(|folder| !folder.is_empty())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let tags = compose_tags(self.options, DefaultTagSource::Chrome, &folders);
         let mut metadata = Vec::new();
         if !folders.is_empty() {
             metadata.push(format!("Chrome folder: {}", folders.join(" > ")));
@@ -427,8 +501,8 @@ impl ChromeParser {
         self.bookmarks.push(BookmarkPreview {
             source_id: url.clone(),
             url,
-            title: truncate(&title, 300),
-            note: metadata.join("\n"),
+            title: optional_mapping(self.options.include_titles, || truncate(&title, 300)),
+            note: optional_mapping(self.options.include_notes, || metadata.join("\n")),
             created_at,
             tags,
             folders,
@@ -437,8 +511,11 @@ impl ChromeParser {
     }
 }
 
-fn parse_chrome(contents: &str) -> Result<Vec<BookmarkPreview>, FileSourceError> {
-    let mut parser = ChromeParser::default();
+fn parse_chrome(
+    contents: &str,
+    options: &TransferOptions,
+) -> Result<Vec<BookmarkPreview>, FileSourceError> {
+    let mut parser = ChromeParser::new(options);
     tokenize_html(contents, &mut parser)?;
 
     let mut seen_urls = HashSet::new();
@@ -454,7 +531,7 @@ fn parse_chrome(contents: &str) -> Result<Vec<BookmarkPreview>, FileSourceError>
     Ok(parser.bookmarks)
 }
 
-fn tokenize_html(contents: &str, parser: &mut ChromeParser) -> Result<(), FileSourceError> {
+fn tokenize_html(contents: &str, parser: &mut ChromeParser<'_>) -> Result<(), FileSourceError> {
     let mut cursor = 0;
     while let Some(relative_start) = contents[cursor..].find('<') {
         let start = cursor + relative_start;
