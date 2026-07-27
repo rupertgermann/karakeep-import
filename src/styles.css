@@ -169,8 +169,8 @@ select {
 
 .brand-mark {
   display: grid;
-  width: 5rem;
-  height: 5rem;
+  width: 6rem;
+  height: 6rem;
   margin-bottom: 2rem;
   place-items: center;
   border: 1px solid #cec9bc;
@@ -180,8 +180,8 @@ select {
 }
 
 .brand-mark img {
-  width: 3.5rem;
-  height: 3.5rem;
+  width: 5rem;
+  height: 5rem;
 }
 
 .eyebrow {
