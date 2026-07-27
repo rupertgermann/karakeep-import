@@ -27,8 +27,22 @@ safe to repeat.
 7. Follow structured progress and receive created, existing, retried, and
    failed totals.
 
-The app owns retry, rate, timeout, concurrency, state-path, title, note, and
-timestamp behavior. Those are not user-facing tuning controls.
+Import options are split into two tiers, recorded in
+[ADR 0025](./adr/0025-split-import-options-into-mapping-and-tuning.md).
+
+- **Source mapping options** change what lands in Karakeep and appear on the
+  Transfer Review screen next to the confirm action, scoped to one run: extra
+  tags, suppress source default tags, suppress export-carried tags, omit titles,
+  omit notes, source timestamp field, and a pending-record limit. Changing one
+  re-previews the transfer and invalidates the previous approval.
+- **Delivery tuning options** change throughput only and live in advanced
+  Settings: worker count, requests per second, request timeout, and maximum
+  retries. They persist across restarts and apply to the next run started after
+  a change, never to a run already in progress.
+
+The app owns the state path, the retry backoff shape, and the rules that compose
+a title, a note, and a tag list from a source record. Those are not user-facing
+controls.
 
 ## Secondary journey
 
@@ -39,10 +53,13 @@ source.
 
 ## Transfer semantics
 
-- Every X bookmark receives the Karakeep human tag `twitter`.
+- Settings carries the set of source default tags a transfer attaches, chosen
+  from `twitter`, `fieldtheory`, and `chrome`. None is selected out of the box,
+  as recorded in
+  [ADR 0026](./adr/0026-choose-source-default-tags-in-settings.md).
 - X folder names become same-named Karakeep human tags.
 - Tags are deduplicated case-insensitively.
-- The internal name `fieldtheory` is not added as a tag.
+- Empty and whitespace-only tags are discarded.
 - New bookmarks preserve URL, title, tweet text, author, source timestamp,
   quoted text, and linked URLs.
 - Image and video binaries are not acquired or uploaded.
@@ -187,12 +204,13 @@ The single-window flow covers:
 - Karakeep connection setup and validation;
 - browser detection, profile choice, and X-session consent;
 - acquisition progress and cancellation;
-- transfer preview and confirmation;
+- transfer preview, source mapping options, and confirmation;
 - delivery progress and cancellation;
 - completed, partial, interrupted, authentication, compatibility, and network
   failure results;
 - settings for connection replacement, source replacement, data deletion,
-  local diagnostics, version information, and manual update checking;
+  source default tags, advanced delivery tuning, local diagnostics, version
+  information, and manual update checking;
 - **Other sources** for one-off file imports.
 
 ## Platform and release
@@ -230,7 +248,10 @@ The single-window flow covers:
 - OAuth or manual X-cookie entry
 - X media archiving
 - Karakeep content overwrites or deletions
-- Advanced concurrency and payload controls
+- Delivery ledger and snapshot path selection
+- Retry backoff shape and payload structure controls
+- The superseded script options `--state-file`, `--failure-file`,
+  `--progress-every`, `--api-key-env`, and `--execute`
 - Automatic app updates
 - Remote telemetry and crash reporting
 - Linux, native Windows ARM64, and store distribution
