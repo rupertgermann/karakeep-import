@@ -42,7 +42,8 @@ jobs:
 
   desktop:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    # Release-script tests exercise macOS staging with native-host validation.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
