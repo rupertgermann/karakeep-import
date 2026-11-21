@@ -430,16 +430,41 @@ describe("TransferReview transfer options", () => {
     });
   });
 
-  it("caps the run at a positive limit and treats anything else as uncapped", () => {
-    const onOptionsChange = renderOptions();
+  it("caps the run at a positive limit and clears the cap when the field is emptied", () => {
+    const onOptionsChange = renderOptions({ ...defaultTransferOptions, limit: 1 });
     const field = screen.getByLabelText("Limit this run to");
 
     fireEvent.change(field, { target: { value: "10" } });
-    fireEvent.change(field, { target: { value: "0" } });
+    fireEvent.change(field, { target: { value: "" } });
 
     expect(onOptionsChange.mock.calls.map(([options]) => options.limit)).toEqual(
       [10, null],
     );
+  });
+
+  it("keeps the reviewed cap and blocks delivery while the limit is invalid", () => {
+    const onOptionsChange = renderOptions({ ...defaultTransferOptions, limit: 10 });
+    const field = screen.getByLabelText("Limit this run to");
+    const start = screen.getByRole("button", { name: "Start transfer" });
+    fireEvent.click(start);
+    const confirm = screen.getByRole("button", { name: "Confirm transfer" });
+
+    for (const value of ["0", "-1", "1.5", "1e2", "9007199254740992", "-"]) {
+      fireEvent.change(field, { target: { value } });
+
+      expect(onOptionsChange).not.toHaveBeenCalled();
+      expect(field).toHaveValue(value);
+      expect(field).toHaveAccessibleDescription(/enter a positive whole number/i);
+      expect(start).toBeDisabled();
+      expect(confirm).toBeDisabled();
+    }
+
+    fireEvent.change(field, { target: { value: "10" } });
+
+    expect(field).not.toHaveAccessibleDescription();
+    expect(onOptionsChange).not.toHaveBeenCalled();
+    expect(start).toBeEnabled();
+    expect(confirm).toBeEnabled();
   });
 
   it("locks the options while a changed preview is being prepared", () => {

@@ -220,7 +220,6 @@
 }
 
 .transfer-review__options input[type="text"],
-.transfer-review__options input[type="number"],
 .transfer-review__options select {
   width: 100%;
   padding: 0.5rem 0.6rem;
