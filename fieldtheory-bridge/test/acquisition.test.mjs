@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { syncBookmarksGraphQL } from "fieldtheory/dist/graphql-bookmarks.js";
 
 import { acquireSnapshot } from "../src/acquisition.mjs";
 import {
@@ -112,6 +113,69 @@ test("returns a resumable result before acquiring folders when X throttles bookm
     resumeReason: "rateLimited",
   });
   assert.equal(folderCalls, 0);
+});
+
+test("checkpoints a fetched page and pauses on a long Retry-After without waiting", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "karakeep-x-throttle-"));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const entries = [
+    {
+      entryId: "tweet-123",
+      content: {
+        itemContent: { tweet_results: { result: { legacy: { id_str: "123" } } } },
+      },
+    },
+    { entryId: "cursor-bottom-next", content: { value: "next-page" } },
+  ];
+  const firstPage = {
+    data: {
+      bookmark_timeline_v2: {
+        timeline: { instructions: [{ type: "TimelineAddEntries", entries }] },
+      },
+    },
+  };
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    requests += 1;
+    return requests === 1
+      ? Response.json(firstPage)
+      : new Response(null, { status: 429, headers: { "Retry-After": "3600" } });
+  });
+  const waits = [];
+  t.mock.method(globalThis, "setTimeout", (callback, delay) => {
+    waits.push(delay);
+    callback();
+  });
+
+  const result = await acquireSnapshot(
+    {
+      consent: true,
+      source,
+      dataDir,
+      signal: new AbortController().signal,
+      onProgress() {},
+    },
+    {
+      selectSource: async () => source,
+      acquireBookmarks: (options) =>
+        syncBookmarksGraphQL({ ...options, csrfToken: "fixture-only", delayMs: 0 }),
+      acquireBookmarkFolders: () =>
+        assert.fail("paused acquisition must skip folders"),
+    },
+  );
+
+  assert.equal(result.resumeReason, "rateLimited");
+  assert.equal(result.total, 1);
+  assert.deepEqual(waits, [0]);
+  assert.equal(requests, 2);
+  const saved = JSON.parse(
+    await readFile(path.join(dataDir, "bookmarks-backfill-state.json"), "utf8"),
+  );
+  const bookmark = JSON.parse(
+    await readFile(path.join(dataDir, "bookmarks.jsonl"), "utf8"),
+  );
+  assert.equal(saved.lastCursor, "next-page");
+  assert.equal(bookmark.id, "123");
 });
 
 test("passes the saved cursor into a same-source bookmark backfill", async () => {

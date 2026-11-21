@@ -12,14 +12,13 @@ use karakeep::{
     ApiError, ApiErrorKind, BookmarkDraft, BookmarkOrigin, EnsuredBookmark, KarakeepApi,
     KarakeepBookmark, RequestCancellation,
 };
-use karakeep_transfer_lib::{bookmark, delivery, domain, file_source, karakeep, ledger, transfer};
-
-#[path = "../src/delivery_coordinator.rs"]
-mod delivery_coordinator;
-
-use delivery_coordinator::{
-    DeliveryCoordinator, DeliveryCoordinatorErrorCode, DeliveryEvent, DeliveryEventSink,
-    DeliveryFailureCode, DeliveryId, DeliveryRun, DeliveryTerminalEvent,
+use karakeep_transfer_lib::{
+    bookmark, delivery,
+    delivery_coordinator::{
+        self, DeliveryCoordinator, DeliveryCoordinatorErrorCode, DeliveryEvent, DeliveryEventSink,
+        DeliveryFailureCode, DeliveryId, DeliveryRun, DeliveryTerminalEvent,
+    },
+    domain, file_source, karakeep, ledger, transfer,
 };
 
 #[derive(Default)]

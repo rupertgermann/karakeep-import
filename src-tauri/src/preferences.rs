@@ -10,7 +10,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    delivery::{DeliveryConfig, RetryPolicy},
+    delivery::{DeliveryConfig, MAX_DELIVERY_WORKERS, RetryPolicy},
     transfer_options::SourceDefaultTags,
 };
 
@@ -39,7 +39,7 @@ impl Default for DeliveryTuning {
 
 impl DeliveryTuning {
     fn validate(&self) -> Result<(), PreferencesError> {
-        if self.workers == 0
+        if !(1..=MAX_DELIVERY_WORKERS).contains(&self.workers)
             || !self.requests_per_second.is_finite()
             || self.requests_per_second <= 0.0
             || self.timeout_seconds == 0
@@ -87,7 +87,7 @@ impl PreferencesError {
     pub fn message(self) -> &'static str {
         match self {
             Self::OutOfRange => {
-                "Worker count, requests per second, and timeout must be greater than zero."
+                "Use the allowed worker count and positive requests per second and timeout."
             }
             Self::Storage => "Settings could not be saved.",
         }
@@ -151,7 +151,15 @@ impl PreferencesStore {
 
     fn read(&self) -> Result<TransferPreferences, PreferencesError> {
         match fs::read_to_string(&self.path) {
-            Ok(contents) => serde_json::from_str(&contents).map_err(|_| PreferencesError::Storage),
+            Ok(contents) => {
+                let mut preferences: TransferPreferences =
+                    serde_json::from_str(&contents).map_err(|_| PreferencesError::Storage)?;
+                preferences.delivery_tuning.workers = preferences
+                    .delivery_tuning
+                    .workers
+                    .min(MAX_DELIVERY_WORKERS);
+                Ok(preferences)
+            }
             Err(error) if error.kind() == ErrorKind::NotFound => Ok(TransferPreferences::default()),
             Err(_) => Err(PreferencesError::Storage),
         }

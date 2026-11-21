@@ -417,14 +417,22 @@ class ChromeBookmarksParser(HTMLParser):
         )
 
 
+def is_web_url(url: object) -> bool:
+    if not isinstance(url, str) or re.search(r"[\x00-\x20\x7f]", url):
+        return False
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        _ = parsed.port  # Accessing port also rejects malformed port values.
+        return parsed.scheme in HTTP_DEFAULT_PORTS and bool(parsed.hostname)
+    except ValueError:
+        return False
+
+
 def normalize_chrome_url(url: str) -> str | None:
     normalized = url.strip()
     if normalized.casefold().startswith("view-source:"):
         normalized = normalized[len("view-source:") :]
-    parsed = urllib.parse.urlsplit(normalized)
-    if parsed.scheme.casefold() in {"http", "https"} and parsed.netloc:
-        return normalized
-    return None
+    return normalized if is_web_url(normalized) else None
 
 
 def detect_input_format(path: Path) -> str:
@@ -483,9 +491,7 @@ def load_input(
                 )
             record_id = source_id(value)
             url = value.get("url")
-            if not isinstance(url, str) or not url.startswith(
-                ("http://", "https://")
-            ):
+            if not is_web_url(url):
                 raise ImportFailure(
                     f"Record {record_id} on line {line_number} has no valid http(s) URL"
                 )

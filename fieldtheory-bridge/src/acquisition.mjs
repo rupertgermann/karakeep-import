@@ -127,6 +127,7 @@ export async function acquireSnapshot(
     const bookmarks = await dependencies.acquireBookmarks({
       ...options,
       ...(resumeCursor === undefined ? {} : { resumeCursor }),
+      stopOnRateLimit: true,
       signal,
       onProgress: (progress) => onProgress(bookmarkProgress(progress)),
     });

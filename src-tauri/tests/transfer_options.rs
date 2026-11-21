@@ -460,12 +460,35 @@ fn saved_preferences_survive_a_restart() {
 }
 
 #[test]
+fn an_oversized_saved_worker_count_loads_at_the_limit() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let path = directory.path().join("preferences.json");
+    std::fs::write(
+        &path,
+        r#"{"deliveryTuning":{"workers":1000,"maxRetries":2}}"#,
+    )
+    .expect("write previously accepted settings");
+
+    let tuning = PreferencesStore::new(path)
+        .load()
+        .expect("older settings should remain usable")
+        .delivery_tuning;
+    assert_eq!(tuning.workers, 32);
+    assert_eq!(tuning.delivery_config().max_concurrency, 32);
+    assert_eq!(tuning.max_retries, 2);
+}
+
+#[test]
 fn out_of_range_tuning_is_rejected_and_leaves_the_stored_values_alone() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let store = PreferencesStore::new(directory.path().join("preferences.json"));
     let invalid = [
         DeliveryTuning {
             workers: 0,
+            ..DeliveryTuning::default()
+        },
+        DeliveryTuning {
+            workers: 33,
             ..DeliveryTuning::default()
         },
         DeliveryTuning {

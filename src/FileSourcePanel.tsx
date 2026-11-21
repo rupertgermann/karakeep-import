@@ -29,16 +29,46 @@ function formatLabel(format: FileSourcePreview["format"]): string {
 }
 
 function safeErrorMessage(error: unknown): string {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "fileUnreadable"
-  ) {
+  const fallback =
+    "The selected file could not be previewed. Choose its format and try again.";
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return fallback;
+  }
+  if (error.code === "fileUnreadable") {
     return "The selected file could not be read. Check its permissions and try again.";
   }
+  if (!("position" in error)) {
+    return fallback;
+  }
 
-  return "The selected file could not be previewed. Choose its format and try again.";
+  const { position } = error;
+  if (
+    typeof position !== "object" ||
+    position === null ||
+    !("kind" in position) ||
+    (position.kind !== "line" && position.kind !== "bookmark") ||
+    !("number" in position) ||
+    typeof position.number !== "number" ||
+    !Number.isSafeInteger(position.number) ||
+    position.number < 1
+  ) {
+    return fallback;
+  }
+
+  const label = position.kind === "line" ? "Line" : "Bookmark";
+  const location = `${label} ${position.number}`;
+  switch (error.code) {
+    case "invalidRecord":
+      return `${location} must contain a valid bookmark record.`;
+    case "duplicateSourceId":
+      return `${location} has the same bookmark ID as an earlier record.`;
+    case "invalidUrl":
+      return `${location} must contain a valid HTTP or HTTPS bookmark URL.`;
+    case "duplicateUrl":
+      return `${location} has the same URL as an earlier bookmark.`;
+    default:
+      return fallback;
+  }
 }
 
 export default function FileSourcePanel({
@@ -136,7 +166,7 @@ export default function FileSourcePanel({
           <button
             type="button"
             onClick={() => onContinue(selection)}
-            disabled={bookmarkCount === 0}
+            disabled={busy || bookmarkCount === 0}
           >
             Continue with {countLabel}
           </button>

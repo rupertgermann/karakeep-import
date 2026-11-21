@@ -46,6 +46,24 @@ function controlledApi() {
 }
 
 describe("X acquisition", () => {
+  it("explains how to change X accounts within the same browser profile before acquisition", () => {
+    const controlled = controlledApi();
+    render(
+      <XAcquisition
+        api={controlled.api}
+        source={source}
+        onPreview={() => {}}
+        onChooseAnotherSource={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        /Settings → Replace X Source before acquiring from a different X account in the same browser profile/,
+      ),
+    ).toBeVisible();
+  });
+
   it("offers another source before acquisition begins", () => {
     const controlled = controlledApi();
     const onChooseAnotherSource = vi.fn();

@@ -1,4 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type {
   BrowserSource,
@@ -24,6 +31,15 @@ export default function XSourceSetup({
   const [selected, setSelected] = useState<SelectedXSource | null>(null);
   const [error, setError] = useState("");
   const [discoveryAttempt, setDiscoveryAttempt] = useState(0);
+  const [selecting, setSelecting] = useState(false);
+  const selectionPending = useRef(false);
+
+  useLayoutEffect(
+    () => () => {
+      selectionPending.current = false;
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -65,16 +81,27 @@ export default function XSourceSetup({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (selectionPending.current || !consent || !profileId) return;
+    selectionPending.current = true;
+    setSelecting(true);
     setError("");
     try {
       const nextSource = await api.selectXSource({
         consent: true,
         source: { browserId, profileId },
       });
+      if (!selectionPending.current) return;
       setSelected(nextSource);
       onSelected?.(nextSource);
     } catch {
-      setError("The selected browser profile is no longer available.");
+      if (selectionPending.current) {
+        setError("The selected browser profile is no longer available.");
+      }
+    } finally {
+      if (selectionPending.current) {
+        selectionPending.current = false;
+        setSelecting(false);
+      }
     }
   };
 
@@ -114,6 +141,7 @@ export default function XSourceSetup({
             <label>
               <span>Browser</span>
               <select
+                disabled={selecting}
                 value={browserId}
                 onChange={(event) => chooseBrowser(event.target.value)}
               >
@@ -127,6 +155,7 @@ export default function XSourceSetup({
             <label>
               <span>Profile</span>
               <select
+                disabled={selecting}
                 value={profileId}
                 onChange={(event) => {
                   setProfileId(event.target.value);
@@ -145,6 +174,7 @@ export default function XSourceSetup({
           <label className="consent">
             <input
               type="checkbox"
+              disabled={selecting}
               checked={consent}
               onChange={(event) => setConsent(event.target.checked)}
             />
@@ -154,8 +184,8 @@ export default function XSourceSetup({
             </span>
           </label>
 
-          <button type="submit" disabled={!consent || !profileId}>
-            Use this X Source
+          <button type="submit" disabled={selecting || !consent || !profileId}>
+            {selecting ? "Selecting X Source…" : "Use this X Source"}
           </button>
         </form>
       )}

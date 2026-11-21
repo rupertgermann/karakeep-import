@@ -367,8 +367,10 @@ function DefaultTagToggle({
   );
 }
 
+const MAX_DELIVERY_WORKERS = 32;
+
 const tuningFields = [
-  { key: "workers", label: "Workers", min: 1, step: 1 },
+  { key: "workers", label: "Workers", min: 1, max: MAX_DELIVERY_WORKERS, step: 1 },
   {
     key: "requestsPerSecond",
     label: "Requests per second",
@@ -398,19 +400,25 @@ function DeliveryTuningForm({
   function submit(event: FormEvent) {
     event.preventDefault();
     if (
+      !Number.isInteger(draft.workers) ||
       draft.workers < 1 ||
+      draft.workers > MAX_DELIVERY_WORKERS
+    ) {
+      setRejected(`Workers must be between 1 and ${MAX_DELIVERY_WORKERS}.`);
+      return;
+    }
+    if (
       draft.requestsPerSecond <= 0 ||
       draft.timeoutSeconds < 1 ||
       draft.maxRetries < 0 ||
       [
-        draft.workers,
         draft.requestsPerSecond,
         draft.timeoutSeconds,
         draft.maxRetries,
       ].some((value) => !Number.isFinite(value))
     ) {
       setRejected(
-        "Workers, requests per second, and timeout must be greater than zero, and retries cannot be negative.",
+        "Requests per second and timeout must be greater than zero, and retries cannot be negative.",
       );
       return;
     }
@@ -427,6 +435,7 @@ function DeliveryTuningForm({
             id={`tuning-${field.key}`}
             type="number"
             min={field.min}
+            max={"max" in field ? field.max : undefined}
             step={field.step}
             disabled={busy}
             value={draft[field.key]}

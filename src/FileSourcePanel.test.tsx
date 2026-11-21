@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import FileSourcePanel from "./FileSourcePanel";
 import type {
   FileSourceApi,
+  FileSourceCommandError,
   FileSourcePreview,
 } from "./desktop-api";
 
@@ -63,6 +64,53 @@ describe("Other sources File Source", () => {
     );
   });
 
+  it("prevents continuing with the previous file while a replacement is being read", async () => {
+    const replacementPath = "/private/selected/replacement.jsonl";
+    let finishPreview = () => {};
+    const pendingPreview = new Promise<FileSourcePreview>((resolve) => {
+      finishPreview = () => resolve(preview);
+    });
+    const onContinue = vi.fn();
+    const api: FileSourceApi = {
+      selectFileSource: vi
+        .fn()
+        .mockResolvedValueOnce("/private/selected/bookmarks.jsonl")
+        .mockResolvedValueOnce(replacementPath),
+      previewFileSource: vi
+        .fn()
+        .mockResolvedValueOnce(preview)
+        .mockReturnValueOnce(pendingPreview),
+    };
+
+    render(
+      <FileSourcePanel
+        api={api}
+        onContinue={onContinue}
+        onChooseAnotherSource={vi.fn()}
+      />,
+    );
+    const chooseFile = screen.getByRole("button", {
+      name: "Choose and preview file",
+    });
+    fireEvent.click(chooseFile);
+    const continueButton = await screen.findByRole("button", {
+      name: "Continue with 2 bookmarks",
+    });
+    fireEvent.click(chooseFile);
+    await waitFor(() =>
+      expect(api.previewFileSource).toHaveBeenLastCalledWith(
+        replacementPath,
+        "auto",
+      ),
+    );
+
+    expect(continueButton).toBeDisabled();
+    finishPreview();
+    await screen.findByText(/replacement\.jsonl/);
+    fireEvent.click(continueButton);
+    expect(onContinue).toHaveBeenCalledWith({ path: replacementPath, preview });
+  });
+
   it("offers an explicit Field Theory fallback without exposing unsafe error details", async () => {
     const api: FileSourceApi = {
       selectFileSource: vi
@@ -92,7 +140,7 @@ describe("Other sources File Source", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The selected file could not be previewed. Choose its format and try again.",
     );
-    expect(screen.queryByText(/secret-name/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/raw parser detail/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("combobox", { name: "File format" }), {
       target: { value: "fieldTheoryJsonl" },
     });
@@ -108,6 +156,46 @@ describe("Other sources File Source", () => {
       "fieldTheoryJsonl",
     );
   });
+
+  it.each([
+    {
+      code: "duplicateUrl",
+      position: { kind: "bookmark", number: 2 },
+      message: "Bookmark 2 has the same URL as an earlier bookmark.",
+    },
+    {
+      code: "invalidUrl",
+      position: { kind: "line", number: 3 },
+      message: "Line 3 must contain a valid HTTP or HTTPS bookmark URL.",
+    },
+  ] satisfies FileSourceCommandError[])(
+    "describes the $code validation problem and safe record position",
+    async ({ code, position, message }) => {
+      render(
+        <FileSourcePanel
+          api={{
+            selectFileSource: vi
+              .fn()
+              .mockResolvedValue("/private/selected/bookmarks.txt"),
+            previewFileSource: vi.fn().mockRejectedValue({
+              code,
+              position,
+              message: "private bookmark contents",
+            }),
+          }}
+          onContinue={vi.fn()}
+          onChooseAnotherSource={vi.fn()}
+        />,
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Choose and preview file" }),
+      );
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(message);
+      expect(alert).not.toHaveTextContent("private bookmark contents");
+    },
+  );
 
   it("does not change state when the native file picker is cancelled", async () => {
     const api: FileSourceApi = {

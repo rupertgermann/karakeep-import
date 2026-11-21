@@ -442,12 +442,12 @@ describe("Settings source tags and delivery tuning", () => {
     );
   });
 
-  it("rejects out of range tuning without storing it", async () => {
+  it.each([0, 33])("rejects a worker count of %i without storing it", async (count) => {
     const api = createSettingsApi();
     render(<Settings api={api} />);
     const workers = await screen.findByLabelText("Workers");
 
-    fireEvent.change(workers, { target: { value: "0" } });
+    fireEvent.change(workers, { target: { value: String(count) } });
     fireEvent.click(
       screen.getByRole("button", { name: "Save delivery tuning" }),
     );
@@ -455,7 +455,7 @@ describe("Settings source tags and delivery tuning", () => {
 
     expect(workers).toBeInvalid();
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "must be greater than zero",
+      "Workers must be between 1 and 32.",
     );
     expect(api.saveTransferPreferences).not.toHaveBeenCalled();
   });

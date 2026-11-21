@@ -1,0 +1,21 @@
+--- a/dist/graphql-bookmarks.js
++++ b/dist/graphql-bookmarks.js
+@@ -341,3 +341,3 @@
+ }
+-async function fetchPageWithRetry(csrfToken, cursor, cookieHeader, pageSize) {
++async function fetchPageWithRetry(csrfToken, cursor, cookieHeader, pageSize, stopOnRateLimit) {
+     let lastError;
+@@ -347,4 +347,6 @@
+             const retryAfterSec = parseRetryAfterSec(response);
+-            const waitSec = retryAfterSec ?? Math.min(15 * Math.pow(2, attempt), 120);
+-            lastError = new RateLimitError(`Rate limited (429) on attempt ${attempt + 1}`, retryAfterSec);
++            lastError = new RateLimitError(`Rate limited (429) on attempt ${attempt + 1}`, retryAfterSec);
++            if (stopOnRateLimit)
++                throw lastError;
++            const waitSec = retryAfterSec ?? Math.min(15 * Math.pow(2, attempt), 120);
+             await new Promise((r) => setTimeout(r, waitSec * 1000));
+@@ -520,3 +522,3 @@
+         try {
+-            return await fetchPageWithRetry(csrfToken, cursor, cookieHeader, pageSize);
++            return await fetchPageWithRetry(csrfToken, cursor, cookieHeader, pageSize, options.stopOnRateLimit);
+         }
