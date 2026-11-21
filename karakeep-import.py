@@ -80,6 +80,26 @@ class RateLimiter:
             time.sleep(delay)
 
 
+def _request_origin(url: str) -> tuple[str, str, int]:
+    parts = urllib.parse.urlsplit(url)
+    if parts.hostname is None or parts.username is not None:
+        raise ValueError("Invalid redirect authority")
+    port = parts.port
+    if port is None:
+        port = 443 if parts.scheme == "https" else 80
+    return parts.scheme, parts.hostname, port
+
+
+class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            if _request_origin(req.full_url) != _request_origin(newurl):
+                return None
+        except ValueError:
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class KarakeepClient:
     def __init__(
         self,
@@ -95,6 +115,7 @@ class KarakeepClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.rate_limiter = RateLimiter(requests_per_second)
+        self._opener = urllib.request.build_opener(_SameOriginRedirectHandler())
 
     def preflight(self) -> Mapping[str, Any]:
         response = self._request("GET", "/users/me")
@@ -143,7 +164,7 @@ class KarakeepClient:
                 url, data=data, headers=headers, method=method
             )
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                with self._opener.open(request, timeout=self.timeout) as response:
                     raw_body = response.read()
                     return ApiResponse(
                         status=response.status,

@@ -53,7 +53,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         onPreview={() => {}}
         onChooseAnotherSource={onChooseAnotherSource}
       />,
@@ -72,7 +71,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         onPreview={() => {}}
         onChooseAnotherSource={() => {}}
       />,
@@ -97,7 +95,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-cancelled-switch"}
         onPreview={() => {}}
         onChooseAnotherSource={onChooseAnotherSource}
@@ -129,7 +126,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-resume"}
         onPreview={onPreview}
         onRunningChange={onRunningChange}
@@ -168,7 +164,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-runtime-resume"}
         onPreview={() => {}}
         onChooseAnotherSource={() => {}}
@@ -200,7 +195,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-failed-switch"}
         onPreview={() => {}}
         onChooseAnotherSource={onChooseAnotherSource}
@@ -235,7 +229,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-1"}
         onEvent={onEvent}
         onPreview={onPreview}
@@ -293,7 +286,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-cancel"}
         onPreview={() => {}}
         onChooseAnotherSource={() => {}}
@@ -322,7 +314,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-cancel-error"}
         onPreview={() => {}}
         onChooseAnotherSource={() => {}}
@@ -365,7 +356,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-failure"}
         onPreview={onPreview}
         onChooseAnotherSource={() => {}}
@@ -403,7 +393,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-cancelled"}
         onPreview={() => {}}
         onChooseAnotherSource={() => {}}
@@ -437,7 +426,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-preview-error"}
         onPreview={() => {}}
         onChooseAnotherSource={() => {}}
@@ -474,7 +462,6 @@ describe("X acquisition", () => {
       <XAcquisition
         api={controlled.api}
         source={source}
-        destination={destination}
         createAcquisitionId={() => "acquire-ui-start-error"}
         onPreview={() => {}}
         onChooseAnotherSource={() => {}}

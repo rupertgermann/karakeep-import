@@ -5,15 +5,11 @@ import type {
   SelectedXSource,
   XAcquisitionApi,
 } from "../desktop-api";
-import type {
-  DestinationSummary,
-  TransferPreview,
-} from "../workflow";
+import type { TransferPreview } from "../workflow";
 
 interface XAcquisitionProps {
   api: XAcquisitionApi;
   source: SelectedXSource;
-  destination: DestinationSummary;
   createAcquisitionId?: () => string;
   onEvent?: (event: AcquisitionEvent) => void;
   onPreview: (preview: TransferPreview) => void;
@@ -52,7 +48,6 @@ function safeFailureMessage(event: Extract<AcquisitionEvent, { type: "failed" }>
 export default function XAcquisition({
   api,
   source,
-  destination,
   createAcquisitionId = () => crypto.randomUUID(),
   onEvent,
   onPreview,
@@ -75,7 +70,7 @@ export default function XAcquisition({
 
   const loadPreview = async () => {
     try {
-      onPreview(await api.previewXSnapshot(destination));
+      onPreview(await api.previewXSnapshot());
     } catch {
       setView({
         step: "failed",

@@ -215,9 +215,18 @@ fn write_response(stream: &mut TcpStream, response: PlannedResponse) {
 }
 
 fn delivery_api(server_url: String, api_key: &str, timeout: Duration) -> Arc<dyn KarakeepApi> {
+    let destination =
+        karakeep_transfer_lib::domain::DestinationIdentity::new(&server_url, "user-1").unwrap();
     let service = DestinationService::new(
         ReqwestKarakeepClient::with_timeout(timeout),
-        MemoryVault(Some(api_key.to_owned())),
+        MemoryVault(Some(
+            serde_json::json!({
+                "serverUrl": server_url,
+                "userId": "user-1",
+                "apiKey": api_key,
+            })
+            .to_string(),
+        )),
         MemorySettings(Some(DestinationSummary {
             server_url,
             user_id: "user-1".into(),
@@ -227,7 +236,7 @@ fn delivery_api(server_url: String, api_key: &str, timeout: Duration) -> Arc<dyn
         })),
     );
     service
-        .delivery_api(timeout)
+        .delivery_api(&destination, timeout)
         .expect("remembered destination creates a delivery API")
 }
 
@@ -254,7 +263,10 @@ fn delivery_api_cannot_be_created_without_the_saved_vault_credential() {
         })),
     );
 
-    let error = match service.delivery_api(Duration::from_secs(20)) {
+    let destination =
+        karakeep_transfer_lib::domain::DestinationIdentity::new("http://127.0.0.1:9", "user-1")
+            .unwrap();
+    let error = match service.delivery_api(&destination, Duration::from_secs(20)) {
         Ok(_) => panic!("delivery requires the credential vault entry"),
         Err(error) => error,
     };

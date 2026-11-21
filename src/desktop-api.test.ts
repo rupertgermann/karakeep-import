@@ -224,18 +224,10 @@ describe("desktop API", () => {
       },
     });
 
-    await xAcquisitionApi.previewXSnapshot({
-      serverUrl: "https://keep.example",
-      userId: "user-7",
-      userName: "Reader",
-    });
+    await xAcquisitionApi.previewXSnapshot();
 
-    expect(mocks.invoke).toHaveBeenCalledWith("preview_x_snapshot", {
-      destination: {
-        serverUrl: "https://keep.example",
-        userId: "user-7",
-        userName: "Reader",
-      },
+    expect(mocks.invoke).toHaveBeenCalledWith("preview_transfer", {
+      source: { kind: "x" },
     });
   });
 });

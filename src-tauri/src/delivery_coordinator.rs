@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     error::Error,
     fmt,
     sync::{Arc, Mutex},
@@ -9,7 +10,7 @@ use serde::Serialize;
 use crate::{
     delivery::{
         self, CancellationToken, DeliveryConfig, DeliveryProgress, DeliveryRunError,
-        DeliveryTotals, ProgressSink,
+        DeliveryTotals, ProgressSink, RecordStatus,
     },
     domain::{DestinationIdentity, RunStatus},
     file_source::FileSourcePreview,
@@ -76,7 +77,7 @@ impl DeliveryCoordinatorError {
                 "There is no active delivery operation."
             }
             DeliveryCoordinatorErrorCode::DeliveryIdMismatch => {
-                "The requested delivery operation is not active."
+                "The requested delivery operation is unavailable."
             }
             DeliveryCoordinatorErrorCode::InvalidDeliveryId => {
                 "The delivery operation identifier is invalid."
@@ -188,7 +189,7 @@ pub trait DeliveryEventSink: Send + Sync {
 pub struct DeliveryCoordinator {
     ledger: SharedSqliteLedger,
     config: DeliveryConfig,
-    active: Arc<Mutex<Option<ActiveDelivery>>>,
+    state: Arc<Mutex<DeliveryState>>,
 }
 
 impl DeliveryCoordinator {
@@ -196,7 +197,7 @@ impl DeliveryCoordinator {
         Self {
             ledger,
             config: DeliveryConfig::default(),
-            active: Arc::new(Mutex::new(None)),
+            state: Arc::new(Mutex::new(DeliveryState::default())),
         }
     }
 
@@ -208,7 +209,7 @@ impl DeliveryCoordinator {
         Ok(Self {
             ledger,
             config,
-            active: Arc::new(Mutex::new(None)),
+            state: Arc::new(Mutex::new(DeliveryState::default())),
         })
     }
 
@@ -262,8 +263,79 @@ impl DeliveryCoordinator {
         events: Arc<dyn DeliveryEventSink>,
         config: DeliveryConfig,
     ) -> Result<DeliveryRun, DeliveryCoordinatorError> {
+        self.prepare(
+            api,
+            delivery_id,
+            DeliveryBatch::Reviewed(preview),
+            destination,
+            events,
+            config,
+        )
+    }
+
+    /// Reuses the reviewed mapping for unfinished records from the last delivery.
+    pub fn prepare_retry(
+        &self,
+        api: Arc<dyn KarakeepApi>,
+        delivery_id: DeliveryId,
+        retry_of: &DeliveryId,
+        destination: DestinationIdentity,
+        events: Arc<dyn DeliveryEventSink>,
+        config: DeliveryConfig,
+    ) -> Result<DeliveryRun, DeliveryCoordinatorError> {
+        self.prepare(
+            api,
+            delivery_id,
+            DeliveryBatch::Retry(retry_of),
+            destination,
+            events,
+            config,
+        )
+    }
+
+    fn prepare(
+        &self,
+        api: Arc<dyn KarakeepApi>,
+        delivery_id: DeliveryId,
+        batch: DeliveryBatch<'_>,
+        destination: DestinationIdentity,
+        events: Arc<dyn DeliveryEventSink>,
+        mut config: DeliveryConfig,
+    ) -> Result<DeliveryRun, DeliveryCoordinatorError> {
         validate_config(&config)?;
-        let cancellation = self.begin(delivery_id.clone())?;
+        let mut state = self.state.lock().map_err(|_| {
+            DeliveryCoordinatorError::for_code(DeliveryCoordinatorErrorCode::StateUnavailable)
+        })?;
+        if state.active.is_some() {
+            return Err(DeliveryCoordinatorError::for_code(
+                DeliveryCoordinatorErrorCode::AlreadyActive,
+            ));
+        }
+        let preview = match batch {
+            DeliveryBatch::Reviewed(preview) => {
+                state.retry = None;
+                preview
+            }
+            DeliveryBatch::Retry(retry_of) => {
+                config.pending_limit = None;
+                state
+                    .retry
+                    .take_if(|retry| {
+                        &retry.delivery_id == retry_of && retry.destination == destination
+                    })
+                    .ok_or_else(|| {
+                        DeliveryCoordinatorError::for_code(
+                            DeliveryCoordinatorErrorCode::DeliveryIdMismatch,
+                        )
+                    })?
+                    .preview
+            }
+        };
+        let cancellation = CancellationToken::new();
+        state.active = Some(ActiveDelivery {
+            delivery_id: delivery_id.clone(),
+            cancellation: cancellation.clone(),
+        });
         Ok(DeliveryRun {
             api,
             ledger: Arc::clone(&self.ledger),
@@ -273,19 +345,19 @@ impl DeliveryCoordinator {
             destination,
             events,
             cancellation,
-            _active: ActiveDeliveryGuard {
+            active: ActiveDeliveryGuard {
                 delivery_id,
-                active: Arc::clone(&self.active),
+                state: Arc::clone(&self.state),
             },
         })
     }
 
     pub fn cancel(&self, delivery_id: &DeliveryId) -> Result<(), DeliveryCoordinatorError> {
         let cancellation = {
-            let active = self.active.lock().map_err(|_| {
+            let state = self.state.lock().map_err(|_| {
                 DeliveryCoordinatorError::for_code(DeliveryCoordinatorErrorCode::StateUnavailable)
             })?;
-            let Some(active) = active.as_ref() else {
+            let Some(active) = state.active.as_ref() else {
                 return Err(DeliveryCoordinatorError::for_code(
                     DeliveryCoordinatorErrorCode::NoActiveDelivery,
                 ));
@@ -302,27 +374,9 @@ impl DeliveryCoordinator {
     }
 
     pub fn is_active(&self) -> bool {
-        self.active.lock().map_or(true, |active| active.is_some())
-    }
-
-    fn begin(
-        &self,
-        delivery_id: DeliveryId,
-    ) -> Result<CancellationToken, DeliveryCoordinatorError> {
-        let mut active = self.active.lock().map_err(|_| {
-            DeliveryCoordinatorError::for_code(DeliveryCoordinatorErrorCode::StateUnavailable)
-        })?;
-        if active.is_some() {
-            return Err(DeliveryCoordinatorError::for_code(
-                DeliveryCoordinatorErrorCode::AlreadyActive,
-            ));
-        }
-        let cancellation = CancellationToken::new();
-        *active = Some(ActiveDelivery {
-            delivery_id,
-            cancellation: cancellation.clone(),
-        });
-        Ok(cancellation)
+        self.state
+            .lock()
+            .map_or(true, |state| state.active.is_some())
     }
 }
 
@@ -336,11 +390,11 @@ pub struct DeliveryRun {
     destination: DestinationIdentity,
     events: Arc<dyn DeliveryEventSink>,
     cancellation: CancellationToken,
-    _active: ActiveDeliveryGuard,
+    active: ActiveDeliveryGuard,
 }
 
 impl DeliveryRun {
-    pub fn execute(self) -> DeliveryTerminalEvent {
+    pub fn execute(mut self) -> DeliveryTerminalEvent {
         let adapter = match SqliteDeliveryLedgerAdapter::start(
             Arc::clone(&self.ledger),
             self.destination.clone(),
@@ -398,6 +452,24 @@ impl DeliveryRun {
                 );
             }
         };
+        if report.totals.pending > 0 {
+            let retry_ids: HashSet<_> = report
+                .records
+                .iter()
+                .filter(|record| record.status != RecordStatus::Delivered)
+                .map(|record| record.source_id.as_str())
+                .collect();
+            self.preview
+                .bookmarks
+                .retain(|bookmark| retry_ids.contains(bookmark.source_id.as_str()));
+            if let Ok(mut state) = self.active.state.lock() {
+                state.retry = Some(RetryBatch {
+                    delivery_id: self.delivery_id.clone(),
+                    destination: self.destination,
+                    preview: self.preview,
+                });
+            }
+        }
         let classified_failure = classified_failure_code(&report.records);
         let run_status = if report.totals.cancelled > 0 {
             RunStatus::Interrupted
@@ -439,6 +511,23 @@ impl DeliveryRun {
     }
 }
 
+enum DeliveryBatch<'a> {
+    Reviewed(FileSourcePreview),
+    Retry(&'a DeliveryId),
+}
+
+#[derive(Default)]
+struct DeliveryState {
+    active: Option<ActiveDelivery>,
+    retry: Option<RetryBatch>,
+}
+
+struct RetryBatch {
+    delivery_id: DeliveryId,
+    destination: DestinationIdentity,
+    preview: FileSourcePreview,
+}
+
 struct ActiveDelivery {
     delivery_id: DeliveryId,
     cancellation: CancellationToken,
@@ -446,19 +535,20 @@ struct ActiveDelivery {
 
 struct ActiveDeliveryGuard {
     delivery_id: DeliveryId,
-    active: Arc<Mutex<Option<ActiveDelivery>>>,
+    state: Arc<Mutex<DeliveryState>>,
 }
 
 impl Drop for ActiveDeliveryGuard {
     fn drop(&mut self) {
-        let Ok(mut active) = self.active.lock() else {
+        let Ok(mut state) = self.state.lock() else {
             return;
         };
-        if active
+        if state
+            .active
             .as_ref()
             .is_some_and(|active| active.delivery_id == self.delivery_id)
         {
-            *active = None;
+            state.active = None;
         }
     }
 }

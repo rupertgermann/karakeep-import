@@ -46,9 +46,8 @@ use destination::{
 use domain::DestinationIdentity;
 
 use fieldtheory::{
-    AcquisitionEvent, AcquisitionFailureCode, BridgeCommand, BridgeRequest, DestinationPreview,
-    DiscoveryResponse, FieldTheoryState, SelectedXSource, XAcquisitionRequest, XSourceReference,
-    XSourceSelection, XTransferPreview,
+    AcquisitionEvent, AcquisitionFailureCode, BridgeCommand, BridgeRequest, DiscoveryResponse,
+    FieldTheoryState, SelectedXSource, XAcquisitionRequest, XSourceReference, XSourceSelection,
 };
 use operation_gate::{OperationGate, OperationKind};
 use preferences::{PreferencesError, PreferencesStore, TransferPreferences};
@@ -317,6 +316,7 @@ trait DestinationConnection: Send + Sync {
     fn forget(&self) -> Result<(), DestinationError>;
     fn delivery_api(
         &self,
+        destination: &DestinationIdentity,
         timeout: std::time::Duration,
     ) -> Result<Arc<dyn karakeep::KarakeepApi>, DestinationError>;
 }
@@ -339,9 +339,10 @@ impl DestinationConnection for NativeDestinationService {
 
     fn delivery_api(
         &self,
+        destination: &DestinationIdentity,
         timeout: std::time::Duration,
     ) -> Result<Arc<dyn karakeep::KarakeepApi>, DestinationError> {
-        DestinationService::delivery_api(self, timeout)
+        DestinationService::delivery_api(self, destination, timeout)
     }
 }
 
@@ -455,6 +456,8 @@ fn replace_x_source(
         .operations
         .reserve(OperationKind::Maintenance)
         .map_err(|_| "local transfer data is in use")?;
+    transfers.clear_approval()?;
+    transfers.close_ledger()?;
     let result = state
         .replace_x_source(confirmation.capability())
         .map_err(|_| "X source data could not be replaced");
@@ -478,7 +481,7 @@ fn delete_local_transfer_data(
         .reserve(OperationKind::Maintenance)
         .map_err(|_| "local transfer data is in use")?;
     transfers.close_ledger()?;
-    transfers.clear_file_approval()?;
+    transfers.clear_approval()?;
     let result = state
         .delete_local_transfer_data(confirmation.capability())
         .map_err(|_| "local transfer data could not be deleted");
@@ -556,29 +559,16 @@ fn cancel_x_acquisition(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn preview_x_snapshot(
-    state: tauri::State<'_, FieldTheoryState>,
-    preferences: tauri::State<'_, PreferencesStore>,
-    destination: DestinationPreview,
-) -> Result<XTransferPreview, String> {
-    let options = TransferOptions::default()
-        .with_default_tags(preferences.load().unwrap_or_default().default_tags);
-    state
-        .preview(destination, &options)
-        .map_err(|error| error.to_string())
-}
-
 struct TransferState {
-    approved_file_source: Mutex<Option<ApprovedFileSource>>,
+    approval: Mutex<Option<ApprovedPreview>>,
     coordinator: Mutex<Option<Arc<DeliveryCoordinator>>>,
     ledger_path: PathBuf,
-    next_file_approval: AtomicU64,
+    next_approval: AtomicU64,
     operations: OperationGate,
 }
 
 #[derive(Clone)]
-struct ApprovedFileSource {
+struct ApprovedPreview {
     approval_id: String,
     destination: DestinationIdentity,
     preview: file_source::FileSourcePreview,
@@ -589,10 +579,10 @@ struct ApprovedFileSource {
 impl TransferState {
     fn new(ledger_path: PathBuf) -> Self {
         Self {
-            approved_file_source: Mutex::new(None),
+            approval: Mutex::new(None),
             coordinator: Mutex::new(None),
             ledger_path,
-            next_file_approval: AtomicU64::new(1),
+            next_approval: AtomicU64::new(1),
             operations: OperationGate::default(),
         }
     }
@@ -601,54 +591,51 @@ impl TransferState {
     fn in_memory() -> Self {
         let ledger = ledger::DeliveryLedger::open_in_memory().expect("in-memory delivery ledger");
         Self {
-            approved_file_source: Mutex::new(None),
+            approval: Mutex::new(None),
             coordinator: Mutex::new(Some(Arc::new(DeliveryCoordinator::new(Arc::new(
                 Mutex::new(ledger),
             ))))),
             ledger_path: PathBuf::new(),
-            next_file_approval: AtomicU64::new(1),
+            next_approval: AtomicU64::new(1),
             operations: OperationGate::default(),
         }
     }
 
-    fn approve_file_source(
+    fn approve_preview(
         &self,
         source: &TransferSourceRequest,
         preview: &file_source::FileSourcePreview,
         destination: &DestinationIdentity,
         options: &TransferOptions,
-    ) -> Result<Option<String>, TransferCommandError> {
-        if !matches!(source, TransferSourceRequest::File { .. }) {
-            return Ok(None);
-        }
+    ) -> Result<String, TransferCommandError> {
         let approval_id = format!(
-            "file-approval-{}",
-            self.next_file_approval.fetch_add(1, Ordering::Relaxed)
+            "transfer-approval-{}",
+            self.next_approval.fetch_add(1, Ordering::Relaxed)
         );
-        *self.approved_file_source.lock().map_err(|_| {
+        *self.approval.lock().map_err(|_| {
             TransferCommandError::for_code(TransferCommandErrorCode::DeliveryFailed)
-        })? = Some(ApprovedFileSource {
+        })? = Some(ApprovedPreview {
             approval_id: approval_id.clone(),
             destination: destination.clone(),
             preview: preview.clone(),
             source: source.clone(),
             options: options.clone(),
         });
-        Ok(Some(approval_id))
+        Ok(approval_id)
     }
 
     /// Returns the approved preview only when the request still describes the
     /// transfer that was reviewed. Changing a source mapping option after
     /// review invalidates the approval exactly as changing the source or the
     /// destination does.
-    fn approved_file_preview(
+    fn approved_preview(
         &self,
         approval_id: Option<&str>,
         source: &TransferSourceRequest,
         destination: &DestinationIdentity,
         options: &TransferOptions,
     ) -> Result<file_source::FileSourcePreview, TransferCommandError> {
-        let approved = self.approved_file_source.lock().map_err(|_| {
+        let approved = self.approval.lock().map_err(|_| {
             TransferCommandError::for_code(TransferCommandErrorCode::DeliveryFailed)
         })?;
         approved
@@ -689,9 +676,9 @@ impl TransferState {
         Ok(())
     }
 
-    fn clear_file_approval(&self) -> Result<(), &'static str> {
+    fn clear_approval(&self) -> Result<(), &'static str> {
         let mut approved = self
-            .approved_file_source
+            .approval
             .lock()
             .map_err(|_| "local transfer data is unavailable")?;
         *approved = None;
@@ -704,6 +691,7 @@ impl TransferState {
 struct StartDeliveryRequest {
     approval_id: Option<String>,
     delivery_id: String,
+    retry_of: Option<String>,
     source: TransferSourceRequest,
     #[serde(default)]
     options: TransferOptions,
@@ -755,9 +743,16 @@ impl TransferCommandError {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct DestinationPreview {
+    server_url: String,
+    user_id: String,
+    user_name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TransferPreview {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    approval_id: Option<String>,
+    approval_id: String,
     total: usize,
     pending: usize,
     previously_delivered: usize,
@@ -844,6 +839,9 @@ fn preview_transfer(
     transfers: tauri::State<'_, TransferState>,
     preferences: tauri::State<'_, PreferencesStore>,
 ) -> Result<TransferPreview, TransferCommandError> {
+    transfers
+        .clear_approval()
+        .map_err(|_| TransferCommandError::for_code(TransferCommandErrorCode::DeliveryFailed))?;
     let options = run_options(options.unwrap_or_default(), &preferences)?;
     let (destination_summary, destination_identity) =
         connected_destination(destination.0.as_ref())?;
@@ -859,7 +857,7 @@ fn preview_transfer(
         .preview(&preview, &destination_identity, options.limit())
         .map_err(map_coordinator_error)?;
     let approval_id =
-        transfers.approve_file_source(&source, &preview, &destination_identity, &options)?;
+        transfers.approve_preview(&source, &preview, &destination_identity, &options)?;
     Ok(TransferPreview {
         approval_id,
         total: counts.total,
@@ -879,16 +877,13 @@ fn preview_transfer(
 fn start_delivery<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: StartDeliveryRequest,
-    field_theory: tauri::State<'_, FieldTheoryState>,
     destination: tauri::State<'_, DestinationState>,
     transfers: tauri::State<'_, TransferState>,
     preferences: tauri::State<'_, PreferencesStore>,
 ) -> Result<(), TransferCommandError> {
-    let options = run_options(request.options, &preferences)?;
-    let tuning = preferences
+    let stored = preferences
         .load()
-        .map_err(|_| TransferCommandError::for_code(TransferCommandErrorCode::Unexpected))?
-        .delivery_tuning;
+        .map_err(|_| TransferCommandError::for_code(TransferCommandErrorCode::Unexpected))?;
     let delivery_id = DeliveryId::new(request.delivery_id).map_err(map_coordinator_error)?;
     let operation = transfers
         .operations
@@ -897,26 +892,34 @@ fn start_delivery<R: tauri::Runtime>(
     let (_, destination_identity) = connected_destination(destination.0.as_ref())?;
     let api = destination
         .0
-        .delivery_api(tuning.request_timeout())
+        .delivery_api(
+            &destination_identity,
+            stored.delivery_tuning.request_timeout(),
+        )
         .map_err(map_destination_error)?;
-    let preview = match &request.source {
-        TransferSourceRequest::X => {
-            resolve_transfer_source(&request.source, &field_theory, &options)
-                .map_err(map_transfer_source_error)?
-        }
-        TransferSourceRequest::File { .. } => transfers.approved_file_preview(
+    let sink: Arc<dyn DeliveryEventSink> = Arc::new(TauriDeliveryEventSink(app));
+    let coordinator = transfers.coordinator()?;
+    let mut config = stored.delivery_tuning.delivery_config();
+    let run = if let Some(retry_of) = request.retry_of {
+        let retry_of = DeliveryId::new(retry_of).map_err(map_coordinator_error)?;
+        coordinator.prepare_retry(
+            api,
+            delivery_id,
+            &retry_of,
+            destination_identity,
+            sink,
+            config,
+        )
+    } else {
+        let options = request.options.with_default_tags(stored.default_tags);
+        let preview = transfers.approved_preview(
             request.approval_id.as_deref(),
             &request.source,
             &destination_identity,
             &options,
-        )?,
-    };
-    let sink: Arc<dyn DeliveryEventSink> = Arc::new(TauriDeliveryEventSink(app));
-    let coordinator = transfers.coordinator()?;
-    let mut config = tuning.delivery_config();
-    config.pending_limit = options.limit();
-    let run = coordinator
-        .prepare_run(
+        )?;
+        config.pending_limit = options.limit();
+        coordinator.prepare_run(
             api,
             delivery_id,
             preview,
@@ -924,7 +927,8 @@ fn start_delivery<R: tauri::Runtime>(
             sink,
             config,
         )
-        .map_err(map_coordinator_error)?;
+    }
+    .map_err(map_coordinator_error)?;
     let _task = tauri::async_runtime::spawn_blocking(move || {
         let _operation = operation;
         run.execute();
@@ -1033,7 +1037,6 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
             delete_local_transfer_data,
             start_x_acquisition,
             cancel_x_acquisition,
-            preview_x_snapshot,
             preview_transfer,
             transfer_preferences,
             save_transfer_preferences,
@@ -1139,6 +1142,7 @@ mod tests {
 
         fn delivery_api(
             &self,
+            _destination: &super::DestinationIdentity,
             _timeout: std::time::Duration,
         ) -> Result<Arc<dyn super::karakeep::KarakeepApi>, super::DestinationError> {
             Ok(self.0.clone())
@@ -1165,6 +1169,7 @@ mod tests {
 
         fn delivery_api(
             &self,
+            _destination: &super::DestinationIdentity,
             _timeout: std::time::Duration,
         ) -> Result<Arc<dyn super::karakeep::KarakeepApi>, super::DestinationError> {
             Err(super::DestinationError::for_code(
@@ -1970,17 +1975,16 @@ mod tests {
         let other_destination = super::DestinationIdentity::new("https://other.example", "user-b")
             .expect("different destination");
         let approval = transfers
-            .approve_file_source(
+            .approve_preview(
                 &source,
                 &preview,
                 &reviewed_destination,
                 &TransferOptions::default(),
             )
-            .expect("file approval")
-            .expect("opaque approval ID");
+            .expect("file approval");
 
         let error = transfers
-            .approved_file_preview(
+            .approved_preview(
                 Some(&approval),
                 &source,
                 &other_destination,
@@ -2051,16 +2055,15 @@ mod tests {
         let destination = super::DestinationIdentity::new("https://keep.example", "user-a")
             .expect("reviewed destination");
         let approval = transfers
-            .approve_file_source(&source, &preview, &destination, &TransferOptions::default())
-            .expect("file approval")
-            .expect("opaque approval ID");
+            .approve_preview(&source, &preview, &destination, &TransferOptions::default())
+            .expect("file approval");
 
         transfers
-            .clear_file_approval()
+            .clear_approval()
             .expect("ephemeral file approval clears");
 
         let error = transfers
-            .approved_file_preview(
+            .approved_preview(
                 Some(&approval),
                 &source,
                 &destination,
@@ -2139,6 +2142,60 @@ mod tests {
                 "message": "The selected bookmark source is unavailable."
             }))
         );
+    }
+
+    #[test]
+    fn x_delivery_requires_a_preview_for_the_selected_options() {
+        let harness = FileDeliveryHarness::new();
+        let snapshot_dir = harness._directory.path().join("fieldtheory");
+        fs::create_dir_all(snapshot_dir.join("acquisition")).expect("snapshot directories");
+        fs::write(
+            snapshot_dir.join("bookmarks.jsonl"),
+            &harness.approved_contents,
+        )
+        .expect("retained snapshot");
+        fs::write(snapshot_dir.join("acquisition/source.json"), "{}").expect("source binding");
+        let source = json!({ "kind": "x" });
+        let preview = FileDeliveryHarness::invoke(
+            &harness.webview,
+            "preview_transfer",
+            json!({ "source": source }).into(),
+        )
+        .expect("X preview");
+        let approval = preview["approvalId"].as_str().expect("X preview approval");
+        let start = |id: &str, approval: &str| {
+            FileDeliveryHarness::invoke(
+                &harness.webview,
+                "start_delivery",
+                json!({
+                    "request": {
+                        "deliveryId": id,
+                        "source": source,
+                        "approvalId": approval,
+                        "options": { "includeNotes": false }
+                    }
+                })
+                .into(),
+            )
+        };
+        assert_eq!(
+            start("delivery-stale-x", approval),
+            Err(json!({
+                "code": "source-unavailable",
+                "message": "The selected bookmark source is unavailable."
+            }))
+        );
+        let refreshed = FileDeliveryHarness::invoke(
+            &harness.webview,
+            "preview_transfer",
+            json!({ "source": source, "options": { "includeNotes": false } }).into(),
+        )
+        .expect("refreshed X preview");
+        let approval = refreshed["approvalId"]
+            .as_str()
+            .expect("refreshed approval");
+        assert_eq!(start("delivery-current-x", approval), Ok(Value::Null));
+        harness.wait_for_terminal("delivery-current-x");
     }
 
     #[test]
