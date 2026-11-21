@@ -1371,7 +1371,7 @@ describe("Karakeep Transfer shell", () => {
     );
   });
 
-  it("opens Settings and can forget the active destination", async () => {
+  it("opens Settings from the icon button and can forget the active destination", async () => {
     const forgetDestination = vi.fn().mockResolvedValue(undefined);
     const api = desktopApi(
       vi.fn().mockResolvedValue({
@@ -1390,9 +1390,9 @@ describe("Karakeep Transfer shell", () => {
 
     render(<App desktopApi={api} settingsApi={settingsApi()} />);
     await screen.findByRole("heading", { name: "Choose a bookmark source" });
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Open Settings" }),
-    );
+    const settingsButton = screen.getByRole("button", { name: "Open Settings" });
+    expect(settingsButton).not.toHaveTextContent("Open Settings");
+    fireEvent.click(settingsButton);
     expect(
       await screen.findByRole("heading", { name: "Settings" }),
     ).toBeInTheDocument();

@@ -500,7 +500,9 @@ export default function App({
           {health ? (
             <button
               type="button"
-              className="settings-link"
+              className="settings-trigger"
+              aria-label={showSettings ? undefined : "Open Settings"}
+              title={showSettings ? undefined : "Open Settings"}
               disabled={
                 transferProgress !== null ||
                 acquisitionActive ||
@@ -514,7 +516,23 @@ export default function App({
                 setShowSettings(!showSettings);
               }}
             >
-              {showSettings ? "Back to transfer" : "Open Settings"}
+              {showSettings ? (
+                "Back to transfer"
+              ) : (
+                <svg
+                  aria-hidden="true"
+                  width="22"
+                  height="22"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                >
+                  <path d="M10 3h4l.5 2.7 1.8 1 2.6-.9 2 3.4-2.1 1.8v2l2.1 1.8-2 3.4-2.6-.9-1.8 1L14 21h-4l-.5-2.7-1.8-1-2.6.9-2-3.4L5.2 13v-2L3.1 9.2l2-3.4 2.6.9 1.8-1L10 3Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              )}
             </button>
           ) : null}
         </div>

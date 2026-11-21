@@ -149,16 +149,33 @@ select {
   gap: 0.75rem;
 }
 
-.settings-link {
-  padding: 0.5rem 0;
-  border: 0;
-  background: transparent;
+.settings-trigger {
+  display: inline-grid;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  place-items: center;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid #cec9bc;
+  border-radius: 0.75rem;
+  background: #fbf8f1;
   color: #405a43;
   cursor: pointer;
   font-size: 0.875rem;
   font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
+}
+
+.settings-trigger:hover:not(:disabled) {
+  background: #e8eee5;
+}
+
+.settings-trigger:focus-visible {
+  outline: 3px solid #e4b75d;
+  outline-offset: 3px;
+}
+
+.settings-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .source-result {
