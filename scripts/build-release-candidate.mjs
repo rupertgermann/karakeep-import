@@ -237,13 +237,35 @@ function nativeHost(target) {
   return configuration.host;
 }
 
-function planFor(input, metadata, noSign) {
+function windowsSigningConfig() {
+  const thumbprint = process.env.KARAKEEP_WINDOWS_SIGNING_THUMBPRINT?.trim() ?? "";
+  if (!/^[0-9a-f]{40}$/i.test(thumbprint)) {
+    throw new Error("Set KARAKEEP_WINDOWS_SIGNING_THUMBPRINT to the 40-hex-digit certificate thumbprint.");
+  }
+  const timestampUrl = process.env.KARAKEEP_WINDOWS_TIMESTAMP_URL?.trim() ?? "";
+  const timestamp = URL.parse(timestampUrl);
+  if (
+    !/^https?:\/\//i.test(timestampUrl) || /[?#\s\\]/u.test(timestampUrl) ||
+    !timestamp || timestamp.username || timestamp.password
+  ) {
+    throw new Error("Set KARAKEEP_WINDOWS_TIMESTAMP_URL to a credential-free HTTP(S) RFC 3161 timestamp URL.");
+  }
+  return {
+    certificateThumbprint: thumbprint,
+    digestAlgorithm: "sha256",
+    timestampUrl: timestamp.href,
+    tsp: true,
+  };
+}
+
+function planFor(input, metadata, noSign, signing) {
   const frontend = path.join(input, "frontend");
   const resources = path.join(input, "resources");
   const config = {
     build: { beforeBuildCommand: "", frontendDist: frontend },
     bundle: { resources: { resources: null, [resources]: "" } },
   };
+  if (signing) config.bundle.windows = signing;
   const args = ["run", "tauri", "--", "build", "--target", metadata.rustTarget, "--bundles", metadata.bundleFormat];
   if (noSign) args.push("--no-sign");
   const [command, tauriArgs] = npmInvocation(args);
@@ -266,11 +288,14 @@ async function verifiedPlan(options) {
   }
   const expectedHost = nativeHost(metadata.target);
   if (process.platform !== expectedHost) throw new Error(`Staged ${metadata.target} release must run on ${expectedHost}.`);
+  const signing = metadata.target === "windows-x64" && !options.noSign && !options.dryRun
+    ? windowsSigningConfig()
+    : undefined;
   const canonical = verificationOutput();
   try {
     await canonicalStaging(metadata, canonical);
     await requireCanonicalMatch(input, canonical);
-    return { canonical, plan: planFor(canonical, metadata, options.noSign) };
+    return { canonical, plan: planFor(canonical, metadata, options.noSign, signing) };
   } catch (error) {
     await removeCanonicalSnapshot(canonical);
     throw error;

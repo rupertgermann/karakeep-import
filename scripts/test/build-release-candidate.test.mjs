@@ -54,7 +54,7 @@ async function fixture(target = nativeTarget) {
   );
   await writeFile(
     path.join(root, "tauri.mjs"),
-    `import { readFile, writeFile } from "node:fs/promises";\nimport path from "node:path";\nconst config = process.argv[process.argv.indexOf("--config") + 1];\nawait writeFile(path.join("release-inputs", ${JSON.stringify(target)}, "frontend", "index.html"), "attacker replacement\\n");\nif (await readFile("tauri-fail", "utf8").catch(() => null)) process.exit(7);\nconst value = JSON.parse(await readFile(config, "utf8"));\nconst resources = Object.keys(value.bundle.resources).find((key) => key !== "resources");\nawait writeFile("package-result.json", JSON.stringify({ frontend: await readFile(path.join(value.build.frontendDist, "index.html"), "utf8"), resource: await readFile(path.join(resources, "runtime.txt"), "utf8"), frontendDist: value.build.frontendDist, resources }));\n`,
+    `import { readFile, writeFile } from "node:fs/promises";\nimport path from "node:path";\nconst config = process.argv[process.argv.indexOf("--config") + 1];\nawait writeFile(path.join("release-inputs", ${JSON.stringify(target)}, "frontend", "index.html"), "attacker replacement\\n");\nif (await readFile("tauri-fail", "utf8").catch(() => null)) process.exit(7);\nconst value = JSON.parse(await readFile(config, "utf8"));\nconst resources = Object.keys(value.bundle.resources).find((key) => key !== "resources");\nawait writeFile("package-result.json", JSON.stringify({ frontend: await readFile(path.join(value.build.frontendDist, "index.html"), "utf8"), resource: await readFile(path.join(resources, "runtime.txt"), "utf8"), frontendDist: value.build.frontendDist, resources, windows: value.bundle.windows, noSign: process.argv.includes("--no-sign") }));\n`,
   );
   await mkdir(path.join(root, "scripts"), { recursive: true });
   await writeFile(
@@ -101,15 +101,107 @@ async function fixture(target = nativeTarget) {
   return { root, input, commit };
 }
 
-function run(root, input, { dryRun = true, env = process.env } = {}) {
-  const args = [script, "--input", input];
+function run(root, input, {
+  dryRun = true,
+  noSign = false,
+  env = process.env,
+  windowsHost = false,
+} = {}) {
+  const args = [];
+  if (windowsHost && process.platform !== "win32") {
+    const override = 'import "node:path"; Object.defineProperty(process, "platform", { value: "win32" });';
+    args.push("--import", "data:text/javascript," + encodeURIComponent(override));
+    env = { ...env, TEMP: os.tmpdir() };
+    // A simulated Windows process needs the real npm CLI path for npmInvocation.
+    if (!env.npm_execpath) {
+      const npmRoot = spawnSync("npm", ["root", "-g"], { encoding: "utf8" });
+      assert.equal(npmRoot.status, 0, npmRoot.stderr);
+      env = { ...env, npm_execpath: path.join(npmRoot.stdout.trim(), "npm", "bin", "npm-cli.js") };
+    }
+  }
+  args.push(script, "--input", input);
   if (dryRun) args.push("--dry-run");
+  if (noSign) args.push("--no-sign");
   return spawnSync(process.execPath, args, {
     cwd: root,
     encoding: "utf8",
     env,
   });
 }
+
+test("Windows packaging requires signing settings unless explicitly unsigned", async () => {
+  const { root, input } = await fixture("windows-x64");
+  const options = {
+    windowsHost: true,
+    env: { ...process.env, KARAKEEP_WINDOWS_SIGNING_THUMBPRINT: "", KARAKEEP_WINDOWS_TIMESTAMP_URL: "" },
+  };
+  const result = run(root, input, { ...options, dryRun: false });
+
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /KARAKEEP_WINDOWS_SIGNING_THUMBPRINT/);
+
+  const dryRun = run(root, input, options);
+  assert.equal(dryRun.status, 0, dryRun.stderr);
+  assert.equal(JSON.parse(dryRun.stdout).config.bundle.windows, undefined);
+
+  const unsigned = run(root, input, { ...options, dryRun: false, noSign: true });
+  assert.equal(unsigned.status, 0, unsigned.stderr);
+  const packaged = JSON.parse(await readFile(path.join(root, "package-result.json"), "utf8"));
+  assert.equal(packaged.noSign, true);
+  assert.equal(packaged.windows, undefined);
+});
+
+test("Windows packaging selects the certificate and applies an RFC 3161 SHA-256 timestamp", async () => {
+  const { root, input } = await fixture("windows-x64");
+  const thumbprint = "0123456789ABCDEF0123456789ABCDEF01234567";
+  const timestampUrl = "https://timestamp.example.invalid/rfc3161";
+  const result = run(root, input, {
+    dryRun: false,
+    windowsHost: true,
+    env: {
+      ...process.env,
+      KARAKEEP_WINDOWS_SIGNING_THUMBPRINT: thumbprint,
+      KARAKEEP_WINDOWS_TIMESTAMP_URL: timestampUrl,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const packaged = JSON.parse(await readFile(path.join(root, "package-result.json"), "utf8"));
+  assert.equal(packaged.noSign, false);
+  assert.deepEqual(packaged.windows, {
+    certificateThumbprint: thumbprint,
+    digestAlgorithm: "sha256",
+    timestampUrl,
+    tsp: true,
+  });
+});
+
+test("Windows packaging rejects invalid signing settings without echoing their values", async () => {
+  const { root, input } = await fixture("windows-x64");
+  const thumbprint = "0123456789ABCDEF0123456789ABCDEF01234567";
+  const timestampUrl = "https://timestamp.example.invalid/rfc3161";
+  for (const [name, value] of [
+    ["KARAKEEP_WINDOWS_SIGNING_THUMBPRINT", "invalid-thumbprint"],
+    ["KARAKEEP_WINDOWS_TIMESTAMP_URL", ""],
+    ["KARAKEEP_WINDOWS_TIMESTAMP_URL", "file:///timestamp"],
+    ["KARAKEEP_WINDOWS_TIMESTAMP_URL", "https://account:test-value@timestamp.example.invalid/rfc3161"],
+    ["KARAKEEP_WINDOWS_TIMESTAMP_URL", "https://timestamp.example.invalid/rfc3161?key=test-value"],
+  ]) {
+    const result = run(root, input, {
+      dryRun: false,
+      windowsHost: true,
+      env: {
+        ...process.env,
+        KARAKEEP_WINDOWS_SIGNING_THUMBPRINT: thumbprint,
+        KARAKEEP_WINDOWS_TIMESTAMP_URL: timestampUrl,
+        [name]: value,
+      },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, new RegExp(name));
+    if (value) assert.ok(!result.stderr.includes(value), result.stderr);
+  }
+});
 
 test("verified plan binds Tauri to a canonical frontend and resources snapshot", async () => {
   const { root, input } = await fixture();
@@ -151,7 +243,7 @@ test("frontend rebuild uses the invoking npm CLI even when its path has spaces",
 
 test("package consumes the canonical snapshot after supplied staging is mutated", async () => {
   const { root, input } = await fixture();
-  const result = run(root, input, { dryRun: false });
+  const result = run(root, input, { dryRun: false, noSign: nativeTarget === "windows-x64" });
 
   assert.equal(result.status, 0, result.stderr);
   const packaged = JSON.parse(await readFile(path.join(root, "package-result.json"), "utf8"));
@@ -173,7 +265,7 @@ test("failed package removes the canonical snapshot", async () => {
   const { root, input } = await fixture();
   await writeFile(path.join(root, "tauri-fail"), "yes\n");
 
-  const result = run(root, input, { dryRun: false });
+  const result = run(root, input, { dryRun: false, noSign: nativeTarget === "windows-x64" });
 
   assert.equal(result.status, 7, result.stderr);
   assert.deepEqual(

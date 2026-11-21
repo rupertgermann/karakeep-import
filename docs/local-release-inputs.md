@@ -101,7 +101,6 @@ cargo fetch --locked --manifest-path src-tauri/Cargo.toml
 npm run prepare:fieldtheory
 npm run build
 npm run release:inputs -- --target windows-x64
-npm run release:build-candidate -- --input release-inputs/windows-x64
 ```
 
 The output is `release-inputs/windows-x64`. It contains only the Windows x64
@@ -109,10 +108,35 @@ private Node runtime, the pinned `sqlite3.exe` helper, and the same
 deterministic metadata, notices, and checksum files. The packaged bridge puts
 the private SQLite directory first on its Windows-only `PATH`; no separately
 installed SQLite command is required. Its `NATIVE-BUILD-COMMAND.txt` contains
-the tracked Windows wrapper command shown above; run it from the checkout root
-on the controlled Windows release machine. The Windows acceptance record
+the tracked Windows wrapper command. The Windows acceptance record
 requires Authenticode verification for the installer, the app, and all shipped
 executables, including the SQLite helper. [Windows acceptance](release-acceptance/windows-x64.md)
+
+### Sign the Windows candidate
+
+Install SignTool from the Windows SDK on the controlled release host. Make the
+approved Authenticode certificate and its private key available through the
+current user's Personal certificate store. Keep the private key with the
+signing provider.
+
+From the checkout root, set the certificate's 40-digit hexadecimal thumbprint
+and the signing provider's credential-free RFC 3161 timestamp URL.
+
+```powershell
+$env:KARAKEEP_WINDOWS_SIGNING_THUMBPRINT = "<certificate thumbprint>"
+$env:KARAKEEP_WINDOWS_TIMESTAMP_URL = "<RFC 3161 timestamp URL>"
+npm run release:build-candidate -- --input release-inputs/windows-x64
+```
+
+The wrapper passes these public settings to Tauri with SHA-256 for the file
+and timestamp digests. Use `--dry-run` to check the staged inputs before
+configuring SignTool or the certificate. Add `--no-sign` to build an unsigned
+local test installer.
+
+The wrapper verifies the pinned original SQLite helper before Tauri signs
+eligible executables in the private Windows packaging copy. Retain the source
+and signed helper hashes as described in the
+[Windows acceptance record](release-acceptance/windows-x64.md#artifact-and-authenticode-evidence).
 
 Do not prepare a Windows release from macOS or a macOS release from Windows.
 Each target proceeds from this staging gate into its native, local signing and

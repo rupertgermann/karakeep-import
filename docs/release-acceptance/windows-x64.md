@@ -43,6 +43,7 @@ Typical native checks include:
 
 ```powershell
 Get-FileHash -Algorithm SHA256 $Installer
+Get-FileHash -Algorithm SHA256 $BundledSqlite
 Get-AuthenticodeSignature $Installer
 Get-AuthenticodeSignature $Application
 Get-AuthenticodeSignature $BundledNode
@@ -56,6 +57,13 @@ signtool verify /pa /all /v $BundledSqlite
 Retain the file's package-relative name, signature status, public signer
 subject, public certificate thumbprint, and timestamp result. Do not retain its
 absolute installed path.
+
+For the SQLite helper, retain the verified unsigned SHA-256 from the canonical
+input check and the signed SHA-256 from the installed payload. Bind both hashes
+to the candidate ID and the package-relative helper path. Tauri signs the helper
+in its packaging copy after the wrapper verifies the pinned original. Use the
+installed helper's Authenticode result for `signing-identity:bundled-sqlite`.
+[Windows signing setup](../local-release-inputs.md#sign-the-windows-candidate)
 
 | Binding or assertion ID | Required gate | Status | Redacted evidence filename and SHA-256 |
 | --- | --- | --- | --- |
