@@ -1,6 +1,6 @@
 [package]
 name = "karakeep-transfer"
-version = "0.1.0"
+version = "0.1.1"
 description = "Transfer bookmarks to Karakeep from a private desktop app"
 authors = ["Rupert Germann"]
 edition = "2024"

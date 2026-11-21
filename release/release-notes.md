@@ -1,9 +1,15 @@
-# Karakeep Transfer 0.1.0
+# Karakeep Transfer 0.1.1
 
 ## Status
 
 Karakeep Transfer is an unofficial community application. It is not affiliated
 with Karakeep, X, or Field Theory.
+
+## Changes
+
+- Clarified what to do when the system credential store is unavailable.
+- Updated dropdowns, checkboxes, buttons, and the desktop status badge.
+- Added the MIT license, sponsorship links, and refreshed README screenshots.
 
 ## Platform support
 
