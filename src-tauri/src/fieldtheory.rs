@@ -227,10 +227,8 @@ impl BridgeRunner {
     pub fn bundled(resource_dir: &Path) -> Self {
         let platform_dir = if cfg!(target_os = "windows") {
             "win-x64"
-        } else if cfg!(target_arch = "aarch64") {
-            "darwin-arm64"
         } else {
-            "darwin-x64"
+            "darwin-arm64"
         };
         let executable = if cfg!(target_os = "windows") {
             "node.exe"

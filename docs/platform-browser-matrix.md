@@ -53,7 +53,7 @@ session.
 
 | Platform | Chrome | Edge | Brave | Chromium | Firefox |
 | --- | --- | --- | --- | --- | --- |
-| macOS 12 or newer | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE |
+| macOS 14.8.9 or newer, Apple Silicon | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE |
 | Windows 10 version 1803 or newer, x64 | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE |
 | Windows 11, x64 | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE | UNAVAILABLE |
 

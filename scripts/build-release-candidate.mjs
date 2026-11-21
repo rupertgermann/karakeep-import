@@ -38,9 +38,9 @@ function stagedPath(input, relative) {
 }
 
 const targetConfigurations = {
-  "macos-universal": {
+  "macos-arm64": {
     host: "darwin",
-    rustTarget: "universal-apple-darwin",
+    rustTarget: "aarch64-apple-darwin",
     bundleFormat: "dmg",
   },
   "windows-x64": {

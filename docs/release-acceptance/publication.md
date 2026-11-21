@@ -50,7 +50,7 @@ files cannot overwrite each other during upload.
 
 | Material | Required comparison | Status | Filename and final SHA-256 |
 | --- | --- | --- | --- |
-| Signed and notarized universal DMG | Matches accepted macOS record after all signing and stapling | UNAVAILABLE | Template not executed |
+| Signed and notarized Apple Silicon DMG | Matches accepted macOS record after all signing and stapling | UNAVAILABLE | Template not executed |
 | Signed Windows x64 NSIS installer | Matches accepted Windows record after all signing and timestamping | UNAVAILABLE | Template not executed |
 | macOS release metadata | Accepted commit/version; expected macOS-only target fields | UNAVAILABLE | Template not executed |
 | Windows release metadata | Accepted commit/version; expected Windows-only target fields | UNAVAILABLE | Template not executed |
@@ -71,10 +71,10 @@ Generate final checksums after signing, notarization, stapling, and
 Authenticode timestamping. Checksums produced for unsigned staging inputs do
 not satisfy this gate.
 
-Third-party notices are target-specific and are not expected to be
-byte-identical. The macOS notice covers both bundled Node architectures; the
-Windows notice covers its bundled Node and SQLite executables. Verify each
-notice against its own dependency inventory and retain both reviewed files.
+Third-party notices are target-specific. The macOS notice covers the bundled
+arm64 Node executable. The Windows notice covers its bundled Node and SQLite
+executables. Verify each notice against its own dependency inventory and
+retain both reviewed files.
 
 ## Pre-publication review
 

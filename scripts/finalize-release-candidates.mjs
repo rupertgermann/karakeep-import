@@ -23,11 +23,11 @@ const scriptRoot = path.resolve(
 );
 const targets = [
   {
-    name: "macos-universal",
+    name: "macos-arm64",
     inputOption: "macos-input",
     artifactOption: "macos-artifact",
     evidenceOption: "macos-evidence",
-    platforms: ["macos-arm64", "macos-x86_64-native"],
+    platforms: ["macos-arm64"],
   },
   {
     name: "windows-x64",
@@ -74,7 +74,7 @@ const commonPlatformAssertions = [
   ["workflow:evidence-sanitization", "evidence-sanitization"],
 ];
 const targetWideAssertions = {
-  "macos-universal": [
+  "macos-arm64": [
     ["checkout:clean", "clean-checkout"],
     ["package:release-inputs", "package-inventory"],
     ["package:no-python-or-browser-gui", "package-exclusions"],
@@ -85,7 +85,7 @@ const targetWideAssertions = {
     ["notarization:application-and-dmg", "notarization"],
     ["gatekeeper:application-and-dmg", "gatekeeper"],
     ["dmg:hdiutil-verify", "dmg-verification"],
-    ["architecture:universal", "universal-architecture"],
+    ["architecture:arm64", "arm64-architecture"],
   ],
   "windows-x64": [
     ["checkout:clean", "clean-checkout"],
@@ -100,8 +100,8 @@ const targetWideAssertions = {
   ],
 };
 const targetPlatformAssertions = {
-  "macos-universal": [
-    ["minimum-macos:executable-slices", "minimum-macos-version"],
+  "macos-arm64": [
+    ["minimum-macos:executable", "minimum-macos-version"],
   ],
   "windows-x64": [
     ["host:bundled-sqlite-helper", "bundled-helper"],
@@ -109,7 +109,7 @@ const targetPlatformAssertions = {
   ],
 };
 const expectedSigningScopes = {
-  "macos-universal": ["application-and-dmg"],
+  "macos-arm64": ["application-and-dmg"],
   "windows-x64": [
     "installer",
     "application",
@@ -417,7 +417,7 @@ function coherentPeNsis(content) {
 
 function requireArtifactStructure(content, target) {
   const valid =
-    target === "macos-universal"
+    target === "macos-arm64"
       ? coherentUdif(content)
       : coherentPeNsis(content);
   if (!valid) {
@@ -575,7 +575,7 @@ function safeArtifactFilename(filename, target) {
   ) {
     throw new Error(`${target} evidence artifact filename is unsafe.`);
   }
-  const extension = target === "macos-universal" ? ".dmg" : ".exe";
+  const extension = target === "macos-arm64" ? ".dmg" : ".exe";
   if (!filename.toLowerCase().endsWith(extension)) {
     throw new Error(
       `${target} evidence artifact filename does not have the expected extension.`,

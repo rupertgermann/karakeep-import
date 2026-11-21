@@ -222,7 +222,7 @@ async function requireNonempty(file, description = "resource") {
   }
 }
 
-function validateReleaseNotes(content, product) {
+function validateReleaseNotes(content, product, macOSMinimum) {
   const expectedHeading = `# ${product.name} ${product.version}`;
   if (content.split(/\r?\n/, 1)[0] !== expectedHeading) {
     throw new Error(`Release notes heading must be exactly: ${expectedHeading}`);
@@ -251,10 +251,11 @@ function validateReleaseNotes(content, product) {
     ],
     [
       "macOS support",
-      hasLine(
-        "Platform support",
-        "- macOS 12 Monterey or newer on Apple Silicon and Intel",
-      ),
+      macOSMinimum &&
+        hasLine(
+          "Platform support",
+          `- macOS ${macOSMinimum} or newer on Apple Silicon`,
+        ),
     ],
     [
       "Windows support",
@@ -490,6 +491,7 @@ async function validateInputs(
   validateReleaseNotes(
     await readFile(releaseNotesFile, "utf8"),
     config.product,
+    tauriConfig.bundle?.macOS?.minimumSystemVersion,
   );
 
   const vendorManifestFile = path.join(

@@ -6,17 +6,16 @@
     "version": "0.1.0"
   },
   "buildToolchains": {
-    "node": "24.18.0",
-    "npm": "11.16.0",
+    "node": "26.13.1",
+    "npm": "11.20.0",
     "rust": "1.93.0"
   },
   "targets": {
-    "macos-universal": {
-      "rustTarget": "universal-apple-darwin",
+    "macos-arm64": {
+      "rustTarget": "aarch64-apple-darwin",
       "bundleFormat": "dmg",
       "nodeRuntimes": [
-        "darwin-arm64",
-        "darwin-x64"
+        "darwin-arm64"
       ]
     },
     "windows-x64": {

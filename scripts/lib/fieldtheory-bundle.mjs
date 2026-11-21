@@ -42,8 +42,8 @@ export async function verifyVendoredPackage(repositoryRoot, manifest) {
 }
 
 export function selectRuntimeTargets(platform, architecture) {
-  if (platform === "darwin" && ["arm64", "x64"].includes(architecture)) {
-    return ["darwin-arm64", "darwin-x64"];
+  if (platform === "darwin" && architecture === "arm64") {
+    return ["darwin-arm64"];
   }
   if (platform === "win32" && architecture === "x64") {
     return ["win-x64"];

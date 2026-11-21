@@ -35,6 +35,7 @@ test("the vendored package matches the accepted upstream source pin", async () =
 test("all extracted runtime executables have independent accepted pins", async () => {
   const manifest = await readBundleManifest(repositoryRoot);
 
+  assert.equal(manifest.node.version, "26.13.1");
   assert.deepEqual(
     Object.fromEntries(
       Object.entries(manifest.node.artifacts).map(([target, artifact]) => [
@@ -44,11 +45,9 @@ test("all extracted runtime executables have independent accepted pins", async (
     ),
     {
       "darwin-arm64":
-        "49161ba4e67afda85c25b2daa1f0e91d1bffc023d2dbc4886eda7a9ba38bca62",
-      "darwin-x64":
-        "1fdf607e61ae32be3f77e4e3cf1257c677aeb694e409f99586084839f61ad931",
+        "266dec4dce3a6cdcf5cdc38722a00cf5ae6a12cc51068d2a227655bbb75751ec",
       "win-x64":
-        "fdddbf4581e046b8102815d56208d6a248950bb554570b81519a8a5dacfee95d",
+        "f5109dc868ec38703ad8f305e0aceece717cb60d4889873f434017af4e96cccb",
     },
   );
 });
@@ -76,11 +75,12 @@ test("Windows SQLite is pinned to the accepted official archive and executable",
 });
 
 test("local release preparation selects only the accepted runtime matrix", () => {
-  assert.deepEqual(selectRuntimeTargets("darwin", "arm64"), [
-    "darwin-arm64",
-    "darwin-x64",
-  ]);
+  assert.deepEqual(selectRuntimeTargets("darwin", "arm64"), ["darwin-arm64"]);
   assert.deepEqual(selectRuntimeTargets("win32", "x64"), ["win-x64"]);
+  assert.throws(
+    () => selectRuntimeTargets("darwin", "x64"),
+    /Unsupported Field Theory runtime target: darwin-x64/,
+  );
   assert.throws(
     () => selectRuntimeTargets("linux", "x64"),
     /Unsupported Field Theory runtime target/,

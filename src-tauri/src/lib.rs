@@ -1,3 +1,6 @@
+#[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+compile_error!("Karakeep Transfer requires an Apple Silicon Mac.");
+
 use std::{
     path::{Path, PathBuf},
     sync::{
