@@ -3,7 +3,7 @@
   "product": {
     "name": "Karakeep Transfer",
     "identifier": "io.github.rupertgermann.karakeeptransfer",
-    "version": "0.1.1"
+    "version": "0.1.2"
   },
   "buildToolchains": {
     "node": "26.13.1",

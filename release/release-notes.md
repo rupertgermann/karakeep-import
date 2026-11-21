@@ -1,4 +1,4 @@
-# Karakeep Transfer 0.1.1
+# Karakeep Transfer 0.1.2
 
 ## Status
 
@@ -7,9 +7,9 @@ with Karakeep, X, or Field Theory.
 
 ## Changes
 
-- Clarified what to do when the system credential store is unavailable.
-- Updated dropdowns, checkboxes, buttons, and the desktop status badge.
-- Added the MIT license, sponsorship links, and refreshed README screenshots.
+- Added a direct link to the existing macOS test installer in the README.
+- Updated the browser, transfer workflow, and release documentation.
+- Removed the superseded MVP plan.
 
 ## Platform support
 
