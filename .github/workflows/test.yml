@@ -7,9 +7,9 @@ on:
       check:
         description: Check to run
         type: choice
-        default: python
+        default: icons
         options:
-          - python
+          - icons
           - windows-preflight
           - cold-rust
 
@@ -21,23 +21,17 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    if: github.event_name == 'workflow_dispatch' && inputs.check == 'python'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.14"]
-    runs-on: ${{ matrix.os }}
-    env:
-      PYTHONWARNINGS: error::ResourceWarning
+  icons:
+    if: github.event_name == 'workflow_dispatch' && inputs.check == 'icons'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - run: python -m unittest discover -s tests -v
-      - run: python -m compileall -q karakeep-import.py karakeep-import-gui.py tests
+          python-version: "3.14"
+      - run: python -m unittest -v tests.test_app_icons
 
   desktop:
     if: github.event_name == 'pull_request'
@@ -48,10 +42,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Check repository privacy
-        run: >-
-          python3 -m unittest -v
-          tests.test_karakeep_import.ImporterTests.test_tracked_text_files_contain_no_personal_home_paths
-          tests.test_karakeep_import.ImporterTests.test_tracked_karakeep_urls_use_reserved_example_hosts
+        run: python3 -m unittest discover -s tests -p test_repository_privacy.py -v
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc

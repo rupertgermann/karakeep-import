@@ -942,9 +942,11 @@ test("requires the current repository HEAD and a clean checkout", async (t) => {
   }
 });
 
-test("rejects either post-removal legacy GUI path", async (t) => {
+test("rejects retired bookmark importer files in the release checkout", async (t) => {
   for (const relative of [
+    "karakeep-import.py",
     "karakeep-import-gui.py",
+    "tests/test_karakeep_import.py",
     "tests/test_karakeep_import_gui.py",
   ]) {
     const fixture = await createFixture(t, {
@@ -952,7 +954,7 @@ test("rejects either post-removal legacy GUI path", async (t) => {
     });
     await assertRejected(
       fixture,
-      new RegExp(`Legacy GUI release blocker is still present: ${relative}`),
+      new RegExp(`Retired bookmark importer file blocks release: ${relative}`),
       relative,
     );
   }
