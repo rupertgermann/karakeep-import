@@ -83,23 +83,24 @@ export default function FileSourcePanel({
         The file stays where it is and does not replace your active X Source.
       </p>
 
-      <label className="file-source-format">
-        <span>File format</span>
-        <select
-          value={format}
-          onChange={(event) =>
-            setFormat(event.target.value as FileSourceFormat)
-          }
-        >
-          <option value="auto">Detect automatically</option>
-          <option value="fieldTheoryJsonl">Field Theory JSONL</option>
-          <option value="chromeNetscape">Chrome bookmarks</option>
-        </select>
-      </label>
-
-      <button type="button" onClick={chooseAndPreview} disabled={busy}>
-        {busy ? "Reading selected file…" : "Choose and preview file"}
-      </button>
+      <div className="file-source-controls">
+        <label className="file-source-format">
+          <span>File format</span>
+          <select
+            value={format}
+            onChange={(event) =>
+              setFormat(event.target.value as FileSourceFormat)
+            }
+          >
+            <option value="auto">Detect automatically</option>
+            <option value="fieldTheoryJsonl">Field Theory JSONL</option>
+            <option value="chromeNetscape">Chrome bookmarks</option>
+          </select>
+        </label>
+        <button type="button" onClick={chooseAndPreview} disabled={busy}>
+          {busy ? "Reading selected file…" : "Choose and preview file"}
+        </button>
+      </div>
 
       {error ? <p role="alert">{error}</p> : null}
 
@@ -111,7 +112,7 @@ export default function FileSourcePanel({
           <h3>
             {countLabel} ready
           </h3>
-          <ul>
+          <ul aria-label="Bookmarks in selected file" tabIndex={0}>
             {selection.preview.bookmarks.map((bookmark) => (
               <li key={bookmark.sourceId}>
                 <strong>{bookmark.title}</strong>
@@ -126,6 +127,12 @@ export default function FileSourcePanel({
               </li>
             ))}
           </ul>
+        </div>
+      ) : (
+        <p aria-live="polite">No file selected.</p>
+      )}
+      <div className="source-choice-actions">
+        {selection ? (
           <button
             type="button"
             onClick={() => onContinue(selection)}
@@ -133,17 +140,15 @@ export default function FileSourcePanel({
           >
             Continue with {countLabel}
           </button>
-        </div>
-      ) : (
-        <p aria-live="polite">No file selected.</p>
-      )}
-      <button
-        type="button"
-        className="button button--secondary"
-        onClick={onChooseAnotherSource}
-      >
-        Choose another source
-      </button>
+        ) : null}
+        <button
+          type="button"
+          className="button button--secondary"
+          onClick={onChooseAnotherSource}
+        >
+          Choose another source
+        </button>
+      </div>
     </section>
   );
 }

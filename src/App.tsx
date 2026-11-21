@@ -465,46 +465,44 @@ export default function App({
 
   return (
     <main className="app-shell">
-      <section className="welcome-card" aria-labelledby="app-title">
-        <div className="brand-mark" aria-hidden="true">
-          <img src="/favicon.png" alt="" width="64" height="64" />
+      <header className="app-header">
+        <div className="app-brand">
+          <img src="/favicon.png" alt="" width="36" height="36" />
+          <h1>Karakeep Transfer</h1>
         </div>
-        <p className="eyebrow">Private bookmark transfer</p>
-        <h1 id="app-title">Karakeep Transfer</h1>
-        <p className="introduction">
-          Move bookmarks into your Karakeep library from a quiet, local desktop
-          workflow.
-        </p>
-        <p
-          className={`bridge-status bridge-status--${status.tone}`}
-          role="status"
-          aria-label={status.label}
-        >
-          <span className="status-dot" aria-hidden="true" />
-          {status.text}
-        </p>
-        {health ? (
-          <button
-            type="button"
-            className="settings-link"
-            disabled={transferProgress !== null || acquisitionActive}
-            onClick={() => setShowSettings(true)}
+        <div className="app-header-actions">
+          <p
+            className={`bridge-status bridge-status--${status.tone}`}
+            role="status"
+            aria-label={status.label}
           >
-            Open Settings
-          </button>
-        ) : null}
-        {health && !showSettings && !destination ? (
-          <DestinationSetup
-            desktopApi={desktopApi}
-            onReady={(nextDestination) =>
-              dispatch({
-                type: "destination.connected",
-                destination: nextDestination,
-              })
-            }
-          />
-        ) : null}
-      </section>
+            <span className="status-dot" aria-hidden="true" />
+            {status.text}
+          </p>
+          {health ? (
+            <button
+              type="button"
+              className="settings-link"
+              disabled={transferProgress !== null || acquisitionActive}
+              onClick={() => setShowSettings(!showSettings)}
+            >
+              {showSettings ? "Back to transfer" : "Open Settings"}
+            </button>
+          ) : null}
+        </div>
+      </header>
+
+      {health && !showSettings && !destination ? (
+        <DestinationSetup
+          desktopApi={desktopApi}
+          onReady={(nextDestination) =>
+            dispatch({
+              type: "destination.connected",
+              destination: nextDestination,
+            })
+          }
+        />
+      ) : null}
 
       {health && destination && !showSettings && sourceMode === null ? (
         <section className="source-card" aria-labelledby="source-choice-title">
@@ -655,35 +653,26 @@ export default function App({
       ) : null}
 
       {health && showSettings ? (
-        <div className="settings-view">
-          <button
-            type="button"
-            className="button button--secondary"
-            onClick={() => setShowSettings(false)}
-          >
-            Back to transfer
-          </button>
-          <Settings
-            api={settingsApi}
-            onXSourceReplaced={() => {
-              chooseAnotherSource();
-              setShowSettings(false);
-            }}
-            onLocalDataDeleted={() => {
-              chooseAnotherSource();
-              setShowSettings(false);
-            }}
-            onForgetKarakeepConnection={
-              destination
-                ? async () => {
-                    await desktopApi.forgetDestination();
-                    dispatch({ type: "destination.forgotten" });
-                    setShowSettings(false);
-                  }
-                : undefined
-            }
-          />
-        </div>
+        <Settings
+          api={settingsApi}
+          onXSourceReplaced={() => {
+            chooseAnotherSource();
+            setShowSettings(false);
+          }}
+          onLocalDataDeleted={() => {
+            chooseAnotherSource();
+            setShowSettings(false);
+          }}
+          onForgetKarakeepConnection={
+            destination
+              ? async () => {
+                  await desktopApi.forgetDestination();
+                  dispatch({ type: "destination.forgotten" });
+                  setShowSettings(false);
+                }
+              : undefined
+          }
+        />
       ) : null}
 
       <footer>

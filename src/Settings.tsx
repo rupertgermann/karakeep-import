@@ -157,163 +157,157 @@ export default function Settings({
   return (
     <section className="settings-panel" aria-labelledby="settings-title">
       <header>
-        <p className="eyebrow">Local control</p>
         <h2 id="settings-title">Settings</h2>
-        <p>
-          Manage private transfer data and inspect this installation. Nothing
-          is uploaded for diagnostics.
-        </p>
       </header>
 
       {error ? <p role="alert">{error}</p> : null}
       {status ? <p role="status">{status}</p> : null}
 
-      <section aria-labelledby="storage-title">
-        <h3 id="storage-title">Private transfer data</h3>
-        {privateData ? (
-          <dl className="settings-facts">
-            <div>
-              <dt>Location</dt>
-              <dd>{privateData.dataDirectory}</dd>
-            </div>
-            <div>
-              <dt>Total size</dt>
-              <dd>{formatBytes(privateData.totalBytes)}</dd>
-            </div>
-            <div>
-              <dt>Bookmark Snapshot</dt>
-              <dd>{formatBytes(privateData.snapshotBytes)}</dd>
-            </div>
-            <div>
-              <dt>Delivery Ledger</dt>
-              <dd>{formatBytes(privateData.ledgerBytes)}</dd>
-            </div>
-          </dl>
-        ) : (
-          <p>Reading local data size…</p>
-        )}
+      <div className="settings-sections">
+        <section aria-labelledby="storage-title">
+          <h3 id="storage-title">Private transfer data</h3>
+          {privateData ? (
+            <dl className="settings-facts">
+              <div>
+                <dt>Location</dt>
+                <dd>{privateData.dataDirectory}</dd>
+              </div>
+              <div>
+                <dt>Total size</dt>
+                <dd>{formatBytes(privateData.totalBytes)}</dd>
+              </div>
+              <div>
+                <dt>Bookmark Snapshot</dt>
+                <dd>{formatBytes(privateData.snapshotBytes)}</dd>
+              </div>
+              <div>
+                <dt>Delivery Ledger</dt>
+                <dd>{formatBytes(privateData.ledgerBytes)}</dd>
+              </div>
+            </dl>
+          ) : (
+            <p>Reading local data size…</p>
+          )}
 
-        <div className="settings-actions">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => setConfirmation("replace-source")}
-          >
-            Replace X Source
-          </button>
-          <button
-            type="button"
-            className="danger-button"
-            disabled={busy}
-            onClick={() => setConfirmation("delete-data")}
-          >
-            Delete local transfer data
-          </button>
-        </div>
-      </section>
-
-      <section aria-labelledby="connection-title">
-        <h3 id="connection-title">Karakeep connection</h3>
-        <p>
-          Forgetting the connection removes its credential from the operating
-          system vault. Delivery history remains available if you reconnect.
-        </p>
-        <button
-          type="button"
-          disabled={busy || !onForgetKarakeepConnection}
-          onClick={() => setConfirmation("forget-connection")}
-        >
-          Forget Karakeep connection
-        </button>
-        {!onForgetKarakeepConnection ? (
-          <p className="settings-note">
-            Connection removal becomes available after the vault is connected.
-          </p>
-        ) : null}
-      </section>
-
-      <section aria-labelledby="default-tags-title">
-        <h3 id="default-tags-title">Source tags</h3>
-        <p>
-          Choose the marker tags a transfer attaches to every bookmark from a
-          source. None is attached unless you select it here.
-        </p>
-        <DefaultTagToggle
-          label="twitter, for X bookmarks"
-          checked={preferences.defaultTags.twitter}
-          busy={busy}
-          onChange={(twitter) =>
-            void saveDefaultTags({ ...preferences.defaultTags, twitter })
-          }
-        />
-        <DefaultTagToggle
-          label="fieldtheory, the internal acquisition name"
-          checked={preferences.defaultTags.fieldTheory}
-          busy={busy}
-          onChange={(fieldTheory) =>
-            void saveDefaultTags({ ...preferences.defaultTags, fieldTheory })
-          }
-        />
-        <DefaultTagToggle
-          label="chrome, for Chrome bookmark files"
-          checked={preferences.defaultTags.chrome}
-          busy={busy}
-          onChange={(chrome) =>
-            void saveDefaultTags({ ...preferences.defaultTags, chrome })
-          }
-        />
-      </section>
-
-      <section aria-labelledby="tuning-title">
-        <h3 id="tuning-title">Advanced delivery tuning</h3>
-        <p>
-          These values change delivery speed, not what lands in Karakeep. A
-          change applies to the next run you start.
-        </p>
-        <DeliveryTuningForm
-          tuning={preferences.deliveryTuning}
-          busy={busy}
-          onSave={(tuning) => void saveDeliveryTuning(tuning)}
-        />
-      </section>
-
-      <section aria-labelledby="diagnostics-title">
-        <h3 id="diagnostics-title">Diagnostics</h3>
-        <p>
-          Export local, redacted diagnostics without bookmark content,
-          telemetry, or secret values.
-        </p>
-        <button type="button" disabled={busy} onClick={exportDiagnostics}>
-          Export diagnostics
-        </button>
-      </section>
-
-      <section aria-labelledby="version-title">
-        <h3 id="version-title">Version and updates</h3>
-        {versions ? (
-          <p>
-            Karakeep Transfer {versions.app} · Field Theory{" "}
-            {versions.fieldTheory} · Node {versions.node} · schema{" "}
-            {versions.schema} · Karakeep baseline {versions.karakeepBaseline}
-          </p>
-        ) : (
-          <p>Reading version information…</p>
-        )}
-        <button type="button" disabled={busy} onClick={checkForUpdates}>
-          Check for updates
-        </button>
-        {update ? (
-          <p>
-            <a
-              href={update.releasePage}
-              target="_blank"
-              rel="noreferrer noopener"
+          <div className="settings-actions">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmation("replace-source")}
             >
-              Open signed releases
-            </a>
+              Replace X Source
+            </button>
+            <button
+              type="button"
+              className="danger-button"
+              disabled={busy}
+              onClick={() => setConfirmation("delete-data")}
+            >
+              Delete local transfer data
+            </button>
+          </div>
+        </section>
+
+        <section aria-labelledby="connection-title">
+          <h3 id="connection-title">Karakeep connection</h3>
+          <p>
+            Remove the saved credential from this device. You can reconnect and
+            keep your delivery history.
           </p>
-        ) : null}
-      </section>
+          <button
+            type="button"
+            disabled={busy || !onForgetKarakeepConnection}
+            onClick={() => setConfirmation("forget-connection")}
+          >
+            Forget Karakeep connection
+          </button>
+          {!onForgetKarakeepConnection ? (
+            <p className="settings-note">
+              Connection removal becomes available after the vault is connected.
+            </p>
+          ) : null}
+        </section>
+
+        <section aria-labelledby="default-tags-title">
+          <h3 id="default-tags-title">Source tags</h3>
+          <p>
+            Apply these tags to every bookmark from the corresponding source.
+          </p>
+          <DefaultTagToggle
+            label="twitter, for X bookmarks"
+            checked={preferences.defaultTags.twitter}
+            busy={busy}
+            onChange={(twitter) =>
+              void saveDefaultTags({ ...preferences.defaultTags, twitter })
+            }
+          />
+          <DefaultTagToggle
+            label="fieldtheory, the internal acquisition name"
+            checked={preferences.defaultTags.fieldTheory}
+            busy={busy}
+            onChange={(fieldTheory) =>
+              void saveDefaultTags({ ...preferences.defaultTags, fieldTheory })
+            }
+          />
+          <DefaultTagToggle
+            label="chrome, for Chrome bookmark files"
+            checked={preferences.defaultTags.chrome}
+            busy={busy}
+            onChange={(chrome) =>
+              void saveDefaultTags({ ...preferences.defaultTags, chrome })
+            }
+          />
+        </section>
+
+        <section aria-labelledby="tuning-title">
+          <h3 id="tuning-title">Advanced delivery tuning</h3>
+          <p>
+            Changes to delivery speed apply to the next run.
+          </p>
+          <DeliveryTuningForm
+            tuning={preferences.deliveryTuning}
+            busy={busy}
+            onSave={(tuning) => void saveDeliveryTuning(tuning)}
+          />
+        </section>
+
+        <section aria-labelledby="diagnostics-title">
+          <h3 id="diagnostics-title">Diagnostics</h3>
+          <p>
+            Export a local report with bookmark content and secrets removed.
+          </p>
+          <button type="button" disabled={busy} onClick={exportDiagnostics}>
+            Export diagnostics
+          </button>
+        </section>
+
+        <section aria-labelledby="version-title">
+          <h3 id="version-title">Version and updates</h3>
+          {versions ? (
+            <p>
+              Karakeep Transfer {versions.app} · Field Theory{" "}
+              {versions.fieldTheory} · Node {versions.node} · schema{" "}
+              {versions.schema} · Karakeep baseline {versions.karakeepBaseline}
+            </p>
+          ) : (
+            <p>Reading version information…</p>
+          )}
+          <button type="button" disabled={busy} onClick={checkForUpdates}>
+            Check for updates
+          </button>
+          {update ? (
+            <p>
+              <a
+                href={update.releasePage}
+                target="_blank"
+                rel="noreferrer noopener"
+              >
+                Open signed releases
+              </a>
+            </p>
+          ) : null}
+        </section>
+      </div>
 
       {confirmation === "replace-source" ? (
         <ConfirmationDialog
