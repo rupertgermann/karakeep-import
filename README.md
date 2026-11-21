@@ -104,3 +104,13 @@ gate checks the pinned runtimes and dependency inventory, rejects missing
 resources, runtime-download code, and secret-like values, and emits release
 metadata, notices, and SHA-256 checksums.
 Validate the Windows installer on a native Windows host before publishing it.
+
+## Support development
+
+Support the project on [Patreon](https://patreon.com/rupertgermann) or
+[Buy Me a Coffee](https://buymeacoffee.com/rupertgermann).
+
+## License
+
+Karakeep Transfer is licensed under the [MIT License](LICENSE). Bundled
+components retain their own licenses and notices.
