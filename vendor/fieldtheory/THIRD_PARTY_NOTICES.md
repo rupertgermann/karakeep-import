@@ -13,7 +13,7 @@ by every package.
 | dotenv | 17.4.2 | BSD-2-Clause | <https://www.npmjs.com/package/dotenv> |
 | sql.js | 1.14.1 | MIT | <https://www.npmjs.com/package/sql.js> |
 | sql.js-fts5 | 1.4.0 | MIT | <https://www.npmjs.com/package/sql.js-fts5> |
-| undici | 6.28.0 | MIT | <https://www.npmjs.com/package/undici> |
+| undici | 6.29.1 | MIT | <https://www.npmjs.com/package/undici> |
 
 The authoritative artifact checksums are in
 [`manifest.json`](./manifest.json). Field Theory's complete MIT text is in
