@@ -12,6 +12,7 @@ import concurrent.futures
 import dataclasses
 import datetime as dt
 import hashlib
+import itertools
 import json
 import os
 import random
@@ -749,6 +750,11 @@ def import_one(
                 "failedAt": utc_now(),
             }
         )
+        if isinstance(error, ApiFailure) and error.status == 401:
+            raise ImportFailure(
+                "Karakeep rejected the API key during import. "
+                "Update the key and rerun to resume incomplete records."
+            ) from error
         return ImportResult(record_id, "failed", error=message)
 
 
@@ -864,18 +870,27 @@ def run(args: argparse.Namespace) -> int:
         "include_note": not args.no_notes,
         "timestamp_field": args.timestamp_field,
     }
+    remaining = iter(pending)
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = [
-            executor.submit(import_one, record, **kwargs) for record in pending
-        ]
-        for position, future in enumerate(
-            concurrent.futures.as_completed(futures), start=1
-        ):
-            result = future.result()
-            results.append(result)
-            if position == 1 or position % args.progress_every == 0:
-                failed = sum(item.outcome == "failed" for item in results)
-                print(f"Progress: {position}/{len(pending)} ({failed} failed)")
+        futures = set()
+        try:
+            while True:
+                for record in itertools.islice(remaining, args.workers - len(futures)):
+                    futures.add(executor.submit(import_one, record, **kwargs))
+                if not futures:
+                    break
+                finished, futures = concurrent.futures.wait(
+                    futures, return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                for future in finished:
+                    results.append(future.result())
+                    position = len(results)
+                    if position == 1 or position % args.progress_every == 0:
+                        failed = sum(item.outcome == "failed" for item in results)
+                        print(f"Progress: {position}/{len(pending)} ({failed} failed)")
+        finally:
+            for future in futures:
+                future.cancel()
 
     created = sum(result.outcome == "created" for result in results)
     existing = sum(result.outcome == "existing" for result in results)

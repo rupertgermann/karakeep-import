@@ -546,6 +546,85 @@ class ImporterTests(unittest.TestCase):
                 state_path.read_text(encoding="utf-8").startswith(legacy_entry)
             )
 
+    def test_live_import_stops_on_a_revoked_key_and_resumes_unfinished_records(self):
+        class RevokedKeyHandler(FakeKarakeepHandler):
+            requests = []
+
+            def do_POST(self):
+                body = self._json_body()
+                self.requests.append(("POST", self.path, body))
+                if (
+                    self.headers.get("Authorization") == "Bearer revoked"
+                    and body["url"] != "https://example.com/bookmark/1"
+                ):
+                    self._reply(401, {"message": "Unauthorized"})
+                else:
+                    self._reply(201, {"id": "bookmark-1"})
+
+        with ExitStack() as stack:
+            directory = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+            server = stack.enter_context(
+                ThreadingHTTPServer(("127.0.0.1", 0), RevokedKeyHandler)
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            stack.callback(thread.join)
+            stack.callback(server.shutdown)
+            urls = [f"https://example.com/bookmark/{index}" for index in range(1, 4)]
+            input_path = directory / "bookmarks.jsonl"
+            input_path.write_text(
+                "".join(
+                    json.dumps({"id": str(index), "url": url}) + "\n"
+                    for index, url in enumerate(urls, start=1)
+                ),
+                encoding="utf-8",
+            )
+            failure_path = directory / "failures.jsonl"
+            arguments = [
+                "--execute",
+                "--input", str(input_path),
+                "--state-file", str(directory / "state.jsonl"),
+                "--failure-file", str(failure_path),
+                "--server", f"http://127.0.0.1:{server.server_port}",
+                "--api-key-env", "REVOCATION_TEST_API_KEY",
+                "--workers", "1",
+                "--requests-per-second", "1000",
+                "--no-default-tags",
+            ]
+            with (
+                patch.dict(os.environ, {"REVOCATION_TEST_API_KEY": "revoked"}),
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()) as errors,
+            ):
+                self.assertEqual(importer.main(arguments), 1)
+            self.assertEqual(
+                [
+                    body["url"]
+                    for method, _, body in RevokedKeyHandler.requests
+                    if method == "POST"
+                ],
+                urls[:2],
+            )
+            self.assertIn("rejected the API key", errors.getvalue())
+            failures = failure_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual([json.loads(line)["url"] for line in failures], [urls[1]])
+
+            RevokedKeyHandler.requests.clear()
+            with (
+                patch.dict(os.environ, {"REVOCATION_TEST_API_KEY": "replacement"}),
+                redirect_stdout(io.StringIO()),
+                redirect_stderr(io.StringIO()) as errors,
+            ):
+                self.assertEqual(importer.main(arguments), 0, errors.getvalue())
+            self.assertEqual(
+                [
+                    body["url"]
+                    for method, _, body in RevokedKeyHandler.requests
+                    if method == "POST"
+                ],
+                urls[1:],
+            )
+
     def test_import_creates_bookmark_attaches_tags_and_writes_state(self):
         FakeKarakeepHandler.requests = []
         server = ThreadingHTTPServer(("127.0.0.1", 0), FakeKarakeepHandler)
