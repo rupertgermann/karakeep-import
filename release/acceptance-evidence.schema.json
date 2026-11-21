@@ -1,0 +1,582 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rupertgermann/karakeep-import/release/acceptance-evidence.schema.json",
+  "title": "Karakeep Transfer native release acceptance evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "target",
+    "commit",
+    "product",
+    "testedAt",
+    "artifact",
+    "signingIdentities",
+    "assertions"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 4
+    },
+    "target": {
+      "enum": [
+        "macos-universal",
+        "windows-x64"
+      ]
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "identifier",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identifier": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "testedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "artifact": {
+      "$ref": "#/$defs/artifact"
+    },
+    "signingIdentities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/signingIdentity"
+      }
+    },
+    "assertions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/passWithEvidence"
+      },
+      "propertyNames": {
+        "enum": [
+          "checkout:clean",
+          "host:installer-completes",
+          "host:app-launches",
+          "host:first-screen-connect-karakeep",
+          "host:component-versions",
+          "host:no-system-python",
+          "host:no-system-node",
+          "host:bundled-node-runtime",
+          "host:bundled-sqlite-helper",
+          "host:no-runtime-download",
+          "host:fresh-state",
+          "browser:google-chrome:discovery",
+          "browser:google-chrome:x-acquisition",
+          "browser:microsoft-edge:discovery",
+          "browser:microsoft-edge:x-acquisition",
+          "browser:brave:discovery",
+          "browser:brave:x-acquisition",
+          "browser:chromium:discovery",
+          "browser:chromium:x-acquisition",
+          "browser:firefox:discovery",
+          "browser:firefox:x-acquisition",
+          "workflow:https-destination-validation",
+          "workflow:x-consent-before-session",
+          "workflow:x-acquisition-progress-no-media",
+          "workflow:x-folder-and-source-tags",
+          "workflow:x-transfer-preview",
+          "workflow:x-delivery-result-totals",
+          "workflow:x-repeat-delivery-preserves-content",
+          "workflow:field-theory-file-transfer",
+          "workflow:chrome-netscape-file-transfer",
+          "workflow:file-source-preserves-active-x",
+          "workflow:cancellation-resume",
+          "workflow:evidence-sanitization",
+          "package:release-inputs",
+          "package:no-python-or-browser-gui",
+          "signature:application",
+          "signature:dmg",
+          "signing-identity:application-and-dmg",
+          "signature:nested-code",
+          "notarization:application-and-dmg",
+          "gatekeeper:application-and-dmg",
+          "dmg:hdiutil-verify",
+          "architecture:universal",
+          "minimum-macos:executable-slices",
+          "signing-identity:installer",
+          "signing-identity:application",
+          "signing-identity:bundled-node",
+          "signing-identity:bundled-sqlite",
+          "signature:other-shipped-pe",
+          "application-payload:windows-x64",
+          "authenticode:platform-trust"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filename",
+        "size",
+        "sha256"
+      ],
+      "properties": {
+        "filename": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._ -]{0,191}$"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "evidenceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "file",
+        "sha256",
+        "assertionId",
+        "platform"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,122}\\.json$",
+          "not": {
+            "pattern": "^[Aa][Cc][Cc][Ee][Pp][Tt][Aa][Nn][Cc][Ee]-[Ee][Vv][Ii][Dd][Ee][Nn][Cc][Ee]\\.[Jj][Ss][Oo][Nn]$"
+          }
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "assertionId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9:_-]{2,127}$"
+        },
+        "platform": {
+          "enum": [
+            "target-wide",
+            "macos-arm64",
+            "macos-x86_64-native",
+            "windows-10-x64",
+            "windows-11-x64"
+          ]
+        }
+      }
+    },
+    "signingIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "subject",
+        "stableIdentifier",
+        "certificateSha256",
+        "timestampStatus"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "application-and-dmg",
+            "installer",
+            "application",
+            "bundled-node",
+            "bundled-sqlite"
+          ]
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "allOf": [
+            {
+              "not": {
+                "pattern": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:[Hh][Tt][Tt][Pp][Ss]?|[Ff][Ii][Ll][Ee])://"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:~[\\\\/]|/(?:[Uu][Ss][Ee][Rr][Ss]|[Hh][Oo][Mm][Ee]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee]/[Tt][Mm][Pp]|[Tt][Mm][Pp]|[Vv][Aa][Rr]/[Ff][Oo][Ll][Dd][Ee][Rr][Ss])/[\\s\\S]*|[A-Za-z]:\\\\(?:[Uu][Ss][Ee][Rr][Ss]|[Dd][Oo][Cc][Uu][Mm][Ee][Nn][Tt][Ss] [Aa][Nn][Dd] [Ss][Ee][Tt][Tt][Ii][Nn][Gg][Ss]|[Tt][Ee][Mm][Pp])\\\\)"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:^|[^A-Za-z0-9.-])(?:[Ll][Oo][Cc][Aa][Ll][Hh][Oo][Ss][Tt]|(?:[A-Za-z0-9-]+\\.)+(?:[Ll][Oo][Cc][Aa][Ll]|[Ii][Nn][Tt][Ee][Rr][Nn][Aa][Ll]|[Ll][Aa][Nn]|[Hh][Oo][Mm][Ee]|[Cc][Oo][Rr][Pp]))(?:$|[^A-Za-z0-9.-])"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:^|[^0-9.])(?:10(?:\\.\\d{1,3}){3}|127(?:\\.\\d{1,3}){3}|169\\.254(?:\\.\\d{1,3}){2}|172\\.(?:1[6-9]|2\\d|3[0-1])(?:\\.\\d{1,3}){2}|192\\.168(?:\\.\\d{1,3}){2})(?:$|[^0-9.])"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:^|[^0-9A-Fa-f:])(?:::1|(?:[Ff][Cc]|[Ff][Dd])[0-9A-Fa-f]{2}:|[Ff][Ee]80:)(?:$|[^0-9A-Fa-f:])"
+              }
+            },
+            {
+              "not": {
+                "pattern": "(?:^|[=,;\\\\/\\s])(?:[Aa][Cc][Cc][Oo][Uu][Nn][Tt]|[Cc][Oo][Mm][Pp][Uu][Tt][Ee][Rr](?:[Nn][Aa][Mm][Ee])?|[Hh][Oo][Ss][Tt](?:[Nn][Aa][Mm][Ee])?|[Mm][Aa][Cc][Hh][Ii][Nn][Ee]|[Uu][Ii][Dd]|[Uu][Ss][Ee][Rr](?:[Nn][Aa][Mm][Ee])?)\\s*[:=]"
+              }
+            }
+          ]
+        },
+        "stableIdentifier": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
+        },
+        "certificateSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "timestampStatus": {
+          "const": "PASS"
+        }
+      }
+    },
+    "evidenceReferences": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/evidenceReference"
+      }
+    },
+    "passWithEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evidence"
+      ],
+      "properties": {
+        "status": {
+          "const": "PASS"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidenceReferences"
+        }
+      }
+    },
+    "releaseInputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "DEPENDENCY-INVENTORY.json",
+        "RELEASE-METADATA.json",
+        "RELEASE-NOTES.md",
+        "THIRD-PARTY-NOTICES.md"
+      ],
+      "properties": {
+        "DEPENDENCY-INVENTORY.json": {
+          "$ref": "#/$defs/sha256"
+        },
+        "RELEASE-METADATA.json": {
+          "$ref": "#/$defs/sha256"
+        },
+        "RELEASE-NOTES.md": {
+          "$ref": "#/$defs/sha256"
+        },
+        "THIRD-PARTY-NOTICES.md": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "typedEvidenceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "target",
+        "commit",
+        "artifact",
+        "releaseInputs",
+        "assertionId",
+        "platform",
+        "tool",
+        "checkType",
+        "status",
+        "resultSummary"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "target": {
+          "enum": [
+            "macos-universal",
+            "windows-x64"
+          ]
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "releaseInputs": {
+          "$ref": "#/$defs/releaseInputs"
+        },
+        "assertionId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9:_-]{2,127}$"
+        },
+        "platform": {
+          "enum": [
+            "target-wide",
+            "macos-arm64",
+            "macos-x86_64-native",
+            "windows-10-x64",
+            "windows-11-x64"
+          ]
+        },
+        "tool": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]{1,63}$"
+        },
+        "checkType": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,63}$"
+        },
+        "status": {
+          "const": "PASS"
+        },
+        "resultSummary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[^\\r\\n]+$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "target": {
+            "const": "macos-universal"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "then": {
+        "properties": {
+          "signingIdentities": {
+            "minItems": 1,
+            "maxItems": 1,
+            "contains": {
+              "properties": {
+                "scope": {
+                  "const": "application-and-dmg"
+                }
+              },
+              "required": [
+                "scope"
+              ]
+            }
+          },
+          "assertions": {
+            "minProperties": 43,
+            "maxProperties": 43,
+            "required": [
+              "host:installer-completes",
+              "host:app-launches",
+              "host:first-screen-connect-karakeep",
+              "host:component-versions",
+              "host:no-system-python",
+              "host:no-system-node",
+              "host:bundled-node-runtime",
+              "host:no-runtime-download",
+              "host:fresh-state",
+              "browser:google-chrome:discovery",
+              "browser:google-chrome:x-acquisition",
+              "browser:microsoft-edge:discovery",
+              "browser:microsoft-edge:x-acquisition",
+              "browser:brave:discovery",
+              "browser:brave:x-acquisition",
+              "browser:chromium:discovery",
+              "browser:chromium:x-acquisition",
+              "browser:firefox:discovery",
+              "browser:firefox:x-acquisition",
+              "workflow:https-destination-validation",
+              "workflow:x-consent-before-session",
+              "workflow:x-acquisition-progress-no-media",
+              "workflow:x-folder-and-source-tags",
+              "workflow:x-transfer-preview",
+              "workflow:x-delivery-result-totals",
+              "workflow:x-repeat-delivery-preserves-content",
+              "workflow:field-theory-file-transfer",
+              "workflow:chrome-netscape-file-transfer",
+              "workflow:file-source-preserves-active-x",
+              "workflow:cancellation-resume",
+              "workflow:evidence-sanitization",
+              "minimum-macos:executable-slices",
+              "checkout:clean",
+              "package:release-inputs",
+              "package:no-python-or-browser-gui",
+              "signature:application",
+              "signature:dmg",
+              "signing-identity:application-and-dmg",
+              "signature:nested-code",
+              "notarization:application-and-dmg",
+              "gatekeeper:application-and-dmg",
+              "dmg:hdiutil-verify",
+              "architecture:universal"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "target": {
+            "const": "windows-x64"
+          }
+        },
+        "required": [
+          "target"
+        ]
+      },
+      "then": {
+        "properties": {
+          "signingIdentities": {
+            "minItems": 4,
+            "maxItems": 4,
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "scope": {
+                      "const": "installer"
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "scope": {
+                      "const": "application"
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "scope": {
+                      "const": "bundled-node"
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "scope": {
+                      "const": "bundled-sqlite"
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ]
+                }
+              }
+            ]
+          },
+          "assertions": {
+            "minProperties": 42,
+            "maxProperties": 42,
+            "required": [
+              "host:installer-completes",
+              "host:app-launches",
+              "host:first-screen-connect-karakeep",
+              "host:component-versions",
+              "host:no-system-python",
+              "host:no-system-node",
+              "host:bundled-node-runtime",
+              "host:no-runtime-download",
+              "host:fresh-state",
+              "browser:google-chrome:discovery",
+              "browser:google-chrome:x-acquisition",
+              "browser:microsoft-edge:discovery",
+              "browser:microsoft-edge:x-acquisition",
+              "browser:brave:discovery",
+              "browser:brave:x-acquisition",
+              "browser:chromium:discovery",
+              "browser:chromium:x-acquisition",
+              "browser:firefox:discovery",
+              "browser:firefox:x-acquisition",
+              "workflow:https-destination-validation",
+              "workflow:x-consent-before-session",
+              "workflow:x-acquisition-progress-no-media",
+              "workflow:x-folder-and-source-tags",
+              "workflow:x-transfer-preview",
+              "workflow:x-delivery-result-totals",
+              "workflow:x-repeat-delivery-preserves-content",
+              "workflow:field-theory-file-transfer",
+              "workflow:chrome-netscape-file-transfer",
+              "workflow:file-source-preserves-active-x",
+              "workflow:cancellation-resume",
+              "workflow:evidence-sanitization",
+              "host:bundled-sqlite-helper",
+              "authenticode:platform-trust",
+              "checkout:clean",
+              "package:release-inputs",
+              "package:no-python-or-browser-gui",
+              "signing-identity:installer",
+              "signing-identity:application",
+              "signing-identity:bundled-node",
+              "signing-identity:bundled-sqlite",
+              "signature:other-shipped-pe",
+              "application-payload:windows-x64"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -43,6 +43,72 @@ Run all examples from the repository root:
 cd karakeep-bookmark-importer
 ```
 
+## Develop the Tauri desktop app
+
+Karakeep Transfer is the native desktop replacement for the browser-based GUI.
+It provides the cross-platform shell, a typed React-to-Rust bridge, and X
+Source selection for the supported browser matrix. The macOS app has been
+validated locally; Windows validation remains a required native-platform gate.
+The existing Python GUI remains available while the rest of the transfer
+workflow moves into the desktop app.
+
+In addition to Python, desktop development requires current Node.js, npm, the
+stable Rust toolchain, and the
+[Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/) for
+your operating system.
+
+Install the frontend dependencies and run the automated checks:
+
+```bash
+npm install
+npm test
+npm run test:fieldtheory
+npm run test:coverage
+npm run typecheck
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+Start the native app in development mode:
+
+```bash
+npm run tauri dev
+```
+
+The Tauri development and build commands first run
+`npm run prepare:fieldtheory`. This local build step:
+
+- verifies the checked-in Field Theory 1.3.22 package against its SHA-256;
+- installs its exact production dependency lock into the app resources;
+- downloads and verifies private Node.js 22.20.0 runtimes for macOS arm64 and
+  x64, or Windows x64;
+- copies the Field Theory, Node, and dependency license notices into the app.
+
+The accepted commit, source archive, package, Node artifacts, checksums, and
+licenses are recorded in
+[`vendor/fieldtheory/manifest.json`](./vendor/fieldtheory/manifest.json) and
+[`vendor/fieldtheory/THIRD_PARTY_NOTICES.md`](./vendor/fieldtheory/THIRD_PARTY_NOTICES.md).
+These downloads happen only while preparing a local build. The installed app
+uses its private bundled runtime and never downloads or invokes a system Node
+installation.
+
+Create an installer for the current operating system:
+
+```bash
+npm run tauri build
+```
+
+macOS and Windows installers are built locally on their respective operating
+systems. This project does not use GitHub Actions for desktop builds.
+Before packaging, generate and inspect the deterministic platform staging
+inputs described in
+[`docs/local-release-inputs.md`](./docs/local-release-inputs.md). The staging
+gate checks the pinned runtimes and dependency inventory, rejects missing
+resources, runtime-download code, and secret-like values, and emits release
+metadata, notices, and SHA-256 checksums.
+
 ## Use the graphical interface
 
 The GUI runs on current macOS, Windows, and Linux desktop systems with Python

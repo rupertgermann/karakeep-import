@@ -1,0 +1,247 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { cp, chmod, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const script = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "build-release-candidate.mjs",
+);
+
+const sha256 = async (file) =>
+  createHash("sha256").update(await readFile(file)).digest("hex");
+
+async function writeChecksums(input) {
+  const files = [];
+  async function visit(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(file);
+      else if (entry.isFile() && entry.name !== "SHA256SUMS") files.push(file);
+    }
+  }
+  await visit(input);
+  const entries = await Promise.all(
+    files.sort().map(async (file) =>
+      `${await sha256(file)}  ${path.relative(input, file).split(path.sep).join("/")}`,
+    ),
+  );
+  await writeFile(path.join(input, "SHA256SUMS"), `${entries.join("\n")}\n`);
+}
+
+async function fixture(target = "macos-universal") {
+  const root = await (await import("node:fs/promises")).mkdtemp(
+    path.join(os.tmpdir(), "release-candidate-test-"),
+  );
+  await writeFile(path.join(root, ".gitignore"), "release-inputs/\ncanonical/\ndist/\npackage-result.json\ntauri-fail\n");
+  await writeFile(
+    path.join(root, "package.json"),
+    `${JSON.stringify({ type: "module", scripts: { build: "node build.mjs", tauri: "node tauri.mjs" } })}\n`,
+  );
+  await writeFile(
+    path.join(root, "build.mjs"),
+    'import { mkdir, writeFile } from "node:fs/promises";\nawait mkdir("dist", { recursive: true });\nawait writeFile("dist/index.html", "built\\n");\n',
+  );
+  await writeFile(
+    path.join(root, "tauri.mjs"),
+    'import { readFile, writeFile } from "node:fs/promises";\nimport path from "node:path";\nconst config = process.argv[process.argv.indexOf("--config") + 1];\nawait writeFile(path.join("release-inputs", "macos-universal", "frontend", "index.html"), "attacker replacement\\n");\nif (await readFile("tauri-fail", "utf8").catch(() => null)) process.exit(7);\nconst value = JSON.parse(await readFile(config, "utf8"));\nconst resources = Object.keys(value.bundle.resources).find((key) => key !== "resources");\nawait writeFile("package-result.json", JSON.stringify({ frontend: await readFile(path.join(value.build.frontendDist, "index.html"), "utf8"), resource: await readFile(path.join(resources, "runtime.txt"), "utf8"), frontendDist: value.build.frontendDist, resources }));\n',
+  );
+  await mkdir(path.join(root, "scripts"), { recursive: true });
+  await writeFile(
+    path.join(root, "scripts", "prepare-release-inputs.mjs"),
+    'import { cp, mkdir } from "node:fs/promises";\nimport path from "node:path";\nconst args = new Map(process.argv.slice(2).reduce((pairs, value, index, values) => index % 2 ? pairs : [...pairs, [value, values[index + 1]]], []));\nconst target = args.get("--target");\nconst output = args.get("--output");\nawait mkdir(path.dirname(output), { recursive: true });\nawait cp(path.join(process.cwd(), "canonical", target), output, { recursive: true });\n',
+  );
+  for (const args of [
+    ["init", "-q"],
+    ["config", "user.email", "release-test@example.invalid"],
+    ["config", "user.name", "Release Test"],
+    ["add", "."],
+    ["commit", "-qm", "fixture"],
+  ]) {
+    const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const commit = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    encoding: "utf8",
+  }).stdout.trim();
+  const canonical = path.join(root, "canonical", target);
+  const input = path.join(root, "release-inputs", target);
+  await mkdir(path.join(canonical, "frontend"), { recursive: true });
+  await mkdir(path.join(canonical, "resources"), { recursive: true });
+  await writeFile(path.join(canonical, "frontend", "index.html"), "staged frontend\n");
+  await writeFile(path.join(canonical, "resources", "runtime.txt"), "staged resource\n");
+  await writeFile(path.join(canonical, "RELEASE-NOTES.md"), "staged notes\n");
+  await writeFile(path.join(canonical, "DEPENDENCY-INVENTORY.json"), "{}\n");
+  await writeFile(path.join(canonical, "THIRD-PARTY-NOTICES.md"), "staged notices\n");
+  await writeFile(path.join(canonical, "NATIVE-BUILD-COMMAND.txt"), "tracked wrapper\n");
+  await writeFile(
+    path.join(canonical, "RELEASE-METADATA.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      commit,
+      target,
+      rustTarget:
+        target === "windows-x64" ? "x86_64-pc-windows-msvc" : "universal-apple-darwin",
+      bundleFormat: target === "windows-x64" ? "nsis" : "dmg",
+    }, null, 2)}\n`,
+  );
+  await writeChecksums(canonical);
+  await cp(canonical, input, { recursive: true });
+  return { root, input, commit };
+}
+
+function run(root, input, { dryRun = true } = {}) {
+  const args = [script, "--input", input];
+  if (dryRun) args.push("--dry-run");
+  return spawnSync(process.execPath, args, {
+    cwd: root,
+    encoding: "utf8",
+  });
+}
+
+test("verified plan binds Tauri to a canonical frontend and resources snapshot", async () => {
+  const { root, input } = await fixture();
+  const result = run(root, input);
+
+  assert.equal(result.status, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  assert.deepEqual(plan.tauri.args.slice(0, 8), [
+    "run", "tauri", "--", "build", "--target", "universal-apple-darwin", "--bundles", "dmg",
+  ]);
+  assert.equal(plan.config.build.beforeBuildCommand, "");
+  assert.match(
+    plan.config.build.frontendDist,
+    /release-inputs\/\.verify-[0-9a-f-]{36}\/frontend$/,
+  );
+  assert.deepEqual(plan.config.bundle.resources.resources, null);
+  const resources = Object.keys(plan.config.bundle.resources).find(
+    (key) => key !== "resources",
+  );
+  assert.match(resources, /release-inputs\/\.verify-[0-9a-f-]{36}\/resources$/);
+  assert.equal(plan.config.bundle.resources[resources], "");
+  assert.notEqual(plan.config.build.frontendDist, path.join(input, "frontend"));
+  assert.deepEqual(
+    (await readdir(path.join(root, "release-inputs"))).filter((name) => name.startsWith(".verify-")),
+    [],
+  );
+});
+
+test("package consumes the canonical snapshot after supplied staging is mutated", async () => {
+  const { root, input } = await fixture();
+  const result = run(root, input, { dryRun: false });
+
+  assert.equal(result.status, 0, result.stderr);
+  const packaged = JSON.parse(await readFile(path.join(root, "package-result.json"), "utf8"));
+  assert.equal(packaged.frontend, "staged frontend\n");
+  assert.equal(packaged.resource, "staged resource\n");
+  assert.notEqual(packaged.frontendDist, path.join(input, "frontend"));
+  assert.match(packaged.resources, /release-inputs\/\.verify-[0-9a-f-]{36}\/resources$/);
+  assert.equal(
+    await readFile(path.join(input, "frontend", "index.html"), "utf8"),
+    "attacker replacement\n",
+  );
+  assert.deepEqual(
+    (await readdir(path.join(root, "release-inputs"))).filter((name) => name.startsWith(".verify-")),
+    [],
+  );
+});
+
+test("failed package removes the canonical snapshot", async () => {
+  const { root, input } = await fixture();
+  await writeFile(path.join(root, "tauri-fail"), "yes\n");
+
+  const result = run(root, input, { dryRun: false });
+
+  assert.equal(result.status, 7, result.stderr);
+  assert.deepEqual(
+    (await readdir(path.join(root, "release-inputs"))).filter((name) => name.startsWith(".verify-")),
+    [],
+  );
+});
+
+test("verified plan rejects staged inputs from another checkout commit", async () => {
+  const { root, input } = await fixture();
+  const metadata = JSON.parse(await readFile(path.join(input, "RELEASE-METADATA.json")));
+  metadata.commit = "0".repeat(40);
+  await writeFile(path.join(input, "RELEASE-METADATA.json"), `${JSON.stringify(metadata)}\n`);
+  await writeChecksums(input);
+
+  const result = run(root, input);
+  assert.match(result.stderr, /Staged release commit does not match checkout HEAD/);
+});
+
+test("verified plan rejects tampered staged files", async () => {
+  const { root, input } = await fixture();
+  await writeFile(path.join(input, "resources", "runtime.txt"), "tampered\n");
+
+  const result = run(root, input);
+  assert.match(result.stderr, /Staged checksum mismatch: resources\/runtime.txt/);
+});
+
+test("verified plan rejects a stage whose attacker rewrites SHA256SUMS", async () => {
+  const { root, input } = await fixture();
+  await writeFile(path.join(input, "resources", "runtime.txt"), "attacker replacement\n");
+  await writeChecksums(input);
+
+  const result = run(root, input);
+  assert.match(result.stderr, /Canonical staging differs: resources\/runtime\.txt/);
+});
+
+test("verified plan rejects a release target on the wrong native host", async () => {
+  const { root, input } = await fixture("windows-x64");
+  const result = run(root, input);
+
+  assert.match(result.stderr, /must run on win32/);
+});
+
+test("verified plan rejects an unlisted staged file", async () => {
+  const { root, input } = await fixture();
+  await writeFile(path.join(input, "frontend", "unlisted.js"), "unlisted\n");
+
+  const result = run(root, input);
+  assert.match(result.stderr, /Staged file is missing from SHA256SUMS: frontend\/unlisted\.js/);
+});
+
+test("verified plan requires every release-control file", async () => {
+  const { root, input } = await fixture();
+  await rm(path.join(input, "NATIVE-BUILD-COMMAND.txt"));
+  await writeChecksums(input);
+
+  const result = run(root, input);
+  assert.match(result.stderr, /Required staged file is missing: NATIVE-BUILD-COMMAND\.txt/);
+});
+
+test("verified plan rejects a symlinked staged directory", async () => {
+  const { root, input } = await fixture();
+  await symlink("resources", path.join(input, "frontend", "linked-resources"));
+
+  const result = run(root, input);
+  assert.match(result.stderr, /Staged inputs must not contain symlinks/);
+});
+
+test("verified plan rejects a symlinked staged input root", async () => {
+  const { root, input } = await fixture();
+  const alias = path.join(root, "release-inputs", "alias");
+  await symlink(input, alias);
+
+  const result = run(root, alias);
+  assert.match(result.stderr, /Staged inputs must not contain symlinks/);
+});
+
+test("verified plan rejects a target with a mismatched Tauri target", async () => {
+  const { root, input } = await fixture();
+  const metadataFile = path.join(input, "RELEASE-METADATA.json");
+  const metadata = JSON.parse(await readFile(metadataFile, "utf8"));
+  metadata.rustTarget = "aarch64-apple-darwin";
+  await writeFile(metadataFile, `${JSON.stringify(metadata)}\n`);
+  await writeChecksums(input);
+
+  const result = run(root, input);
+  assert.match(result.stderr, /does not match staged target macos-universal/);
+});

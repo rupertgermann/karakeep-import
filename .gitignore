@@ -5,3 +5,14 @@ __pycache__/
 
 bookmarks_*.html
 .agents/skills/*
+
+node_modules/
+dist/
+coverage/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/icons/android/
+src-tauri/icons/ios/
+fieldtheory-bridge/node_modules/
+src-tauri/resources/
+release-inputs/

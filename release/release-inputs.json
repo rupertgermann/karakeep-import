@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "product": {
+    "name": "Karakeep Transfer",
+    "identifier": "io.github.rupertgermann.karakeeptransfer",
+    "version": "0.1.0"
+  },
+  "buildToolchains": {
+    "node": "24.18.0",
+    "npm": "11.16.0",
+    "rust": "1.93.0"
+  },
+  "targets": {
+    "macos-universal": {
+      "rustTarget": "universal-apple-darwin",
+      "bundleFormat": "dmg",
+      "nodeRuntimes": [
+        "darwin-arm64",
+        "darwin-x64"
+      ]
+    },
+    "windows-x64": {
+      "rustTarget": "x86_64-pc-windows-msvc",
+      "bundleFormat": "nsis",
+      "nodeRuntimes": [
+        "win-x64"
+      ]
+    }
+  }
+}

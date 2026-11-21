@@ -1,0 +1,39 @@
+{
+  "name": "karakeep-transfer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:fieldtheory": "node --test fieldtheory-bridge/test/*.test.mjs scripts/test/*.test.mjs",
+    "release:inputs": "node scripts/prepare-release-inputs.mjs",
+    "release:build-candidate": "node scripts/build-release-candidate.mjs",
+    "release:rust-inventory": "node scripts/generate-rust-dependency-inventory.mjs",
+    "typecheck": "tsc --noEmit",
+    "prepare:fieldtheory": "node scripts/prepare-fieldtheory-runtime.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.4",
+    "@vitest/coverage-v8": "4.1.12",
+    "jsdom": "29.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.1.7",
+    "vitest": "4.1.12"
+  }
+}

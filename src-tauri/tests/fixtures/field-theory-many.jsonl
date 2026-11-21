@@ -1,0 +1,3 @@
+{"id":"tweet-123","tweetId":"123","url":"https://x.com/example/status/123","text":"First bookmark","authorName":"Example Person","authorHandle":"example","postedAt":"Wed Oct 11 14:08:46 +0000 2023","tags":["Reading"]}
+
+{"id":"tweet-456","tweetId":"456","url":"https://x.com/example/status/456","title":"An explicit title","text":"Second bookmark","authorHandle":"example","postedAt":"2024-01-02T03:04:05Z","tags":["Research"]}
