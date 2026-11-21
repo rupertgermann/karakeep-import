@@ -164,6 +164,7 @@ fn chrome_folder_path_is_preserved_while_human_tags_are_deduplicated() {
     <DL><p>
       <DT><A HREF="https://example.com/research">Research</A>
     </DL><p>
+    <DT><A HREF="https://example.com/overview">Overview</A>
   </DL><p>
 </DL><p>"#;
 
@@ -179,6 +180,7 @@ fn chrome_folder_path_is_preserved_while_human_tags_are_deduplicated() {
     assert_eq!(bookmark.folders, ["Research", "research"]);
     assert_eq!(bookmark.tags, ["chrome", "Research"]);
     assert!(bookmark.note.contains("Chrome folder: Research > research"));
+    assert_eq!(preview.bookmarks[1].folders, ["Research"]);
 }
 
 #[test]
