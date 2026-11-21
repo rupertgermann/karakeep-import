@@ -5,14 +5,19 @@ Karakeep. Use an existing X session in a supported browser profile, or choose a
 Field Theory JSONL or Chrome/Netscape bookmarks HTML export. The app keeps
 transfer progress locally so you can resume an interrupted run.
 
-**[Download v0.1.1 for macOS on Apple Silicon](https://github.com/rupertgermann/karakeep-import/releases/download/v0.1.1/Karakeep-Transfer-0.1.1-macos-arm64-unsigned.dmg)**
+## Download
 
-The test DMG is unsigned.
+**[Download v0.1.1 for macOS on Apple Silicon](https://github.com/rupertgermann/karakeep-import/releases/download/v0.1.1/Karakeep-Transfer-0.1.1-macos-arm64-unsigned.dmg)**
+(unsigned test build). Requires macOS 14.8.9 or newer.
+
+The Windows installer is pending. [Build from source](#develop-the-tauri-desktop-app)
+for x86-64 PCs running Windows 10 (version 1803 or later) or Windows 11.
+
+**Transfer review** (sample data)
+
+![Transfer review with a demo destination, bookmark counts, folders, and mapping options](docs/screenshots/transfer-review.png)
 
 ## Use the app
-
-- macOS 14.8.9 or newer on Apple Silicon
-- Windows 10 version 1803 or newer and Windows 11 on x86-64
 
 1. In **Connect Karakeep**, enter your server address and an API key. The app
    stores the key in your operating system's credential vault.
@@ -24,10 +29,6 @@ The test DMG is unsigned.
 
 X acquisition is best-effort. See the
 [supported browser matrix](docs/platform-browser-matrix.md).
-
-**Transfer review** (sample data)
-
-![Transfer review with a demo destination, bookmark counts, folders, and mapping options](docs/screenshots/transfer-review.png)
 
 **Transfer progress**
 

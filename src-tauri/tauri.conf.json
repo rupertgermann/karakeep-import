@@ -26,6 +26,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "Utility",
+    "shortDescription": "Transfer bookmarks to Karakeep from X or bookmark export files.",
+    "homepage": "https://github.com/rupertgermann/karakeep-import/releases",
     "resources": {
       "resources": "",
       "../LICENSE": "LICENSE"
