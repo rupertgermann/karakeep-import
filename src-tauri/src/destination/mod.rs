@@ -24,6 +24,7 @@ pub use vault::NativeCredentialVault;
 #[serde(rename_all = "snake_case")]
 pub enum DestinationErrorCode {
     Authentication,
+    CredentialVault,
     InsecureDestination,
     InvalidServerUrl,
     MissingCapability,
@@ -55,6 +56,11 @@ impl DestinationError {
         let message = match code {
             DestinationErrorCode::Authentication => {
                 "Karakeep rejected the API key. Check the key and try again."
+            }
+            DestinationErrorCode::CredentialVault => {
+                "Karakeep Transfer could not access your system credential store. \
+                 Try reopening the app from Finder on macOS or the Start menu on Windows. \
+                 Check that the store is unlocked and allow access if prompted."
             }
             DestinationErrorCode::InsecureDestination => {
                 "This destination does not satisfy the connection security policy."

@@ -12,7 +12,7 @@ pub struct NativeCredentialVault {
 impl NativeCredentialVault {
     pub fn new() -> Result<Self, DestinationError> {
         let entry = Entry::new(SERVICE, ACCOUNT)
-            .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?;
+            .map_err(|_| DestinationError::for_code(DestinationErrorCode::CredentialVault))?;
         Ok(Self {
             entry: Mutex::new(entry),
         })
@@ -21,7 +21,7 @@ impl NativeCredentialVault {
     fn entry(&self) -> Result<std::sync::MutexGuard<'_, Entry>, DestinationError> {
         self.entry
             .lock()
-            .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))
+            .map_err(|_| DestinationError::for_code(DestinationErrorCode::CredentialVault))
     }
 }
 
@@ -30,20 +30,24 @@ impl CredentialVault for NativeCredentialVault {
         match self.entry()?.get_password() {
             Ok(credential) => Ok(Some(credential)),
             Err(KeyringError::NoEntry) => Ok(None),
-            Err(_) => Err(DestinationError::for_code(DestinationErrorCode::Storage)),
+            Err(_) => Err(DestinationError::for_code(
+                DestinationErrorCode::CredentialVault,
+            )),
         }
     }
 
     fn save(&self, credential: &str) -> Result<(), DestinationError> {
         self.entry()?
             .set_password(credential)
-            .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))
+            .map_err(|_| DestinationError::for_code(DestinationErrorCode::CredentialVault))
     }
 
     fn delete(&self) -> Result<(), DestinationError> {
         match self.entry()?.delete_credential() {
             Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
-            Err(_) => Err(DestinationError::for_code(DestinationErrorCode::Storage)),
+            Err(_) => Err(DestinationError::for_code(
+                DestinationErrorCode::CredentialVault,
+            )),
         }
     }
 }

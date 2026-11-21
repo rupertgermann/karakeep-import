@@ -134,6 +134,23 @@ describe("Destination connection", () => {
     expect(screen.queryByText(/backend-canary/)).not.toBeInTheDocument();
   });
 
+  it("offers a normal app restart when the system credential store is unavailable", async () => {
+    const api = destinationApi({
+      connectDestination: vi.fn().mockRejectedValue({ code: "credential_vault" }),
+    });
+
+    render(<DestinationSetup desktopApi={api} />);
+    await screen.findByLabelText("Karakeep API key");
+    completeForm();
+    fireEvent.click(screen.getByRole("button", { name: "Connect Karakeep" }));
+
+    expect(
+      await screen.findByRole("alert", { name: "Karakeep connection failed" }),
+    ).toHaveTextContent(
+      "Try reopening the app from Finder on macOS or the Start menu on Windows.",
+    );
+  });
+
   it("requires an explicit warning acknowledgement for non-loopback HTTP", async () => {
     const connectDestination = vi
       .fn<(input: ConnectDestinationInput) => Promise<DestinationSummary>>()
