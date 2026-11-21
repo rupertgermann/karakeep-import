@@ -155,13 +155,13 @@ fn compatibility_and_access_failures_have_safe_actionable_explanations() {
 }
 
 #[test]
-fn manual_update_check_only_points_to_the_signed_release_channel() {
+fn manual_update_check_only_points_to_the_github_release_overview() {
     let result = manual_update_check();
 
     assert!(result.requested_by_user);
     assert_eq!(
         result.release_page,
-        "https://github.com/rupertgermann/karakeep-import/releases/latest"
+        "https://github.com/rupertgermann/karakeep-import/releases"
     );
     assert_eq!(result.release_page, GITHUB_RELEASES_URL);
     assert!(!result.downloads_update);

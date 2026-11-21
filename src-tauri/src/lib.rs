@@ -1477,7 +1477,7 @@ mod tests {
             "manual_update_check",
             json!({
                 "requestedByUser": true,
-                "releasePage": "https://github.com/rupertgermann/karakeep-import/releases/latest",
+                "releasePage": "https://github.com/rupertgermann/karakeep-import/releases",
                 "downloadsUpdate": false,
                 "executesUpdate": false
             }),

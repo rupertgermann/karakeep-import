@@ -12,7 +12,6 @@ import {
   DEFAULT_TRANSFER_PREFERENCES,
   DELETE_LOCAL_TRANSFER_DATA,
   REPLACE_X_SOURCE,
-  SIGNED_RELEASES_URL,
   settingsDesktopApi,
 } from "./settings-api";
 
@@ -79,7 +78,7 @@ describe("settings desktop API", () => {
   it("checks for updates only through a user-triggered command", async () => {
     mocks.invoke.mockResolvedValue({
       requestedByUser: true,
-      releasePage: SIGNED_RELEASES_URL,
+      releasePage: "https://github.com/rupertgermann/karakeep-import/releases",
       downloadsUpdate: false,
       executesUpdate: false,
     });
@@ -89,7 +88,7 @@ describe("settings desktop API", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("manual_update_check");
   });
 
-  it("rejects an update destination outside the signed release allowlist", async () => {
+  it("rejects an update destination outside the release overview allowlist", async () => {
     mocks.invoke.mockResolvedValue({
       requestedByUser: true,
       releasePage: "https://example.invalid/download",
