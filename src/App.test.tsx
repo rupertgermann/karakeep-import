@@ -1202,11 +1202,23 @@ describe("Karakeep Transfer shell", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("continues an acquired X snapshot into confirmed delivery", async () => {
+  it("refreshes an acquired X review after source tags change in Settings", async () => {
     let acquisitionEvent:
       | Parameters<XAcquisitionApi["startXAcquisition"]>[1]
       | undefined;
     let acquisitionId = "";
+    const xPreview = {
+      approvalId: "approval-x",
+      total: 2,
+      pending: 1,
+      previouslyDelivered: 1,
+      folders: ["Reading"],
+      destination: {
+        serverUrl: rememberedDestination.serverUrl,
+        userId: rememberedDestination.userId,
+        userName: rememberedDestination.displayName,
+      },
+    };
     const acquisitionApi: XAcquisitionApi = {
       startXAcquisition: vi
         .fn()
@@ -1216,20 +1228,13 @@ describe("Karakeep Transfer shell", () => {
           return vi.fn();
         }),
       cancelXAcquisition: vi.fn(),
-      previewXSnapshot: vi.fn().mockResolvedValue({
-        approvalId: "approval-x",
-        total: 2,
-        pending: 1,
-        previouslyDelivered: 1,
-        folders: ["Reading"],
-        destination: {
-          serverUrl: rememberedDestination.serverUrl,
-          userId: rememberedDestination.userId,
-          userName: rememberedDestination.displayName,
-        },
-      }),
+      previewXSnapshot: vi.fn().mockResolvedValue(xPreview),
     };
     const deliveryApi = transferApi({
+      previewTransfer: vi.fn().mockResolvedValue({
+        ...xPreview,
+        approvalId: "approval-x-refreshed",
+      }),
       startDelivery: vi.fn().mockResolvedValue(vi.fn()),
     });
     const api = desktopApi(
@@ -1261,6 +1266,7 @@ describe("Karakeep Transfer shell", () => {
     render(
       <App
         desktopApi={api}
+        settingsApi={settingsApi()}
         xAcquisitionApi={acquisitionApi}
         transferApi={deliveryApi}
         createDeliveryId={() => "delivery-x"}
@@ -1299,6 +1305,21 @@ describe("Karakeep Transfer shell", () => {
       await screen.findByRole("heading", { name: "Review this transfer" }),
     ).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "twitter, for X bookmarks" }),
+    );
+    await screen.findByText(
+      "Settings were saved and apply to the next transfer run.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back to transfer" }));
+    expect(deliveryApi.previewTransfer).toHaveBeenCalledWith(
+      { kind: "x" },
+      defaultTransferOptions,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Start transfer" })).toBeEnabled();
+    });
     fireEvent.click(screen.getByRole("button", { name: "Start transfer" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Confirm transfer" }),
@@ -1306,7 +1327,7 @@ describe("Karakeep Transfer shell", () => {
     await waitFor(() =>
       expect(deliveryApi.startDelivery).toHaveBeenCalledWith(
         {
-          approvalId: "approval-x",
+          approvalId: "approval-x-refreshed",
           deliveryId: "delivery-x",
           source: { kind: "x" },
           options: defaultTransferOptions,

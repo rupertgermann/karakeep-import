@@ -315,9 +315,8 @@ export default function App({
     dispatch({ type: "source.reset" });
   }
 
-  /// A changed option changes what would be delivered, so the reviewed preview
-  /// is replaced before it can be confirmed.
-  async function changeTransferOptions(options: TransferOptions) {
+  /// Replace the preview before confirmation when the mapping may have changed.
+  async function refreshTransferPreview(options: TransferOptions) {
     if (!deliverySource) return;
     setRepreviewing(true);
     setTransferOptions(options);
@@ -508,7 +507,12 @@ export default function App({
                 preparingPreview ||
                 repreviewing
               }
-              onClick={() => setShowSettings(!showSettings)}
+              onClick={() => {
+                if (showSettings && transferPreview && !transferResult) {
+                  void refreshTransferPreview(transferOptions);
+                }
+                setShowSettings(!showSettings);
+              }}
             >
               {showSettings ? "Back to transfer" : "Open Settings"}
             </button>
@@ -665,7 +669,7 @@ export default function App({
           preview={transferPreview}
           options={transferOptions}
           optionsBusy={repreviewing}
-          onOptionsChange={(options) => void changeTransferOptions(options)}
+          onOptionsChange={(options) => void refreshTransferPreview(options)}
           onStart={() => void startDelivery()}
           onChooseAnotherSource={chooseAnotherSource}
         />
