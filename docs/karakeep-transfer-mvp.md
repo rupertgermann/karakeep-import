@@ -230,16 +230,6 @@ The single-window flow covers:
 - The MVP has a user-triggered **Check for updates** link but no automatic
   download or installation.
 
-## Existing command-line tools
-
-- `karakeep-import.py` remains available and supported during the MVP
-  migration, but is not bundled in the desktop installer.
-- It supplies black-box parity fixtures for the Rust delivery engine.
-- `karakeep-import-gui.py` is removed only after the packaged Tauri workflow
-  passes parity and acceptance checks.
-- Existing GUI visual and favicon work must be migrated rather than
-  overwritten.
-
 ## Out of scope
 
 - Background or scheduled transfer
@@ -250,8 +240,6 @@ The single-window flow covers:
 - Karakeep content overwrites or deletions
 - Delivery ledger and snapshot path selection
 - Retry backoff shape and payload structure controls
-- The superseded script options `--state-file`, `--failure-file`,
-  `--progress-every`, `--api-key-env`, and `--execute`
 - Automatic app updates
 - Remote telemetry and crash reporting
 - Linux, native Windows ARM64, and store distribution
@@ -263,9 +251,8 @@ Each phase starts with executable acceptance or contract tests.
 
 ### 1. Lock behavioral contracts
 
-- Preserve the existing GUI and favicon work.
 - Add golden Field Theory and Chrome inputs.
-- Capture Python importer outcomes against a fake Karakeep server.
+- Test delivery outcomes against a fake Karakeep server.
 - Define secret-redaction, duplicate, tag, timestamp, retry, cancellation, and
   partial-delivery cases.
 
@@ -274,7 +261,7 @@ Each phase starts with executable acceptance or contract tests.
 - Create the Tauri 2, React, TypeScript, and Rust workspace.
 - Add the versioned SQLite schema and migrations.
 - Implement the Karakeep API client and OS credential-vault boundary.
-- Port delivery behavior test-first until parity fixtures pass.
+- Implement delivery behavior test-first against the transfer fixtures.
 
 ### 3. Integrate Field Theory
 
@@ -288,7 +275,7 @@ Each phase starts with executable acceptance or contract tests.
 
 ### 4. Build the guided frontend
 
-- Port the current styling and favicon into React components.
+- Use the product styling and favicon in the React frontend.
 - Implement setup, source consent, acquisition, preview, confirmation,
   delivery, results, settings, diagnostics, and file-source flows.
 - Add component and reducer tests for every state transition.

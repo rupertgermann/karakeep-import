@@ -467,9 +467,11 @@ function repositoryHead(root) {
   return head.stdout.trim();
 }
 
-async function requireLegacyGuiAbsent(root) {
+async function requireRetiredImporterAbsent(root) {
   for (const relative of [
+    "karakeep-import.py",
     "karakeep-import-gui.py",
+    "tests/test_karakeep_import.py",
     "tests/test_karakeep_import_gui.py",
   ]) {
     try {
@@ -480,7 +482,7 @@ async function requireLegacyGuiAbsent(root) {
       }
       throw error;
     }
-    throw new Error(`Legacy GUI release blocker is still present: ${relative}`);
+    throw new Error(`Retired bookmark importer file blocks release: ${relative}`);
   }
 }
 
@@ -1327,7 +1329,7 @@ async function finalize(options) {
   const output = requireOption(options, "output");
   await ensureOutputDoesNotExist(output);
   const commit = repositoryHead(root);
-  await requireLegacyGuiAbsent(root);
+  await requireRetiredImporterAbsent(root);
   const snapshots = await mkdtemp(
     path.join(os.tmpdir(), "karakeep-finalizer-inputs-"),
   );

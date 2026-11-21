@@ -166,5 +166,5 @@ local staging gate rejects a stale or incomplete Rust inventory.
 
 Retain platform acceptance results separately from the deterministic build
 inputs. Use the [macOS arm64 acceptance record](./release-acceptance/macos-arm64.md)
-for the current release. The [unsigned universal preflight](./macos-universal-preflight.md)
-records the earlier two-architecture build.
+and [Windows x64 acceptance record](./release-acceptance/windows-x64.md) for the
+current release.

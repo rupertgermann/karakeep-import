@@ -1,9 +1,9 @@
 # Manual release publication checklist
 
 Use this checklist only after the signed macOS and Windows records are
-`ACCEPTED`. It binds one public release to one post-GUI-retirement source,
-matching release materials, final signed artifacts, manual GitHub publication,
-and verification of the assets downloaded from GitHub.
+`ACCEPTED`. It binds the accepted source commit to the release materials and
+final signed artifacts. It records manual GitHub publication and verification
+of the downloaded assets.
 
 Follow the status and confidentiality rules in [`README.md`](./README.md).
 Copy this template to a versioned publication record before use.
@@ -13,7 +13,7 @@ Copy this template to a versioned publication record before use.
 - Overall status: `UNAVAILABLE`
 - Release version: `[version]`
 - Release tag: `[tag]`
-- Accepted post-GUI-retirement source commit: `[full 40-character commit]`
+- Accepted source commit: `[full 40-character commit]`
 - macOS acceptance record filename and SHA-256: `[filename and digest]`
 - Windows acceptance record filename and SHA-256: `[filename and digest]`
 - Publication date in UTC: `[YYYY-MM-DD]`
@@ -24,9 +24,8 @@ Copy this template to a versioned publication record before use.
 ## Source and cross-platform binding
 
 The macOS and Windows artifacts must come from the same clean source commit and
-version. The accepted source must contain the supported Python command-line
-importer and must not contain a browser GUI entry point, GUI-only tests, or
-browser GUI instructions.
+version. The Tauri desktop app is the only supported product in the accepted
+source and user documentation.
 
 | Required gate | Status | Redacted evidence filename and SHA-256 |
 | --- | --- | --- |
@@ -36,8 +35,7 @@ browser GUI instructions.
 | Release metadata for both platforms identifies that same commit, version, and source date epoch | UNAVAILABLE | Template not executed |
 | Platform-specific metadata differs only where the native target, bundle, or runtime inventory requires it | UNAVAILABLE | Template not executed |
 | Accepted source checkout is clean and exactly matches the release tag | UNAVAILABLE | Template not executed |
-| Accepted source contains `karakeep-import.py` and its command-line tests and documentation | UNAVAILABLE | Template not executed |
-| Accepted source contains no browser GUI entry point, GUI-only tests, or browser GUI instructions | UNAVAILABLE | Template not executed |
+| Legacy importer and browser GUI entry points, dedicated tests, and usage instructions have been removed from the accepted source | UNAVAILABLE | Template not executed |
 | No GitHub Actions workflow builds, signs, packages, uploads, or publishes a release | UNAVAILABLE | Template not executed |
 
 Do not infer source equality from matching version strings. Compare the full
