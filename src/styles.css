@@ -169,7 +169,7 @@ select {
 }
 
 .settings-trigger:focus-visible {
-  outline: 3px solid #e4b75d;
+  outline: 3px solid #405a43;
   outline-offset: 3px;
 }
 
