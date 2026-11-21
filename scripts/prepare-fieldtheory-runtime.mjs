@@ -79,48 +79,33 @@ function run(command, args, cwd) {
     encoding: "utf8",
     stdio: "inherit",
   });
-  if (result.error || result.status !== 0) {
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
     throw new Error(`Runtime preparation command failed: ${command}.`);
   }
 }
 
 async function extractNode(manifest, target, archive) {
-  const temporary = await mkdtemp(path.join(os.tmpdir(), "karakeep-node-"));
-  const destination = path.join(resources, "node", target);
-  await rm(destination, { recursive: true, force: true });
-  await mkdir(destination, { recursive: true });
-
-  if (target.startsWith("darwin-")) {
-    run("tar", ["-xJf", archive, "-C", temporary], repositoryRoot);
-  } else {
-    run(
-      "powershell.exe",
-      [
-        "-NonInteractive",
-        "-NoProfile",
-        "-Command",
-        "Expand-Archive",
-        "-LiteralPath",
-        archive,
-        "-DestinationPath",
-        temporary,
-      ],
-      repositoryRoot,
-    );
-  }
-
-  const extractedRoot = path.join(
-    temporary,
-    `node-v${manifest.node.version}-${target}`,
-  );
-  const executable = target === "win-x64" ? "node.exe" : path.join("bin", "node");
-  const sourceExecutable = path.join(extractedRoot, executable);
   const artifact = manifest.node.artifacts[target];
   requireSha256(
     artifact.executableSha256,
     `Node runtime ${target} executable`,
   );
+  const temporary = await mkdtemp(path.join(os.tmpdir(), "karakeep-node-"));
+  const destination = path.join(resources, "node", target);
   try {
+    await mkdir(destination, { recursive: true });
+    if (target === "win-x64") {
+      run("tar.exe", ["-xf", archive, "-C", temporary], repositoryRoot);
+    } else {
+      run("tar", ["-xJf", archive, "-C", temporary], repositoryRoot);
+    }
+    const extractedRoot = path.join(
+      temporary,
+      `node-v${manifest.node.version}-${target}`,
+    );
+    const executable = target === "win-x64" ? "node.exe" : path.join("bin", "node");
+    const sourceExecutable = path.join(extractedRoot, executable);
     if ((await sha256(sourceExecutable)) !== artifact.executableSha256) {
       throw new Error(
         `Node runtime ${target} executable checksum mismatch after extraction.`,
@@ -151,23 +136,9 @@ async function extractSqlite(manifest, target, archive) {
   );
   const temporary = await mkdtemp(path.join(os.tmpdir(), "karakeep-sqlite-"));
   const destination = path.join(resources, "sqlite", target);
-  await rm(destination, { recursive: true, force: true });
-  await mkdir(destination, { recursive: true });
   try {
-    run(
-      "powershell.exe",
-      [
-        "-NonInteractive",
-        "-NoProfile",
-        "-Command",
-        "Expand-Archive",
-        "-LiteralPath",
-        archive,
-        "-DestinationPath",
-        temporary,
-      ],
-      repositoryRoot,
-    );
+    await mkdir(destination, { recursive: true });
+    run("tar.exe", ["-xf", archive, "-C", temporary], repositoryRoot);
     const sourceExecutable = path.join(temporary, "sqlite3.exe");
     if ((await sha256(sourceExecutable)) !== artifact.executableSha256) {
       throw new Error(
