@@ -134,6 +134,23 @@ describe("Destination connection", () => {
     expect(screen.queryByText(/backend-canary/)).not.toBeInTheDocument();
   });
 
+  it("explains how to recover when the system credential store denies access", async () => {
+    const api = destinationApi({
+      connectDestination: vi.fn().mockRejectedValue({ code: "credential_vault" }),
+    });
+
+    render(<DestinationSetup desktopApi={api} />);
+    await screen.findByLabelText("Karakeep API key");
+    completeForm();
+    fireEvent.click(screen.getByRole("button", { name: "Connect Karakeep" }));
+
+    expect(
+      await screen.findByRole("alert", { name: "Karakeep connection failed" }),
+    ).toHaveTextContent(
+      "Unlock your credential store and allow Karakeep Transfer access, then try again.",
+    );
+  });
+
   it("requires an explicit warning acknowledgement for non-loopback HTTP", async () => {
     const connectDestination = vi
       .fn<(input: ConnectDestinationInput) => Promise<DestinationSummary>>()

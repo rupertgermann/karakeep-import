@@ -417,7 +417,8 @@ fn record_destination_diagnostic(
             Some(diagnostics::DiagnosticFailure::DestinationCompatibility)
         }
         DestinationErrorCode::Network => Some(diagnostics::DiagnosticFailure::Network),
-        DestinationErrorCode::InsecureDestination
+        DestinationErrorCode::CredentialVault
+        | DestinationErrorCode::InsecureDestination
         | DestinationErrorCode::InvalidServerUrl
         | DestinationErrorCode::Storage => None,
     };
@@ -946,7 +947,8 @@ fn map_destination_error(error: DestinationError) -> TransferCommandError {
             TransferCommandErrorCode::DestinationCompatibility
         }
         DestinationErrorCode::Network => TransferCommandErrorCode::Network,
-        DestinationErrorCode::InsecureDestination
+        DestinationErrorCode::CredentialVault
+        | DestinationErrorCode::InsecureDestination
         | DestinationErrorCode::InvalidServerUrl
         | DestinationErrorCode::Storage => TransferCommandErrorCode::Unexpected,
     };
