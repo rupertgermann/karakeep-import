@@ -136,11 +136,10 @@
   gap: 0.75rem;
 }
 
-.transfer-review button {
+.transfer-review button:where(:not(.dropdown-trigger)) {
   min-height: 2.75rem;
   padding: 0.65rem 1rem;
   border: 1px solid #526b54;
-  border-radius: 0.75rem;
   background: transparent;
   color: #3e5641;
   font: inherit;
@@ -148,7 +147,7 @@
   cursor: pointer;
 }
 
-.transfer-review button:focus-visible {
+.transfer-review button:where(:not(.dropdown-trigger)):focus-visible {
   outline: 3px solid #e4b75d;
   outline-offset: 3px;
 }
@@ -209,7 +208,7 @@
   font-weight: 600;
 }
 
-.transfer-review__options label {
+.transfer-review__options :is(label, .dropdown-label) {
   font-size: 0.95rem;
 }
 
@@ -219,8 +218,7 @@
   gap: 0.35rem;
 }
 
-.transfer-review__options input[type="text"],
-.transfer-review__options select {
+.transfer-review__options input[type="text"] {
   width: 100%;
   padding: 0.5rem 0.6rem;
   border: 1px solid #cdd6cb;

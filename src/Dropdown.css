@@ -1,0 +1,113 @@
+.dropdown-field {
+  display: grid;
+  min-width: 0;
+  gap: 0.4rem;
+}
+
+.dropdown-trigger {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid #b9b4a7;
+  background: #fffdf8;
+  color: #263028;
+  text-align: start;
+  cursor: pointer;
+}
+
+.dropdown-trigger:hover:not(:disabled),
+.dropdown-trigger[data-popup-open] {
+  border-color: #526b54;
+  background: #f5f7f2;
+}
+
+.dropdown-trigger:focus-visible {
+  outline: 2px solid #526b54;
+  outline-offset: 2px;
+}
+
+.dropdown-trigger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.dropdown-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdown-icon {
+  flex: none;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin: 0 0.15rem 0.2rem 0;
+  border: solid #526b54;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.dropdown-trigger[data-popup-open] .dropdown-icon {
+  margin-block: 0.2rem 0;
+  transform: rotate(225deg);
+}
+
+.dropdown-positioner {
+  z-index: 20;
+  width: max-content;
+  min-width: var(--anchor-width);
+  max-width: var(--available-width);
+}
+
+.dropdown-popup {
+  padding: 0.25rem;
+  border: 1px solid #cec9bc;
+  border-radius: var(--control-radius);
+  background: #fffdf8;
+  box-shadow: 0 0.4rem 1rem rgb(38 48 40 / 14%);
+}
+
+.dropdown-list {
+  max-height: min(18rem, calc(var(--available-height) - 0.625rem));
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.dropdown-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 0.65rem;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.5rem;
+  color: #263028;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.dropdown-option[data-selected] {
+  background: #e5ebdf;
+  color: #3e5641;
+  font-weight: 650;
+}
+
+.dropdown-option[data-highlighted] {
+  background: #eef2e9;
+  outline: 1px solid #526b54;
+  outline-offset: -1px;
+}
+
+.dropdown-option[data-selected]::after {
+  width: 0.35rem;
+  height: 0.65rem;
+  justify-self: center;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  content: "";
+  transform: translateY(-1px) rotate(45deg);
+}

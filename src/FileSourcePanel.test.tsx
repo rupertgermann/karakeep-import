@@ -141,9 +141,12 @@ describe("Other sources File Source", () => {
       "The selected file could not be previewed. Choose its format and try again.",
     );
     expect(screen.queryByText(/raw parser detail/)).not.toBeInTheDocument();
-    fireEvent.change(screen.getByRole("combobox", { name: "File format" }), {
-      target: { value: "fieldTheoryJsonl" },
+    fireEvent.click(screen.getByRole("combobox", { name: "File format" }));
+    const jsonl = await screen.findByRole("option", {
+      name: "Field Theory JSONL",
     });
+    fireEvent.pointerDown(jsonl);
+    fireEvent.click(jsonl);
     fireEvent.click(
       screen.getByRole("button", { name: "Choose and preview file" }),
     );

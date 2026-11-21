@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 
+import Dropdown from "../Dropdown";
 import type {
   BrowserSource,
   SelectedXSource,
@@ -138,37 +139,32 @@ export default function XSourceSetup({
       ) : (
         <form onSubmit={submit}>
           <div className="source-fields">
-            <label>
-              <span>Browser</span>
-              <select
-                disabled={selecting}
-                value={browserId}
-                onChange={(event) => chooseBrowser(event.target.value)}
-              >
-                {browsers.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Profile</span>
-              <select
-                disabled={selecting}
-                value={profileId}
-                onChange={(event) => {
-                  setProfileId(event.target.value);
-                  setSelected(null);
-                }}
-              >
-                {browser?.profiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Dropdown
+              label="Browser"
+              disabled={selecting}
+              value={browserId}
+              options={browsers.map(({ id, name }) => ({
+                value: id,
+                label: name,
+              }))}
+              onChange={chooseBrowser}
+            />
+            <Dropdown
+              label="Profile"
+              disabled={selecting}
+              value={profileId || null}
+              options={
+                browser?.profiles.map(({ id, name }) => ({
+                  value: id,
+                  label: name,
+                })) ?? []
+              }
+              placeholder="No profiles available"
+              onChange={(id) => {
+                setProfileId(id);
+                setSelected(null);
+              }}
+            />
           </div>
 
           <label className="consent">

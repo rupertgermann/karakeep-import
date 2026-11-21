@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import Dropdown from "./Dropdown";
 import { desktopApi as defaultDesktopApi } from "./desktop-api";
 import type {
   FileSourceApi,
@@ -17,6 +18,12 @@ interface FileSourcePanelProps {
   onContinue(selection: FileSourceSelection): void;
   onChooseAnotherSource(): void;
 }
+
+const formats: ReadonlyArray<{ value: FileSourceFormat; label: string }> = [
+  { value: "auto", label: "Detect automatically" },
+  { value: "fieldTheoryJsonl", label: "Field Theory JSONL" },
+  { value: "chromeNetscape", label: "Chrome bookmarks" },
+];
 
 function fileName(path: string): string {
   return path.split(/[\\/]/).pop() || "Selected file";
@@ -114,19 +121,12 @@ export default function FileSourcePanel({
       </p>
 
       <div className="file-source-controls">
-        <label className="file-source-format">
-          <span>File format</span>
-          <select
-            value={format}
-            onChange={(event) =>
-              setFormat(event.target.value as FileSourceFormat)
-            }
-          >
-            <option value="auto">Detect automatically</option>
-            <option value="fieldTheoryJsonl">Field Theory JSONL</option>
-            <option value="chromeNetscape">Chrome bookmarks</option>
-          </select>
-        </label>
+        <Dropdown<FileSourceFormat>
+          label="File format"
+          value={format}
+          options={formats}
+          onChange={setFormat}
+        />
         <button type="button" onClick={chooseAndPreview} disabled={busy}>
           {busy ? "Reading selected file…" : "Choose and preview file"}
         </button>
