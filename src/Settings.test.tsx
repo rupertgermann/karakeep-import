@@ -49,6 +49,23 @@ function createSettingsApi(): SettingsApi {
 }
 
 describe("Settings", () => {
+  it("puts transfer preferences first and groups related settings together", async () => {
+    render(<Settings api={createSettingsApi()} />);
+
+    expect(
+      (await screen.findAllByRole("heading", { level: 3 })).map(
+        (heading) => heading.textContent,
+      ),
+    ).toEqual([
+      "Source tags",
+      "Advanced delivery tuning",
+      "Karakeep connection",
+      "Private transfer data",
+      "Diagnostics",
+      "Version and updates",
+    ]);
+  });
+
   it("discloses the local data location without bookmark content", async () => {
     render(<Settings api={createSettingsApi()} />);
 

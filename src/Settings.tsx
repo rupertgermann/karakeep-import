@@ -164,6 +164,67 @@ export default function Settings({
       {status ? <p role="status">{status}</p> : null}
 
       <div className="settings-sections">
+        <section aria-labelledby="default-tags-title">
+          <h3 id="default-tags-title">Source tags</h3>
+          <p>
+            Apply these tags to every bookmark from the corresponding source.
+          </p>
+          <DefaultTagToggle
+            label="twitter, for X bookmarks"
+            checked={preferences.defaultTags.twitter}
+            busy={busy}
+            onChange={(twitter) =>
+              void saveDefaultTags({ ...preferences.defaultTags, twitter })
+            }
+          />
+          <DefaultTagToggle
+            label="fieldtheory, the internal acquisition name"
+            checked={preferences.defaultTags.fieldTheory}
+            busy={busy}
+            onChange={(fieldTheory) =>
+              void saveDefaultTags({ ...preferences.defaultTags, fieldTheory })
+            }
+          />
+          <DefaultTagToggle
+            label="chrome, for Chrome bookmark files"
+            checked={preferences.defaultTags.chrome}
+            busy={busy}
+            onChange={(chrome) =>
+              void saveDefaultTags({ ...preferences.defaultTags, chrome })
+            }
+          />
+        </section>
+
+        <section aria-labelledby="tuning-title">
+          <h3 id="tuning-title">Advanced delivery tuning</h3>
+          <p>Changes to delivery speed apply to the next run.</p>
+          <DeliveryTuningForm
+            tuning={preferences.deliveryTuning}
+            busy={busy}
+            onSave={(tuning) => void saveDeliveryTuning(tuning)}
+          />
+        </section>
+
+        <section aria-labelledby="connection-title">
+          <h3 id="connection-title">Karakeep connection</h3>
+          <p>
+            Remove the saved credential from this device. You can reconnect and
+            keep your delivery history.
+          </p>
+          <button
+            type="button"
+            disabled={busy || !onForgetKarakeepConnection}
+            onClick={() => setConfirmation("forget-connection")}
+          >
+            Forget Karakeep connection
+          </button>
+          {!onForgetKarakeepConnection ? (
+            <p className="settings-note">
+              Connection removal becomes available after the vault is connected.
+            </p>
+          ) : null}
+        </section>
+
         <section aria-labelledby="storage-title">
           <h3 id="storage-title">Private transfer data</h3>
           {privateData ? (
@@ -208,69 +269,6 @@ export default function Settings({
           </div>
         </section>
 
-        <section aria-labelledby="connection-title">
-          <h3 id="connection-title">Karakeep connection</h3>
-          <p>
-            Remove the saved credential from this device. You can reconnect and
-            keep your delivery history.
-          </p>
-          <button
-            type="button"
-            disabled={busy || !onForgetKarakeepConnection}
-            onClick={() => setConfirmation("forget-connection")}
-          >
-            Forget Karakeep connection
-          </button>
-          {!onForgetKarakeepConnection ? (
-            <p className="settings-note">
-              Connection removal becomes available after the vault is connected.
-            </p>
-          ) : null}
-        </section>
-
-        <section aria-labelledby="default-tags-title">
-          <h3 id="default-tags-title">Source tags</h3>
-          <p>
-            Apply these tags to every bookmark from the corresponding source.
-          </p>
-          <DefaultTagToggle
-            label="twitter, for X bookmarks"
-            checked={preferences.defaultTags.twitter}
-            busy={busy}
-            onChange={(twitter) =>
-              void saveDefaultTags({ ...preferences.defaultTags, twitter })
-            }
-          />
-          <DefaultTagToggle
-            label="fieldtheory, the internal acquisition name"
-            checked={preferences.defaultTags.fieldTheory}
-            busy={busy}
-            onChange={(fieldTheory) =>
-              void saveDefaultTags({ ...preferences.defaultTags, fieldTheory })
-            }
-          />
-          <DefaultTagToggle
-            label="chrome, for Chrome bookmark files"
-            checked={preferences.defaultTags.chrome}
-            busy={busy}
-            onChange={(chrome) =>
-              void saveDefaultTags({ ...preferences.defaultTags, chrome })
-            }
-          />
-        </section>
-
-        <section aria-labelledby="tuning-title">
-          <h3 id="tuning-title">Advanced delivery tuning</h3>
-          <p>
-            Changes to delivery speed apply to the next run.
-          </p>
-          <DeliveryTuningForm
-            tuning={preferences.deliveryTuning}
-            busy={busy}
-            onSave={(tuning) => void saveDeliveryTuning(tuning)}
-          />
-        </section>
-
         <section aria-labelledby="diagnostics-title">
           <h3 id="diagnostics-title">Diagnostics</h3>
           <p>
@@ -296,7 +294,7 @@ export default function Settings({
             Check for updates
           </button>
           {update ? (
-            <p>
+            <p className="settings-update-link">
               <a
                 href={update.releasePage}
                 target="_blank"
