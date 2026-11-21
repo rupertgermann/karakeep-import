@@ -7,10 +7,7 @@ use std::{
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use crate::{
-    domain::DestinationIdentity, file_source::FileSourcePreview, ledger::DeliveryLedger,
-    transfer_options::TransferOptions,
-};
+use crate::{file_source::FileSourcePreview, transfer_options::TransferOptions};
 
 #[path = "fieldtheory_acquisition.rs"]
 mod acquisition;
@@ -153,7 +150,6 @@ pub struct FieldTheoryState {
     runner: BridgeRunner,
     acquisitions: AcquisitionSupervisor,
     snapshots: SnapshotStore,
-    ledger_path: PathBuf,
 }
 
 impl FieldTheoryState {
@@ -162,7 +158,6 @@ impl FieldTheoryState {
             runner: BridgeRunner::bundled(resource_dir),
             acquisitions: AcquisitionSupervisor::default(),
             snapshots: SnapshotStore::new(app_data_dir.join(X_SOURCE_DATA_DIRECTORY)),
-            ledger_path: app_data_dir.join("delivery-ledger.sqlite3"),
         }
     }
 
@@ -201,18 +196,6 @@ impl FieldTheoryState {
 
     pub fn snapshot_bytes(&self) -> std::io::Result<u64> {
         self.snapshots.snapshot_bytes()
-    }
-
-    pub fn preview(
-        &self,
-        destination: DestinationPreview,
-        options: &TransferOptions,
-    ) -> Result<XTransferPreview, SnapshotPreviewError> {
-        let identity = DestinationIdentity::new(&destination.server_url, &destination.user_id)
-            .map_err(|_| SnapshotPreviewError)?;
-        let ledger = DeliveryLedger::open(&self.ledger_path).map_err(|_| SnapshotPreviewError)?;
-        self.snapshots
-            .preview(&ledger, &identity, destination, options)
     }
 }
 

@@ -97,7 +97,11 @@ type WorkflowAction =
       message: string;
       result: TransferResult;
     }
-  | { type: "delivery.start-failed"; message: string }
+  | {
+      type: "delivery.start-failed";
+      message: string;
+      result: TransferResult | null;
+    }
   | { type: "delivery.cancellation-request-failed"; message: string }
   | { type: "source.reset" };
 
@@ -160,6 +164,7 @@ function workflowReducer(
       return {
         ...state,
         phase: "failure",
+        transferPreview: null,
         transferError: action.message,
       };
     case "acquisition.running-changed":
@@ -212,6 +217,7 @@ function workflowReducer(
         ...state,
         phase: "failure",
         transferProgress: null,
+        transferResult: action.result,
         transferError: action.message,
       };
     case "delivery.cancellation-request-failed":
@@ -270,6 +276,7 @@ export default function App({
     id: string;
     unlisten?: () => void;
   } | null>(null);
+  const lastDelivery = useRef<string | null>(null);
   const terminalDeliveries = useRef(new Set<string>());
 
   useEffect(() => {
@@ -303,16 +310,16 @@ export default function App({
   function chooseAnotherSource() {
     activeDelivery.current?.unlisten?.();
     activeDelivery.current = null;
+    lastDelivery.current = null;
     setTransferOptions(defaultTransferOptions);
     dispatch({ type: "source.reset" });
   }
 
-  /// A changed option changes what would be delivered, so the reviewed preview
-  /// is replaced before it can be confirmed.
-  async function changeTransferOptions(options: TransferOptions) {
-    setTransferOptions(options);
+  /// Replace the preview before confirmation when the mapping may have changed.
+  async function refreshTransferPreview(options: TransferOptions) {
     if (!deliverySource) return;
     setRepreviewing(true);
+    setTransferOptions(options);
     try {
       dispatch({
         type: "preview.ready",
@@ -320,6 +327,7 @@ export default function App({
         source: deliverySource,
       });
     } catch {
+      setTransferOptions(defaultTransferOptions);
       dispatch({
         type: "preview.failed",
         message:
@@ -373,6 +381,7 @@ export default function App({
       terminalDeliveries.current.add(deliveryId);
     }
     activeDelivery.current = null;
+    lastDelivery.current = deliveryId;
     if (event.type === "completed") {
       dispatch({ type: "delivery.completed", result: event.result });
       return;
@@ -391,7 +400,14 @@ export default function App({
   }
 
   async function startDelivery(retry = false) {
-    if (!deliverySource || !transferPreview || activeDelivery.current) return;
+    if (
+      repreviewing ||
+      !deliverySource ||
+      !transferPreview ||
+      activeDelivery.current
+    ) return;
+    const retryOf = retry ? lastDelivery.current : null;
+    if (retry && !retryOf) return;
     const deliveryId = createDeliveryId();
     const preview = transferPreview;
     dispatch({
@@ -409,6 +425,7 @@ export default function App({
             ? { approvalId: preview.approvalId }
             : {}),
           deliveryId,
+          ...(retryOf ? { retryOf } : {}),
           source: deliverySource,
           options: transferOptions,
         },
@@ -425,6 +442,7 @@ export default function App({
       activeDelivery.current = null;
       dispatch({
         type: "delivery.start-failed",
+        result: retry ? transferResult : null,
         message:
           "Delivery could not be started. Check the connection and try again.",
       });
@@ -483,8 +501,18 @@ export default function App({
             <button
               type="button"
               className="settings-link"
-              disabled={transferProgress !== null || acquisitionActive}
-              onClick={() => setShowSettings(!showSettings)}
+              disabled={
+                transferProgress !== null ||
+                acquisitionActive ||
+                preparingPreview ||
+                repreviewing
+              }
+              onClick={() => {
+                if (showSettings && transferPreview && !transferResult) {
+                  void refreshTransferPreview(transferOptions);
+                }
+                setShowSettings(!showSettings);
+              }}
             >
               {showSettings ? "Back to transfer" : "Open Settings"}
             </button>
@@ -567,11 +595,6 @@ export default function App({
         <XAcquisition
           api={xAcquisitionApi}
           source={readySource.source}
-          destination={{
-            serverUrl: destination.serverUrl,
-            userId: destination.userId,
-            userName: destination.displayName,
-          }}
           onPreview={(preview) => {
             dispatch({
               type: "preview.ready",
@@ -646,7 +669,7 @@ export default function App({
           preview={transferPreview}
           options={transferOptions}
           optionsBusy={repreviewing}
-          onOptionsChange={(options) => void changeTransferOptions(options)}
+          onOptionsChange={(options) => void refreshTransferPreview(options)}
           onStart={() => void startDelivery()}
           onChooseAnotherSource={chooseAnotherSource}
         />

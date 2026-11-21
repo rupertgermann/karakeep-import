@@ -14,7 +14,7 @@ mod delivery_api;
 mod settings;
 mod vault;
 
-use crate::karakeep::KarakeepApi;
+use crate::{domain::DestinationIdentity, karakeep::KarakeepApi};
 pub use client::ReqwestKarakeepClient;
 use delivery_api::ReqwestDeliveryApi;
 pub use settings::FileDestinationSettings;
@@ -135,8 +135,16 @@ pub trait KarakeepClient {
 
 pub trait CredentialVault {
     fn load(&self) -> Result<Option<String>, DestinationError>;
-    fn save(&self, api_key: &str) -> Result<(), DestinationError>;
+    fn save(&self, credential: &str) -> Result<(), DestinationError>;
     fn delete(&self) -> Result<(), DestinationError>;
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DestinationCredential {
+    server_url: String,
+    user_id: String,
+    api_key: String,
 }
 
 pub trait DestinationSettings {
@@ -193,8 +201,14 @@ where
             insecure_http: normalized.allows_insecure_http(),
         };
 
+        let credential = serde_json::to_string(&DestinationCredential {
+            server_url: destination.server_url.clone(),
+            user_id: destination.user_id.clone(),
+            api_key: api_key.to_owned(),
+        })
+        .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))?;
         let previous_key = self.vault.load()?;
-        self.vault.save(api_key)?;
+        self.vault.save(&credential)?;
         if let Err(error) = self.settings.save(&destination) {
             let rollback = match previous_key {
                 Some(previous_key) => self.vault.save(&previous_key),
@@ -222,10 +236,7 @@ where
         let Some(destination) = self.settings.load()? else {
             return Ok(None);
         };
-        match self.vault.load()? {
-            Some(api_key) if !api_key.is_empty() => Ok(Some(destination)),
-            _ => Ok(None),
-        }
+        Ok(self.credential_for(&destination)?.map(|_| destination))
     }
 
     pub fn forget(&self) -> Result<(), DestinationError> {
@@ -239,6 +250,7 @@ where
     /// advanced delivery tuning settings, read when the run starts.
     pub fn delivery_api(
         &self,
+        expected: &DestinationIdentity,
         timeout: std::time::Duration,
     ) -> Result<Arc<dyn KarakeepApi>, DestinationError> {
         if self.unusable.load(Ordering::Acquire) {
@@ -250,21 +262,42 @@ where
                 "Connect a Karakeep destination before starting delivery.",
             )
         })?;
-        let api_key = self
-            .vault
-            .load()?
-            .filter(|api_key| !api_key.trim().is_empty())
-            .ok_or_else(|| {
-                DestinationError::new(
-                    DestinationErrorCode::Authentication,
-                    "Reconnect Karakeep before starting delivery.",
-                )
-            })?;
+        if destination.server_url != expected.normalized_server()
+            || destination.user_id != expected.authenticated_user()
+        {
+            return Err(DestinationError::new(
+                DestinationErrorCode::Authentication,
+                "The Karakeep destination changed. Review the transfer again.",
+            ));
+        }
+        let api_key = self.credential_for(&destination)?.ok_or_else(|| {
+            DestinationError::new(
+                DestinationErrorCode::Authentication,
+                "Reconnect Karakeep before starting delivery.",
+            )
+        })?;
         let normalized =
             normalize_destination_url(&destination.server_url, destination.insecure_http)?;
         Ok(Arc::new(ReqwestDeliveryApi::new(
             normalized, api_key, timeout,
         )?))
+    }
+
+    fn credential_for(
+        &self,
+        destination: &DestinationSummary,
+    ) -> Result<Option<String>, DestinationError> {
+        // Legacy vault entries cannot prove which destination owns their key.
+        Ok(self
+            .vault
+            .load()?
+            .and_then(|value| serde_json::from_str::<DestinationCredential>(&value).ok())
+            .filter(|credential| {
+                credential.server_url == destination.server_url
+                    && credential.user_id == destination.user_id
+                    && !credential.api_key.trim().is_empty()
+            })
+            .map(|credential| credential.api_key))
     }
 }
 

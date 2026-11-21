@@ -243,7 +243,7 @@ describe("Karakeep Transfer shell", () => {
     ).toBeInTheDocument();
   });
 
-  it("re-previews and delivers with a changed transfer option", async () => {
+  it("blocks delivery until a changed transfer option has a fresh preview", async () => {
     const filePreview = {
       format: "fieldTheoryJsonl" as const,
       bookmarks: [
@@ -277,17 +277,23 @@ describe("Karakeep Transfer shell", () => {
       userId: rememberedDestination.userId,
       userName: rememberedDestination.displayName,
     };
+    const preview = {
+      approvalId: "file-approval-1",
+      total: 3,
+      pending: 3,
+      previouslyDelivered: 0,
+      folders: ["Reading"],
+      destination,
+    };
+    let resolvePreview: (value: typeof preview) => void = () => {};
+    const refreshedPreview = new Promise<typeof preview>((resolve) => {
+      resolvePreview = resolve;
+    });
     const deliveryApi = transferApi({
       previewTransfer: vi
         .fn()
-        .mockImplementation(async (_source, options) => ({
-          approvalId: options.limit === 1 ? "file-approval-2" : "file-approval-1",
-          total: 3,
-          pending: options.limit === 1 ? 1 : 3,
-          previouslyDelivered: 0,
-          folders: ["Reading"],
-          destination,
-        })),
+        .mockResolvedValueOnce(preview)
+        .mockReturnValueOnce(refreshedPreview),
       startDelivery: vi.fn().mockResolvedValue(() => {}),
     });
 
@@ -312,6 +318,9 @@ describe("Karakeep Transfer shell", () => {
     fireEvent.change(screen.getByLabelText("Limit this run to"), {
       target: { value: "1" },
     });
+
+    expect(screen.getByRole("button", { name: "Start transfer" })).toBeDisabled();
+    resolvePreview({ ...preview, approvalId: "file-approval-2", pending: 1 });
 
     await waitFor(() =>
       expect(screen.getByLabelText("Transfer summary")).toHaveTextContent(
@@ -532,7 +541,9 @@ describe("Karakeep Transfer shell", () => {
       <App
         desktopApi={api}
         transferApi={deliveryApi}
-        createDeliveryId={() => "delivery-cancel"}
+        createDeliveryId={vi.fn()
+          .mockReturnValueOnce("delivery-cancel")
+          .mockReturnValueOnce("delivery-retry")}
       />,
     );
     fireEvent.click(
@@ -585,6 +596,10 @@ describe("Karakeep Transfer shell", () => {
       screen.getByRole("button", { name: "Retry 1 pending" }),
     );
 
+    expect(deliveryApi.startDelivery).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deliveryId: "delivery-retry", retryOf: "delivery-cancel" }),
+      expect.any(Function),
+    );
     expect(
       screen.getByRole("progressbar", {
         name: "0 of 1 bookmarks processed",
@@ -1187,11 +1202,23 @@ describe("Karakeep Transfer shell", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("continues an acquired X snapshot into confirmed delivery", async () => {
+  it("refreshes an acquired X review after source tags change in Settings", async () => {
     let acquisitionEvent:
       | Parameters<XAcquisitionApi["startXAcquisition"]>[1]
       | undefined;
     let acquisitionId = "";
+    const xPreview = {
+      approvalId: "approval-x",
+      total: 2,
+      pending: 1,
+      previouslyDelivered: 1,
+      folders: ["Reading"],
+      destination: {
+        serverUrl: rememberedDestination.serverUrl,
+        userId: rememberedDestination.userId,
+        userName: rememberedDestination.displayName,
+      },
+    };
     const acquisitionApi: XAcquisitionApi = {
       startXAcquisition: vi
         .fn()
@@ -1201,19 +1228,13 @@ describe("Karakeep Transfer shell", () => {
           return vi.fn();
         }),
       cancelXAcquisition: vi.fn(),
-      previewXSnapshot: vi.fn().mockResolvedValue({
-        total: 2,
-        pending: 1,
-        previouslyDelivered: 1,
-        folders: ["Reading"],
-        destination: {
-          serverUrl: rememberedDestination.serverUrl,
-          userId: rememberedDestination.userId,
-          userName: rememberedDestination.displayName,
-        },
-      }),
+      previewXSnapshot: vi.fn().mockResolvedValue(xPreview),
     };
     const deliveryApi = transferApi({
+      previewTransfer: vi.fn().mockResolvedValue({
+        ...xPreview,
+        approvalId: "approval-x-refreshed",
+      }),
       startDelivery: vi.fn().mockResolvedValue(vi.fn()),
     });
     const api = desktopApi(
@@ -1245,6 +1266,7 @@ describe("Karakeep Transfer shell", () => {
     render(
       <App
         desktopApi={api}
+        settingsApi={settingsApi()}
         xAcquisitionApi={acquisitionApi}
         transferApi={deliveryApi}
         createDeliveryId={() => "delivery-x"}
@@ -1283,6 +1305,21 @@ describe("Karakeep Transfer shell", () => {
       await screen.findByRole("heading", { name: "Review this transfer" }),
     ).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: "twitter, for X bookmarks" }),
+    );
+    await screen.findByText(
+      "Settings were saved and apply to the next transfer run.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Back to transfer" }));
+    expect(deliveryApi.previewTransfer).toHaveBeenCalledWith(
+      { kind: "x" },
+      defaultTransferOptions,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Start transfer" })).toBeEnabled();
+    });
     fireEvent.click(screen.getByRole("button", { name: "Start transfer" }));
     fireEvent.click(
       screen.getByRole("button", { name: "Confirm transfer" }),
@@ -1290,6 +1327,7 @@ describe("Karakeep Transfer shell", () => {
     await waitFor(() =>
       expect(deliveryApi.startDelivery).toHaveBeenCalledWith(
         {
+          approvalId: "approval-x-refreshed",
           deliveryId: "delivery-x",
           source: { kind: "x" },
           options: defaultTransferOptions,

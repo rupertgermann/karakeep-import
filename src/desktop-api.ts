@@ -1,10 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-import type {
-  DestinationSummary as TransferDestinationSummary,
-  TransferPreview,
-} from "./workflow";
+import type { TransferPreview } from "./workflow";
 
 export interface HealthResponse {
   status: "ok";
@@ -152,9 +149,7 @@ export interface XAcquisitionApi {
     onEvent: (event: AcquisitionEvent) => void,
   ): Promise<UnlistenFn>;
   cancelXAcquisition(acquisitionId: string): Promise<void>;
-  previewXSnapshot(
-    destination: TransferDestinationSummary,
-  ): Promise<TransferPreview>;
+  previewXSnapshot(): Promise<TransferPreview>;
 }
 
 export interface DesktopApi extends DestinationApi, XSourceApi {
@@ -196,6 +191,6 @@ export const xAcquisitionApi: XAcquisitionApi = {
   },
   cancelXAcquisition: (acquisitionId) =>
     invoke<void>("cancel_x_acquisition", { acquisitionId }),
-  previewXSnapshot: (destination) =>
-    invoke<TransferPreview>("preview_x_snapshot", { destination }),
+  previewXSnapshot: () =>
+    invoke<TransferPreview>("preview_transfer", { source: { kind: "x" } }),
 };

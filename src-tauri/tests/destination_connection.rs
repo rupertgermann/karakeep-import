@@ -3,6 +3,7 @@ use karakeep_transfer_lib::destination::{
     DestinationErrorCode, DestinationService, DestinationSettings, DestinationSummary,
     KarakeepClient, normalize_destination_url, validate_destination_redirect,
 };
+use karakeep_transfer_lib::domain::DestinationIdentity;
 use std::{cell::RefCell, rc::Rc};
 
 #[test]
@@ -152,10 +153,9 @@ fn a_validated_destination_is_remembered_without_exposing_its_key() {
         service.status().expect("status loads"),
         Some(destination.clone())
     );
-    assert_eq!(
-        vault_observer.load().expect("vault loads").as_deref(),
-        Some("vault-canary-key")
-    );
+    let stored: serde_json::Value =
+        serde_json::from_str(&vault_observer.load().unwrap().unwrap()).unwrap();
+    assert_eq!(stored["apiKey"], "vault-canary-key");
     let persisted = serde_json::to_string(&settings_observer.load().unwrap()).unwrap();
     assert!(!persisted.contains("vault-canary-key"));
 
@@ -177,7 +177,6 @@ fn failed_validation_does_not_replace_a_remembered_connection_or_leak_the_key() 
         observed_key: RefCell::new(None),
     };
     let vault = MemoryVault::default();
-    vault.save("previous-key").unwrap();
     let settings = MemorySettings::default();
     let previous = DestinationSummary {
         server_url: "https://old.example".to_owned(),
@@ -186,6 +185,13 @@ fn failed_validation_does_not_replace_a_remembered_connection_or_leak_the_key() 
         email: None,
         insecure_http: false,
     };
+    let previous_credential = serde_json::json!({
+        "serverUrl": previous.server_url,
+        "userId": previous.user_id,
+        "apiKey": "previous-key",
+    })
+    .to_string();
+    vault.save(&previous_credential).unwrap();
     settings.save(&previous).unwrap();
     let vault_observer = vault.clone();
     let service = DestinationService::new(client, vault, settings);
@@ -203,7 +209,7 @@ fn failed_validation_does_not_replace_a_remembered_connection_or_leak_the_key() 
     assert_eq!(service.status().unwrap(), Some(previous));
     assert_eq!(
         vault_observer.load().unwrap().as_deref(),
-        Some("previous-key")
+        Some(previous_credential.as_str())
     );
 }
 
@@ -356,7 +362,10 @@ fn unrecoverable_credential_rollback_poisoning_blocks_status_and_delivery() {
     );
     assert_eq!(
         service
-            .delivery_api(std::time::Duration::from_secs(20))
+            .delivery_api(
+                &DestinationIdentity::new("https://old.example", "old-user").unwrap(),
+                std::time::Duration::from_secs(20),
+            )
             .err()
             .expect("poisoned service blocks delivery")
             .code(),
@@ -386,4 +395,121 @@ fn forgetting_a_destination_removes_both_the_vault_entry_and_ready_state() {
     assert_eq!(service.status().unwrap(), None);
     assert_eq!(vault.load().unwrap(), None);
     assert_eq!(settings.load().unwrap(), None);
+}
+
+#[test]
+fn a_restarted_service_rejects_credentials_for_another_server_or_user() {
+    for (server, user) in [
+        ("https://old.example", "user-1"),
+        ("https://keep.example", "old-user"),
+    ] {
+        let vault = MemoryVault::default();
+        let settings = MemorySettings::default();
+        let service = DestinationService::new(
+            FakeKarakeepClient {
+                result: Ok(compatible_user()),
+                observed_key: RefCell::new(None),
+            },
+            vault.clone(),
+            settings.clone(),
+        );
+        let mut previous = service
+            .connect(ConnectDestinationInput {
+                server: "https://keep.example/dashboard/bookmarks".into(),
+                api_key: "bound-key-canary".into(),
+                allow_insecure_http: false,
+            })
+            .unwrap();
+        previous.server_url = server.into();
+        previous.user_id = user.into();
+        settings.save(&previous).unwrap();
+
+        let restarted = DestinationService::new(
+            FakeKarakeepClient {
+                result: Err(DestinationErrorCode::Authentication),
+                observed_key: RefCell::new(None),
+            },
+            vault,
+            settings,
+        );
+
+        assert_eq!(restarted.status().unwrap(), None);
+        let error = restarted
+            .delivery_api(
+                &DestinationIdentity::new(server, user).unwrap(),
+                std::time::Duration::from_secs(20),
+            )
+            .err()
+            .expect("mismatched credentials require reconnection");
+        assert_eq!(error.code(), DestinationErrorCode::Authentication);
+        assert!(!error.to_string().contains("bound-key-canary"));
+    }
+}
+
+#[test]
+fn legacy_credentials_require_reconnection_before_becoming_ready() {
+    let vault = MemoryVault::default();
+    vault.save("legacy-key-canary").unwrap();
+    let settings = MemorySettings::default();
+    settings
+        .save(&DestinationSummary {
+            server_url: "https://keep.example".into(),
+            user_id: "user-1".into(),
+            display_name: "Ada".into(),
+            email: None,
+            insecure_http: false,
+        })
+        .unwrap();
+    let service = DestinationService::new(
+        FakeKarakeepClient {
+            result: Err(DestinationErrorCode::Authentication),
+            observed_key: RefCell::new(None),
+        },
+        vault,
+        settings,
+    );
+
+    assert_eq!(service.status().unwrap(), None);
+    let error = service
+        .delivery_api(
+            &DestinationIdentity::new("https://keep.example", "user-1").unwrap(),
+            std::time::Duration::from_secs(20),
+        )
+        .err()
+        .expect("unbound credentials require reconnection");
+    assert_eq!(error.code(), DestinationErrorCode::Authentication);
+    assert!(!error.to_string().contains("legacy-key-canary"));
+}
+
+#[test]
+fn delivery_requires_the_server_and_user_that_were_reviewed() {
+    let service = DestinationService::new(
+        FakeKarakeepClient {
+            result: Ok(compatible_user()),
+            observed_key: RefCell::new(None),
+        },
+        MemoryVault::default(),
+        MemorySettings::default(),
+    );
+    service
+        .connect(ConnectDestinationInput {
+            server: "https://keep.example".into(),
+            api_key: "reviewed-key-canary".into(),
+            allow_insecure_http: false,
+        })
+        .unwrap();
+
+    for (server, user) in [
+        ("https://old.example", "user-1"),
+        ("https://keep.example", "old-user"),
+    ] {
+        let error = service
+            .delivery_api(
+                &DestinationIdentity::new(server, user).unwrap(),
+                std::time::Duration::from_secs(20),
+            )
+            .err()
+            .expect("delivery requires the reviewed destination");
+        assert_eq!(error.code(), DestinationErrorCode::Authentication);
+    }
 }

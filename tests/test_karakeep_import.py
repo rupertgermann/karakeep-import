@@ -11,10 +11,13 @@ import tempfile
 import threading
 import unittest
 import urllib.parse
+import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
+from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
+from urllib.response import addinfourl
 
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "karakeep-import.py"
@@ -534,6 +537,50 @@ class ImporterTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join()
+
+    def test_preflight_follows_only_same_origin_redirects(self):
+        server = "http://bookmarks.example"
+        for location, same_origin in (
+            ("/identity", True),
+            ("http://BOOKMARKS.EXAMPLE:80/identity", True),
+            ("http://archive.example/identity", False),
+            ("http://bookmarks.example:8080/identity", False),
+            ("https://bookmarks.example/identity", False),
+            ("http://reader@bookmarks.example/identity", False),
+        ):
+            with self.subTest(location=location):
+                def open_request(_handler, request):
+                    headers = Message()
+                    if request.full_url == f"{server}/api/v1/users/me":
+                        headers["Location"] = location
+                        response = addinfourl(
+                            io.BytesIO(), headers, request.full_url, 302
+                        )
+                        response.msg = "Found"
+                    else:
+                        self.assertTrue(
+                            same_origin, "request left its configured origin"
+                        )
+                        self.assertEqual(
+                            request.get_header("Authorization"), "Bearer fixture"
+                        )
+                        response = addinfourl(
+                            io.BytesIO(b'{"id": "reader"}'), headers, request.full_url, 200
+                        )
+                        response.msg = "OK"
+                    return response
+
+                with (
+                    patch.object(urllib.request.HTTPHandler, "http_open", open_request),
+                    patch.object(urllib.request.HTTPSHandler, "https_open", open_request),
+                ):
+                    client = importer.KarakeepClient(server, "fixture", max_retries=0)
+                    if same_origin:
+                        self.assertEqual(client.preflight()["id"], "reader")
+                    else:
+                        with self.assertRaises(importer.ApiFailure) as raised:
+                            client.preflight()
+                        self.assertEqual(raised.exception.status, 302)
 
 
 if __name__ == "__main__":

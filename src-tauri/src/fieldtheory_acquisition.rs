@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     fs,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -16,10 +15,7 @@ use sha2::{Digest, Sha256};
 
 use super::{BridgeRunner, PROTOCOL_VERSION, XSourceReference};
 use crate::{
-    domain::{BookmarkKey, DestinationIdentity},
     file_source::{FileSourceFormat, FileSourcePreview, preview_file},
-    ledger::DeliveryLedger,
-    transfer::FIELD_THEORY_LEDGER_SOURCE,
     transfer_options::TransferOptions,
 };
 
@@ -98,24 +94,6 @@ pub enum AcquisitionEvent {
         #[serde(rename = "previousSnapshotAvailable")]
         previous_snapshot_available: bool,
     },
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DestinationPreview {
-    pub server_url: String,
-    pub user_id: String,
-    pub user_name: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct XTransferPreview {
-    pub total: u64,
-    pub pending: u64,
-    pub previously_delivered: u64,
-    pub folders: Vec<String>,
-    pub destination: DestinationPreview,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -249,45 +227,6 @@ impl SnapshotStore {
             options,
         )
         .map_err(|_| SnapshotPreviewError)
-    }
-
-    pub fn preview(
-        &self,
-        ledger: &DeliveryLedger,
-        destination_identity: &DestinationIdentity,
-        destination: DestinationPreview,
-        options: &TransferOptions,
-    ) -> Result<XTransferPreview, SnapshotPreviewError> {
-        let source = self.delivery_source(options)?;
-        let mut previously_delivered = 0_u64;
-        let mut folder_keys = HashSet::new();
-        let mut folders = Vec::new();
-
-        for bookmark in &source.bookmarks {
-            let key = BookmarkKey::new(FIELD_THEORY_LEDGER_SOURCE, &bookmark.source_id)
-                .map_err(|_| SnapshotPreviewError)?;
-            if ledger
-                .delivery_for(destination_identity, &key)
-                .map_err(|_| SnapshotPreviewError)?
-                .is_some()
-            {
-                previously_delivered += 1;
-            }
-            for folder in &bookmark.folders {
-                if folder_keys.insert(folder.to_lowercase()) {
-                    folders.push(folder.clone());
-                }
-            }
-        }
-
-        let total = u64::try_from(source.bookmarks.len()).map_err(|_| SnapshotPreviewError)?;
-        Ok(XTransferPreview {
-            total,
-            pending: total.saturating_sub(previously_delivered),
-            previously_delivered,
-            folders,
-            destination,
-        })
     }
 
     fn prepare(

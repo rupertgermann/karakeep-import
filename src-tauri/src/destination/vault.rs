@@ -28,15 +28,15 @@ impl NativeCredentialVault {
 impl CredentialVault for NativeCredentialVault {
     fn load(&self) -> Result<Option<String>, DestinationError> {
         match self.entry()?.get_password() {
-            Ok(api_key) => Ok(Some(api_key)),
+            Ok(credential) => Ok(Some(credential)),
             Err(KeyringError::NoEntry) => Ok(None),
             Err(_) => Err(DestinationError::for_code(DestinationErrorCode::Storage)),
         }
     }
 
-    fn save(&self, api_key: &str) -> Result<(), DestinationError> {
+    fn save(&self, credential: &str) -> Result<(), DestinationError> {
         self.entry()?
-            .set_password(api_key)
+            .set_password(credential)
             .map_err(|_| DestinationError::for_code(DestinationErrorCode::Storage))
     }
 

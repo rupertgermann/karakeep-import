@@ -616,6 +616,25 @@ fn cancellation_is_available_as_soon_as_run_preparation_succeeds() {
     ));
     assert_eq!(api.ensure_calls.load(Ordering::SeqCst), 0);
     assert!(!coordinator.is_active());
+
+    let retry = coordinator
+        .prepare_retry(
+            api,
+            delivery_id("delivery-retry-after-cancel"),
+            &id,
+            destination("user-a"),
+            Arc::new(RecordingEvents::default()),
+            fast_config(),
+        )
+        .expect("retry can include records cancelled before any request")
+        .execute();
+    assert!(matches!(
+        retry,
+        DeliveryTerminalEvent::Completed {
+            result: delivery_coordinator::DeliveryResult { delivered: 1, .. },
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -727,5 +746,75 @@ fn a_later_run_resumes_pending_records_without_exposing_failure_details() {
             .expect("completed preview")
             .pending,
         0
+    );
+}
+
+#[test]
+fn retry_resends_failed_records_without_expanding_the_reviewed_batch() {
+    let config = delivery::DeliveryConfig {
+        pending_limit: Some(2),
+        ..fast_config()
+    };
+    let coordinator = DeliveryCoordinator::with_config(ledger(), config).unwrap();
+    let target = destination("user-a");
+    let source = preview(&["created", "authentication-failure", "outside-limit"]);
+    let first_id = delivery_id("delivery-capped");
+    let first = coordinator
+        .run(
+            Arc::new(MixedOutcomeApi),
+            first_id.clone(),
+            source,
+            target.clone(),
+            Arc::new(RecordingEvents::default()),
+        )
+        .unwrap();
+    assert!(matches!(
+        first,
+        DeliveryTerminalEvent::Failed {
+            result: delivery_coordinator::DeliveryResult {
+                delivered: 1,
+                failed: 1,
+                ..
+            },
+            ..
+        }
+    ));
+
+    let wrong_destination = coordinator.prepare_retry(
+        Arc::new(SuccessfulApi::default()),
+        delivery_id("wrong-destination"),
+        &first_id,
+        destination("user-b"),
+        Arc::new(RecordingEvents::default()),
+        fast_config(),
+    );
+    assert!(matches!(
+        wrong_destination,
+        Err(error) if error.code == DeliveryCoordinatorErrorCode::DeliveryIdMismatch
+    ));
+
+    let retry = coordinator
+        .prepare_retry(
+            Arc::new(SuccessfulApi::default()),
+            delivery_id("delivery-capped-retry"),
+            &first_id,
+            target.clone(),
+            Arc::new(RecordingEvents::default()),
+            fast_config(),
+        )
+        .unwrap()
+        .execute();
+    let DeliveryTerminalEvent::Completed { result, .. } = retry else {
+        panic!("expected retry to complete");
+    };
+    assert_eq!(
+        (
+            result.delivered,
+            coordinator
+                .preview(&preview(&["outside-limit"]), &target, None)
+                .unwrap()
+                .pending,
+        ),
+        (1, 1),
     );
 }

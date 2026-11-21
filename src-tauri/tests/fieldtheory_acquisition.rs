@@ -14,8 +14,8 @@ use karakeep_transfer_lib::{
     domain::{DestinationIdentity, RunStatus},
     fieldtheory::{
         AcquisitionEvent, AcquisitionFailureCode, AcquisitionPhase, AcquisitionStartError,
-        AcquisitionSupervisor, BridgeRunner, DestinationPreview, FieldTheoryState, SnapshotStore,
-        XAcquisitionRequest, XSourceReference,
+        AcquisitionSupervisor, BridgeRunner, FieldTheoryState, SnapshotStore, XAcquisitionRequest,
+        XSourceReference,
     },
     file_source::ResolvedFileSourceFormat,
     karakeep::BookmarkOrigin,
@@ -682,34 +682,23 @@ fn snapshot_preview_partitions_pending_records_by_destination_without_delivery()
     delivery
         .finish_run(RunStatus::Completed)
         .expect("delivery run finishes");
-    let ledger = ledger.lock().expect("ledger lock");
-
-    let preview = store
-        .preview(
-            &ledger,
-            &destination_identity,
-            DestinationPreview {
-                server_url: "https://keep.example".to_string(),
-                user_id: "user-7".to_string(),
-                user_name: "Reader".to_string(),
-            },
-            &TransferOptions::default(),
-        )
-        .expect("snapshot preview");
-
+    let source = store
+        .delivery_source(&TransferOptions::default())
+        .expect("snapshot source");
+    let counts = karakeep_transfer_lib::transfer::preview_delivery_counts(
+        &source,
+        &ledger,
+        &destination_identity,
+        None,
+    )
+    .expect("snapshot preview");
     assert_eq!(
-        preview,
-        karakeep_transfer_lib::fieldtheory::XTransferPreview {
-            total: 2,
-            pending: 1,
-            previously_delivered: 1,
-            folders: vec!["Research".to_string()],
-            destination: DestinationPreview {
-                server_url: "https://keep.example".to_string(),
-                user_id: "user-7".to_string(),
-                user_name: "Reader".to_string(),
-            },
-        }
+        (counts.total, counts.pending, counts.previously_delivered),
+        (2, 1, 1)
+    );
+    assert_eq!(
+        karakeep_transfer_lib::transfer_source::deduplicated_preview_folders(&source),
+        ["Research"]
     );
 }
 

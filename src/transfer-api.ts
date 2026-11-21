@@ -20,6 +20,7 @@ export type TransferSourceRequest =
 export interface StartDeliveryRequest {
   approvalId?: string;
   deliveryId: string;
+  retryOf?: string;
   source: TransferSourceRequest;
   options: TransferOptions;
 }
