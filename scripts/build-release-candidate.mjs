@@ -3,6 +3,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdtemp, readFile, readdir, writeFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+import { npmInvocation } from "./lib/npm-invocation.mjs";
+
 const root = path.resolve(process.cwd());
 
 function argumentsFrom(argv) {
@@ -192,8 +195,8 @@ async function removeCanonicalSnapshot(output) {
 }
 
 function rebuildFrontend() {
-  const command = process.platform === "win32" ? "npm.cmd" : "npm";
-  const result = spawnSync(command, ["run", "build"], {
+  const [command, args] = npmInvocation(["run", "build"]);
+  const result = spawnSync(command, args, {
     cwd: root,
     encoding: "utf8",
   });
@@ -243,7 +246,8 @@ function planFor(input, metadata, noSign) {
   };
   const args = ["run", "tauri", "--", "build", "--target", metadata.rustTarget, "--bundles", metadata.bundleFormat];
   if (noSign) args.push("--no-sign");
-  return { input, target: metadata.target, tauri: { command: process.platform === "win32" ? "npm.cmd" : "npm", args }, config };
+  const [command, tauriArgs] = npmInvocation(args);
+  return { input, target: metadata.target, tauri: { command, args: tauriArgs }, config };
 }
 
 async function verifiedPlan(options) {

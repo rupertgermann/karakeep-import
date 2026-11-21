@@ -17,6 +17,8 @@ use serde::Serialize;
 
 pub use crate::karakeep::RequestCancellation as Cancellation;
 
+const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DestinationId(String);
 
@@ -118,6 +120,17 @@ impl CancellationToken {
 impl RequestCancellation for CancellationToken {
     fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
+    }
+}
+
+struct RunCancellation<'a> {
+    requested: &'a dyn Cancellation,
+    authentication_failed: AtomicBool,
+}
+
+impl RequestCancellation for RunCancellation<'_> {
+    fn is_cancelled(&self) -> bool {
+        self.requested.is_cancelled() || self.authentication_failed.load(Ordering::Acquire)
     }
 }
 
@@ -378,9 +391,14 @@ impl DeliveryEngine {
         let queue = Arc::new(Mutex::new(pending));
         let totals = Arc::new(Mutex::new(initial_totals));
         let completed = Arc::new(Mutex::new(Vec::new()));
+        let cancellation = RunCancellation {
+            requested: cancellation,
+            authentication_failed: AtomicBool::new(false),
+        };
 
         thread::scope(|scope| {
             for _ in 0..worker_count {
+                let cancellation = &cancellation;
                 let queue = queue.clone();
                 let totals = totals.clone();
                 let completed = completed.clone();
@@ -431,7 +449,7 @@ impl DeliveryEngine {
         record: DeliveryRecord,
         destination: &DestinationId,
         prior_attempts: usize,
-        cancellation: &dyn Cancellation,
+        cancellation: &RunCancellation<'_>,
     ) -> RecordResult {
         let resumed = prior_attempts > 0;
         let (ensured, ensure_retried) = match self.request_with_retry(cancellation, || {
@@ -526,23 +544,33 @@ impl DeliveryEngine {
 
     fn request_with_retry<T>(
         &self,
-        cancellation: &dyn Cancellation,
+        cancellation: &RunCancellation<'_>,
         mut request: impl FnMut() -> Result<T, ApiError>,
     ) -> Result<(T, bool), RequestFailure> {
         let mut retried = false;
         for attempt in 0..=self.config.retry.max_retries {
+            self.request_gate.wait(cancellation);
             if cancellation.is_cancelled() {
                 return Err(RequestFailure::Cancelled { retried });
             }
-            self.request_gate.wait();
             match request() {
                 Ok(value) => return Ok((value, retried)),
+                Err(error) if error.kind == ApiErrorKind::Authentication => {
+                    cancellation
+                        .authentication_failed
+                        .store(true, Ordering::Release);
+                    return Err(RequestFailure::Api { error, retried });
+                }
                 Err(_error) if cancellation.is_cancelled() => {
                     return Err(RequestFailure::Cancelled { retried });
                 }
                 Err(error) if error.is_retryable() && attempt < self.config.retry.max_retries => {
                     retried = true;
-                    self.clock.sleep(self.retry_delay(attempt, &error));
+                    let deadline = self
+                        .clock
+                        .now()
+                        .saturating_add(self.retry_delay(attempt, &error));
+                    sleep_until(self.clock.as_ref(), deadline, cancellation);
                 }
                 Err(error) => return Err(RequestFailure::Api { error, retried }),
             }
@@ -578,7 +606,13 @@ impl DeliveryEngine {
         let ledger_result = self.ledger.record_pending(destination, pending);
         match ledger_result {
             Ok(()) => failed(source_id, origin, retried, Some(failure_kind), error),
-            Err(ledger_error) => failed(source_id, origin, retried, None, ledger_error.to_string()),
+            Err(ledger_error) => failed(
+                source_id,
+                origin,
+                retried,
+                (failure_kind == ApiErrorKind::Authentication).then_some(failure_kind),
+                ledger_error.to_string(),
+            ),
         }
     }
 
@@ -629,15 +663,29 @@ impl RequestGate {
         }
     }
 
-    fn wait(&self) {
-        let mut next_slot = self.next_slot.lock().unwrap();
-        let now = self.clock.now();
-        let slot = now.max(*next_slot);
-        let delay = slot.saturating_sub(now);
-        if !delay.is_zero() {
-            self.clock.sleep(delay);
+    fn wait(&self, cancellation: &dyn Cancellation) {
+        while !cancellation.is_cancelled() {
+            let deadline = {
+                let mut next_slot = self.next_slot.lock().unwrap();
+                let now = self.clock.now();
+                if now >= *next_slot {
+                    *next_slot = now.saturating_add(self.interval);
+                    return;
+                }
+                *next_slot
+            };
+            sleep_until(self.clock.as_ref(), deadline, cancellation);
         }
-        *next_slot = slot.saturating_add(self.interval);
+    }
+}
+
+fn sleep_until(clock: &dyn Clock, deadline: Duration, cancellation: &dyn Cancellation) {
+    while !cancellation.is_cancelled() {
+        let remaining = deadline.saturating_sub(clock.now());
+        if remaining.is_zero() {
+            return;
+        }
+        clock.sleep(remaining.min(CANCELLATION_POLL_INTERVAL));
     }
 }
 

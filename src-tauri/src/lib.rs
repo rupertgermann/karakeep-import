@@ -85,16 +85,6 @@ fn manual_update_check() -> updates::ManualUpdateCheckResult {
 }
 
 #[tauri::command]
-fn export_diagnostics(
-    state: tauri::State<'_, diagnostics::DiagnosticsStore>,
-    field_theory: tauri::State<'_, FieldTheoryState>,
-    destination: tauri::State<'_, DestinationState>,
-    settings: tauri::State<'_, settings::SettingsService>,
-) -> Result<diagnostics::DiagnosticsExport, &'static str> {
-    current_diagnostics(&state, &field_theory, &destination, &settings)
-}
-
-#[tauri::command]
 async fn save_diagnostics<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     state: tauri::State<'_, diagnostics::DiagnosticsStore>,
@@ -1023,7 +1013,6 @@ fn configure_builder<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
             health,
             version_information,
             manual_update_check,
-            export_diagnostics,
             save_diagnostics,
             discover_x_sources,
             select_x_source,
@@ -1493,30 +1482,12 @@ mod tests {
     }
 
     #[test]
-    fn diagnostics_export_only_runs_through_an_explicit_desktop_command() {
-        let versions = super::versions::ComponentVersions::current();
-
-        assert_command_response(
-            "export_diagnostics",
-            json!({
-                "generatedByUserAction": true,
-                "includesBookmarkContent": false,
-                "telemetryEnabled": false,
-                "versions": versions,
-                "source": "notConfigured",
-                "destination": "notConfigured",
-                "storage": {
-                    "dataDirectory": "private application data",
-                    "snapshotBytes": 0,
-                    "ledgerBytes": 0
-                },
-                "lastFailure": null
-            }),
-        );
+    fn diagnostics_payload_is_unavailable_over_the_retired_ipc_command() {
+        assert!(command_response("export_diagnostics", tauri::ipc::InvokeBody::default()).is_err());
     }
 
     #[test]
-    fn diagnostics_export_reflects_live_component_and_storage_state() {
+    fn saved_diagnostics_reflect_live_state_without_bookmark_content() {
         let directory = tempdir().expect("temporary app state");
         let snapshot = directory.path().join("fieldtheory/bookmarks.jsonl");
         fs::create_dir_all(snapshot.parent().expect("snapshot parent"))
@@ -1535,40 +1506,33 @@ mod tests {
         .expect("source binding");
         let snapshot_bytes = fs::metadata(&snapshot).expect("snapshot metadata").len();
         fs::write(directory.path().join("delivery-ledger.sqlite3"), b"ledger").expect("ledger");
-        let app = super::configure_builder(mock_builder())
-            .manage(test_preferences())
-            .manage(super::FieldTheoryState::bundled(
-                directory.path(),
-                directory.path(),
-            ))
-            .manage(super::DestinationState(Arc::new(ConnectedDestination(
-                Arc::new(SuccessfulDeliveryApi::default()),
-            ))))
-            .manage(super::settings::SettingsService::from_app_data_dir(
-                directory.path(),
-            ))
-            .manage(test_transfer_state())
-            .build(mock_context(noop_assets()))
-            .expect("mock app builds");
-        let webview = WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .expect("mock webview builds");
-
-        let response = get_ipc_response(
-            &webview,
-            InvokeRequest {
-                cmd: "export_diagnostics".into(),
-                callback: tauri::ipc::CallbackFn(0),
-                error: tauri::ipc::CallbackFn(1),
-                url: "tauri://localhost".parse().expect("valid IPC origin"),
-                body: tauri::ipc::InvokeBody::default(),
-                headers: Default::default(),
-                invoke_key: INVOKE_KEY.to_string(),
-            },
+        let export = super::current_diagnostics(
+            &super::diagnostics::DiagnosticsStore::default(),
+            &super::FieldTheoryState::bundled(directory.path(), directory.path()),
+            &super::DestinationState(Arc::new(ConnectedDestination(Arc::new(
+                SuccessfulDeliveryApi::default(),
+            )))),
+            &super::settings::SettingsService::from_app_data_dir(directory.path()),
         )
-        .expect("diagnostics export succeeds")
-        .deserialize::<Value>()
-        .expect("diagnostics JSON");
+        .expect("live diagnostics");
+
+        struct ChoosePath(PathBuf);
+        impl super::diagnostics_save::DiagnosticsSaveDialog for ChoosePath {
+            fn choose_save_path(
+                &self,
+            ) -> Result<Option<PathBuf>, super::diagnostics_save::DiagnosticsSaveError>
+            {
+                Ok(Some(self.0.clone()))
+            }
+        }
+
+        let path = directory.path().join("saved-diagnostics.json");
+        assert!(
+            super::diagnostics_save::save_diagnostics_export(&ChoosePath(path.clone()), &export)
+                .expect("diagnostics saved")
+        );
+        let contents = fs::read_to_string(path).expect("saved diagnostics");
+        let response: Value = serde_json::from_str(&contents).expect("diagnostics JSON");
 
         assert_eq!(
             (
@@ -1578,9 +1542,8 @@ mod tests {
                 response["storage"]["snapshotBytes"].as_u64(),
                 response["storage"]["ledgerBytes"].as_u64(),
                 response["lastFailure"].as_null(),
-                serde_json::to_string(&response)
-                    .expect("diagnostics serialize")
-                    .contains("private-bookmark-id"),
+                contents.contains("private-bookmark-id")
+                    || contents.contains("https://example.invalid/private"),
             ),
             (
                 Some("ready"),
@@ -1633,20 +1596,15 @@ mod tests {
                 invoke_key: INVOKE_KEY.to_string(),
             },
         );
-        let diagnostics = get_ipc_response(
-            &webview,
-            InvokeRequest {
-                cmd: "export_diagnostics".into(),
-                callback: tauri::ipc::CallbackFn(2),
-                error: tauri::ipc::CallbackFn(3),
-                url: "tauri://localhost".parse().expect("valid IPC origin"),
-                body: tauri::ipc::InvokeBody::default(),
-                headers: Default::default(),
-                invoke_key: INVOKE_KEY.to_string(),
-            },
+        let diagnostics = serde_json::to_value(
+            super::current_diagnostics(
+                &app.state::<super::diagnostics::DiagnosticsStore>(),
+                &app.state::<super::FieldTheoryState>(),
+                &app.state::<super::DestinationState>(),
+                &app.state::<super::settings::SettingsService>(),
+            )
+            .expect("diagnostics export succeeds"),
         )
-        .expect("diagnostics export succeeds")
-        .deserialize::<Value>()
         .expect("diagnostics JSON");
 
         assert_eq!(

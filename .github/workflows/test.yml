@@ -62,7 +62,7 @@ jobs:
       - run: npm run test:fieldtheory
 
   cold-rust:
-    if: github.event_name == 'workflow_dispatch' && inputs.cold_rust
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.cold_rust)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,3 +78,26 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/cold-rust-cargo
           CARGO_TARGET_DIR: ${{ runner.temp }}/cold-rust-target
         run: /usr/bin/time -p cargo +stable test --locked --manifest-path src-tauri/Cargo.toml
+
+  windows-release-preflight:
+    if: github.event_name == 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - name: Select the pinned release toolchain
+        shell: pwsh
+        run: |
+          $rust = (Get-Content release/release-inputs.json -Raw | ConvertFrom-Json).buildToolchains.rust
+          rustup toolchain install $rust --profile minimal
+          "RUSTUP_TOOLCHAIN=$rust" >> $env:GITHUB_ENV
+      - run: npm ci --ignore-scripts
+      - run: npm run prepare:fieldtheory
+      - run: npx --no-install vite build
+      - run: npm run release:inputs -- --target windows-x64
+      - run: npm run release:build-candidate -- --input release-inputs/windows-x64 --dry-run
+      - run: node --test scripts/test/build-release-candidate.test.mjs

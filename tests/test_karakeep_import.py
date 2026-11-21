@@ -12,7 +12,7 @@ import threading
 import unittest
 import urllib.parse
 import urllib.request
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -167,7 +167,7 @@ class ImporterTests(unittest.TestCase):
     def test_dashboard_url_is_normalized_to_api_base(self):
         self.assertEqual(
             importer.normalize_api_base(
-                "https://karakeep.example/dashboard/bookmarks/"
+                "https://KARAKEEP.example:443/dashboard/bookmarks/"
             ),
             "https://karakeep.example/api/v1",
         )
@@ -398,7 +398,11 @@ class ImporterTests(unittest.TestCase):
 
                 self.assertEqual(result, 0)
                 self.assertEqual(
-                    importer.StateStore(state_path).completed_ids(),
+                    importer.StateStore(
+                        state_path,
+                        api_base=f"http://127.0.0.1:{server.server_port}/api/v1",
+                        account_id="user-1",
+                    ).completed_ids(),
                     {"https://example.com/docs?a=1&b=2"},
                 )
                 self.assertFalse(failure_path.exists())
@@ -446,24 +450,101 @@ class ImporterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bookmarks.jsonl"
             path.write_text(json.dumps(SAMPLE) + "\n", encoding="utf-8")
+            state_path = Path(directory) / "state.jsonl"
+            state_path.write_text(
+                '{"sourceId":"123","status":"complete"}\n', encoding="utf-8"
+            )
             output = io.StringIO()
 
-            with redirect_stdout(output):
+            with patch.dict(os.environ, {}, clear=True), redirect_stdout(output):
                 result = importer.main(
                     [
                         "--input",
                         str(path),
                         "--state-file",
-                        str(Path(directory) / "state.jsonl"),
+                        str(state_path),
                     ]
                 )
 
         self.assertEqual(result, 0)
         self.assertIn("Input format: Field Theory JSONL", output.getvalue())
         self.assertIn(
+            "Pending in this run: 1 before the resume check", output.getvalue()
+        )
+        self.assertIn(
             "Records with preserved source timestamp: 1", output.getvalue()
         )
         self.assertIn("Static tags: twitter, fieldtheory", output.getvalue())
+
+    def test_live_import_resumes_only_for_the_authenticated_destination(self):
+        class ResumeHandler(FakeKarakeepHandler):
+            requests = []
+
+            def do_GET(self):
+                self.requests.append(("GET", self.path, None))
+                account = {
+                    "Bearer original": "user-1",
+                    "Bearer rotated": "user-1",
+                    "Bearer other-account": "user-2",
+                }.get(self.headers.get("Authorization"))
+                self._reply(200, {"id": account} if account else {})
+
+        with ExitStack() as stack:
+            directory = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+            servers = []
+            for _ in range(2):
+                server = stack.enter_context(
+                    ThreadingHTTPServer(("127.0.0.1", 0), ResumeHandler)
+                )
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                stack.callback(thread.join)
+                stack.callback(server.shutdown)
+                servers.append(f"http://127.0.0.1:{server.server_port}")
+            first_base, second_base = servers
+
+            input_path = directory / "bookmarks.jsonl"
+            input_path.write_text(json.dumps(SAMPLE) + "\n", encoding="utf-8")
+            state_path = directory / "state.jsonl"
+            legacy_entry = '{"sourceId":"123","status":"complete"}\n'
+            state_path.write_text(legacy_entry, encoding="utf-8")
+            arguments = [
+                "--execute",
+                "--input", str(input_path),
+                "--state-file", str(state_path),
+                "--failure-file", str(directory / "failures.jsonl"),
+                "--api-key-env", "RESUME_TEST_API_KEY",
+                "--requests-per-second", "1000",
+                "--max-retries", "0",
+                "--no-default-tags", "--no-export-tags",
+            ]
+            for name, server_url, key, expected in (
+                ("legacy history", first_base, "original", ["GET", "POST"]),
+                ("rotated key", f"{first_base}/dashboard/", "rotated", ["GET"]),
+                ("different account", first_base, "other-account", ["GET", "POST"]),
+                ("different server", second_base, "original", ["GET", "POST"]),
+                ("original destination still complete", first_base, "original", ["GET"]),
+                ("missing account ID", first_base, "unknown", ["GET"]),
+            ):
+                with self.subTest(name=name):
+                    ResumeHandler.requests.clear()
+                    with (
+                        patch.dict(os.environ, {"RESUME_TEST_API_KEY": key}),
+                        redirect_stdout(io.StringIO()),
+                        redirect_stderr(io.StringIO()) as errors,
+                    ):
+                        result = importer.main([*arguments, "--server", server_url])
+                    if key == "unknown":
+                        self.assertEqual(result, 1)
+                        self.assertIn("account ID", errors.getvalue())
+                    else:
+                        self.assertEqual(result, 0, errors.getvalue())
+                    self.assertEqual(
+                        [method for method, _, _ in ResumeHandler.requests], expected
+                    )
+            self.assertTrue(
+                state_path.read_text(encoding="utf-8").startswith(legacy_entry)
+            )
 
     def test_import_creates_bookmark_attaches_tags_and_writes_state(self):
         FakeKarakeepHandler.requests = []
@@ -472,7 +553,6 @@ class ImporterTests(unittest.TestCase):
         thread.start()
         try:
             with tempfile.TemporaryDirectory() as directory:
-                state = importer.StateStore(Path(directory) / "state.jsonl")
                 errors = importer.JsonlLog(Path(directory) / "errors.jsonl")
                 client = importer.KarakeepClient(
                     f"http://127.0.0.1:{server.server_port}",
@@ -480,7 +560,13 @@ class ImporterTests(unittest.TestCase):
                     requests_per_second=1000,
                     max_retries=0,
                 )
-                self.assertEqual(client.preflight()["id"], "user-1")
+                account_id = client.preflight()["id"]
+                self.assertEqual(account_id, "user-1")
+                state = importer.StateStore(
+                    Path(directory) / "state.jsonl",
+                    api_base=client.api_base,
+                    account_id=account_id,
+                )
                 result = importer.import_one(
                     SAMPLE,
                     client=client,

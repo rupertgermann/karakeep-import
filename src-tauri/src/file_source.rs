@@ -251,14 +251,15 @@ fn chrome_timestamp(added_at: &str, field: TimestampField) -> Option<String> {
 fn source_id(record: &Map<String, Value>) -> Option<String> {
     ["tweetId", "id", "url"]
         .iter()
-        .find_map(|key| scalar_string(record.get(*key)))
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+        .find_map(|key| nonblank_scalar_string(record.get(*key)))
 }
 
-fn scalar_string(value: Option<&Value>) -> Option<String> {
+fn nonblank_scalar_string(value: Option<&Value>) -> Option<String> {
     match value {
-        Some(Value::String(value)) => Some(value.clone()),
+        Some(Value::String(value)) => {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_owned())
+        }
         Some(Value::Number(value)) => Some(value.to_string()),
         _ => None,
     }
@@ -345,11 +346,10 @@ fn make_field_theory_note(record: &Map<String, Value>) -> String {
     if let Some(posted_at) = parse_timestamp(record.get("postedAt")) {
         metadata.push(format!("Posted: {posted_at}"));
     }
-    if let Some(tweet_id) =
-        scalar_string(record.get("tweetId")).or_else(|| scalar_string(record.get("id")))
-        && !tweet_id.trim().is_empty()
+    if let Some(tweet_id) = nonblank_scalar_string(record.get("tweetId"))
+        .or_else(|| nonblank_scalar_string(record.get("id")))
     {
-        metadata.push(format!("Tweet ID: {}", tweet_id.trim()));
+        metadata.push(format!("Tweet ID: {tweet_id}"));
     }
 
     let linked_urls = deduplicate_exact(
@@ -404,7 +404,7 @@ impl<'a> ChromeParser<'a> {
         }
     }
 
-    fn start_tag(&mut self, name: &str, attributes: &str) {
+    fn start_tag(&mut self, name: &str, attributes: &str) -> bool {
         match name {
             "h3" => self.folder_text = Some(String::new()),
             "dl" => {
@@ -415,7 +415,7 @@ impl<'a> ChromeParser<'a> {
                 self.folder_depths.push(has_folder);
             }
             "a" => {
-                let attributes = parse_attributes(attributes);
+                let (attributes, self_closing) = parse_attributes(attributes);
                 self.bookmark = Some(ChromeBookmarkCapture {
                     href: attributes
                         .iter()
@@ -429,9 +429,11 @@ impl<'a> ChromeParser<'a> {
                         .unwrap_or_default(),
                     title: String::new(),
                 });
+                return self_closing;
             }
             _ => {}
         }
+        attributes.ends_with('/')
     }
 
     fn text(&mut self, text: &str) {
@@ -490,8 +492,8 @@ impl<'a> ChromeParser<'a> {
         };
         let tags = compose_tags(self.options, DefaultTagSource::Chrome, &folders);
         let mut metadata = Vec::new();
-        if !folders.is_empty() {
-            metadata.push(format!("Chrome folder: {}", folders.join(" > ")));
+        if !self.folders.is_empty() {
+            metadata.push(format!("Chrome folder: {}", self.folders.join(" > ")));
         }
         if let Some(timestamp) = &created_at {
             metadata.push(format!("Added to Chrome: {timestamp}"));
@@ -559,8 +561,8 @@ fn tokenize_html(contents: &str, parser: &mut ChromeParser<'_>) -> Result<(), Fi
         if is_end {
             parser.end_tag(&name)?;
         } else {
-            parser.start_tag(&name, body[name_end..].trim());
-            if raw.ends_with('/') {
+            let self_closing = parser.start_tag(&name, body[name_end..].trim());
+            if self_closing {
                 parser.end_tag(&name)?;
             }
         }
@@ -582,7 +584,7 @@ fn find_tag_end(contents: &str, start: usize) -> Option<usize> {
     None
 }
 
-fn parse_attributes(input: &str) -> Vec<(String, String)> {
+fn parse_attributes(input: &str) -> (Vec<(String, String)>, bool) {
     let bytes = input.as_bytes();
     let mut attributes = Vec::new();
     let mut cursor = 0;
@@ -590,6 +592,9 @@ fn parse_attributes(input: &str) -> Vec<(String, String)> {
     while cursor < bytes.len() {
         while cursor < bytes.len() && (bytes[cursor].is_ascii_whitespace() || bytes[cursor] == b'/')
         {
+            if bytes[cursor] == b'/' && cursor + 1 == bytes.len() {
+                return (attributes, true);
+            }
             cursor += 1;
         }
         let name_start = cursor;
@@ -626,10 +631,7 @@ fn parse_attributes(input: &str) -> Vec<(String, String)> {
                 }
             } else {
                 let value_start = cursor;
-                while cursor < bytes.len()
-                    && !bytes[cursor].is_ascii_whitespace()
-                    && bytes[cursor] != b'/'
-                {
+                while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
                     cursor += 1;
                 }
                 value = decode_html_entities(&input[value_start..cursor]).into_owned();
@@ -637,7 +639,7 @@ fn parse_attributes(input: &str) -> Vec<(String, String)> {
         }
         attributes.push((name, value));
     }
-    attributes
+    (attributes, false)
 }
 
 fn normalize_chrome_url(raw_url: &str) -> Option<String> {

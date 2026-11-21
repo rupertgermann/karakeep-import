@@ -182,6 +182,67 @@ fn chrome_folder_path_is_preserved_while_human_tags_are_deduplicated() {
 }
 
 #[test]
+fn chrome_notes_keep_the_folder_path_when_export_tags_are_disabled() {
+    let mut options = TransferOptions {
+        include_export_tags: false,
+        ..source_tag_options()
+    };
+    let preview = preview_text(
+        "bookmarks.html",
+        CHROME_BOOKMARKS,
+        FileSourceFormat::ChromeNetscape,
+        &options,
+    )
+    .expect("valid Chrome preview");
+    let bookmark = &preview.bookmarks[0];
+    assert_eq!(bookmark.tags, ["chrome"]);
+    assert!(
+        bookmark
+            .note
+            .contains("Chrome folder: Bookmarks bar > Research & Docs")
+    );
+
+    options.include_notes = false;
+    let preview = preview_text(
+        "bookmarks.html",
+        CHROME_BOOKMARKS,
+        FileSourceFormat::ChromeNetscape,
+        &options,
+    )
+    .expect("valid Chrome preview without notes");
+    assert!(preview.bookmarks[0].note.is_empty());
+}
+
+#[test]
+fn field_theory_skips_blank_identifier_candidates() {
+    let input = concat!(
+        r#"{"tweetId":"   ","id":" 42 ","url":"https://example.com/one"}"#,
+        "\n",
+        r#"{"tweetId":"","id":" ","url":"https://example.com/two"}"#,
+    );
+    let preview = preview_text(
+        "bookmarks.jsonl",
+        input,
+        FileSourceFormat::FieldTheoryJsonl,
+        &source_tag_options(),
+    )
+    .expect("records with valid identifier fallbacks");
+
+    assert_eq!(preview.bookmarks[0].source_id, "42");
+    assert!(preview.bookmarks[0].note.contains("Tweet ID: 42"));
+    assert_eq!(preview.bookmarks[1].source_id, "https://example.com/two");
+    assert!(
+        preview_text(
+            "bookmarks.jsonl",
+            r#"{"tweetId":"","id":" ","url":" "}"#,
+            FileSourceFormat::FieldTheoryJsonl,
+            &source_tag_options(),
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn field_theory_duplicate_source_ids_are_rejected() {
     let duplicate_id = concat!(
         "{\"id\":\"same\",\"url\":\"https://example.com/one\"}\n",
@@ -241,6 +302,32 @@ fn chrome_duplicates_are_rejected_after_view_source_normalization() {
         error
             .to_string()
             .contains("Duplicate URL https://example.com/docs in Chrome bookmark 2")
+    );
+}
+
+#[test]
+fn chrome_accepts_unquoted_url_paths_and_keeps_the_anchor_text() {
+    let input = "<DL><p>\n\
+        <DT><A HREF=https://example.com/docs/>Documentation</A>\n\
+        <DT><A HREF=https://example.com/reference/start ADD_DATE=1721779200>Reference</A>\n\
+        </DL><p>";
+    let preview = preview_text(
+        "bookmarks.html",
+        input,
+        FileSourceFormat::ChromeNetscape,
+        &source_tag_options(),
+    )
+    .expect("valid unquoted Chrome links");
+
+    assert_eq!(preview.bookmarks[0].url, "https://example.com/docs/");
+    assert_eq!(preview.bookmarks[0].title, "Documentation");
+    assert_eq!(
+        preview.bookmarks[1].url,
+        "https://example.com/reference/start"
+    );
+    assert_eq!(
+        preview.bookmarks[1].created_at.as_deref(),
+        Some("2024-07-24T00:00:00Z")
     );
 }
 

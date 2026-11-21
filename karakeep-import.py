@@ -11,6 +11,7 @@ import argparse
 import concurrent.futures
 import dataclasses
 import datetime as dt
+import hashlib
 import json
 import os
 import random
@@ -31,6 +32,7 @@ DEFAULT_SERVER = "https://karakeep.example.com"
 FIELD_THEORY_DEFAULT_TAGS = ("twitter", "fieldtheory")
 CHROME_DEFAULT_TAGS = ("chrome",)
 USER_AGENT = "bookmarks-to-karakeep/1.0"
+HTTP_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 class ImportFailure(RuntimeError):
@@ -80,20 +82,26 @@ class RateLimiter:
             time.sleep(delay)
 
 
-def _request_origin(url: str) -> tuple[str, str, int]:
-    parts = urllib.parse.urlsplit(url)
-    if parts.hostname is None or parts.username is not None:
-        raise ValueError("Invalid redirect authority")
+def _request_origin(parts: urllib.parse.SplitResult) -> tuple[str, str, int]:
+    hostname = parts.hostname
+    if (
+        hostname is None
+        or parts.username is not None
+        or parts.scheme not in HTTP_DEFAULT_PORTS
+    ):
+        raise ValueError("Invalid HTTP origin")
     port = parts.port
     if port is None:
-        port = 443 if parts.scheme == "https" else 80
-    return parts.scheme, parts.hostname, port
+        port = HTTP_DEFAULT_PORTS[parts.scheme]
+    return parts.scheme, hostname, port
 
 
 class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         try:
-            if _request_origin(req.full_url) != _request_origin(newurl):
+            current = _request_origin(urllib.parse.urlsplit(req.full_url))
+            target = _request_origin(urllib.parse.urlsplit(newurl))
+            if current != target:
                 return None
         except ValueError:
             return None
@@ -216,6 +224,11 @@ class JsonlLog:
 
 
 class StateStore(JsonlLog):
+    def __init__(self, path: Path, *, api_base: str, account_id: str) -> None:
+        super().__init__(path)
+        identity = json.dumps([api_base, account_id]).encode("utf-8")
+        self._destination_id = hashlib.sha256(identity).hexdigest()
+
     def completed_ids(self) -> set[str]:
         if not self.path.exists():
             return set()
@@ -231,7 +244,11 @@ class StateStore(JsonlLog):
                     raise ImportFailure(
                         f"Invalid state JSON on line {line_number} of {self.path}: {error}"
                     ) from error
-                if value.get("status") == "complete" and value.get("sourceId"):
+                if (
+                    value.get("destinationId") == self._destination_id
+                    and value.get("status") == "complete"
+                    and value.get("sourceId")
+                ):
                     completed.add(str(value["sourceId"]))
         return completed
 
@@ -240,6 +257,7 @@ class StateStore(JsonlLog):
     ) -> None:
         self.append(
             {
+                "destinationId": self._destination_id,
                 "sourceId": source_id,
                 "bookmarkId": bookmark_id,
                 "outcome": outcome,
@@ -252,13 +270,18 @@ class StateStore(JsonlLog):
 def normalize_api_base(server: str) -> str:
     raw = server.strip()
     parsed = urllib.parse.urlsplit(raw)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme not in HTTP_DEFAULT_PORTS or not parsed.netloc:
         raise ValueError(
             "--server must be an absolute http(s) URL, for example "
             "https://karakeep.example.com"
         )
     if parsed.query or parsed.fragment:
         raise ValueError("--server must not contain a query string or fragment")
+
+    scheme, hostname, port = _request_origin(parsed)
+    authority = f"[{hostname}]" if ":" in hostname else hostname
+    if port != HTTP_DEFAULT_PORTS[scheme]:
+        authority = f"{authority}:{port}"
 
     path = parsed.path.rstrip("/")
     if "/dashboard" in path:
@@ -268,7 +291,7 @@ def normalize_api_base(server: str) -> str:
     else:
         api_path = f"{path}/api/v1"
     return urllib.parse.urlunsplit(
-        (parsed.scheme, parsed.netloc, api_path, "", "")
+        (scheme, authority, api_path, "", "")
     )
 
 
@@ -743,11 +766,10 @@ def choose_records(
 
 def dry_run_summary(
     records: Sequence[Mapping[str, Any]],
-    pending: Sequence[Mapping[str, Any]],
-    skipped: int,
     args: argparse.Namespace,
     input_format: str,
 ) -> None:
+    pending = records if args.limit is None else records[: args.limit]
     timestamp_count = sum(
         1
         for record in pending
@@ -773,8 +795,8 @@ def dry_run_summary(
         )
     )
     print(f"Input records: {len(records)}")
-    print(f"Already completed in state file: {skipped}")
-    print(f"Pending in this run: {len(pending)}")
+    print("Prior completions are checked after authentication during live import.")
+    print(f"Pending in this run: {len(pending)} before the resume check")
     print(f"Records with preserved {args.timestamp_field} timestamp: {timestamp_count}")
     print(f"Records whose notes mention archived media: {media_count}")
     tag_names: list[str] = []
@@ -791,13 +813,9 @@ def dry_run_summary(
 
 def run(args: argparse.Namespace) -> int:
     records, input_format = load_input(args.input, args.input_format)
-    state = StateStore(args.state_file)
-    errors = JsonlLog(args.failure_file)
-    completed_ids = state.completed_ids()
-    pending, skipped = choose_records(records, completed_ids, args.limit)
 
     if not args.execute:
-        dry_run_summary(records, pending, skipped, args, input_format)
+        dry_run_summary(records, args, input_format)
         return 0
 
     api_key = os.environ.get(args.api_key_env, "").strip()
@@ -806,10 +824,6 @@ def run(args: argparse.Namespace) -> int:
             f"{args.api_key_env} is not set. Generate a Karakeep API key under "
             "Settings > API Keys and export it only in your current shell."
         )
-    if not pending:
-        print(f"Nothing to import; all {len(records)} records are already complete.")
-        return 0
-
     client = KarakeepClient(
         args.server,
         api_key,
@@ -817,7 +831,20 @@ def run(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         max_retries=args.max_retries,
     )
-    client.preflight()
+    account_id = client.preflight().get("id")
+    if not isinstance(account_id, str) or not account_id.strip():
+        raise ImportFailure(
+            "Karakeep did not return an account ID for resume history."
+        )
+
+    state = StateStore(
+        args.state_file, api_base=client.api_base, account_id=account_id
+    )
+    pending, skipped = choose_records(records, state.completed_ids(), args.limit)
+    if not pending:
+        print(f"Nothing to import; all {len(records)} records are already complete.")
+        return 0
+
     print(
         f"Authenticated. Importing {len(pending)} record(s) to "
         f"{client.api_base} with {args.workers} worker(s)."
@@ -829,7 +856,7 @@ def run(args: argparse.Namespace) -> int:
     kwargs = {
         "client": client,
         "state": state,
-        "errors": errors,
+        "errors": JsonlLog(args.failure_file),
         "extra_tags": args.tag,
         "include_default_tags": not args.no_default_tags,
         "include_export_tags": not args.no_export_tags,

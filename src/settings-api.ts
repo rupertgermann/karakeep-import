@@ -45,36 +45,6 @@ export interface ComponentVersions {
   karakeepBaseline: string;
 }
 
-export type ComponentStatus = "notConfigured" | "ready" | "unavailable";
-
-export type DiagnosticFailure =
-  | "browserAccess"
-  | "destinationAuthentication"
-  | "destinationCompatibility"
-  | "network"
-  | "xCompatibility";
-
-export interface DiagnosticFailureExplanation {
-  kind: DiagnosticFailure;
-  title: string;
-  guidance: string;
-}
-
-export interface DiagnosticsExport {
-  generatedByUserAction: true;
-  includesBookmarkContent: false;
-  telemetryEnabled: false;
-  versions: ComponentVersions;
-  source: ComponentStatus;
-  destination: ComponentStatus;
-  storage: {
-    dataDirectory: string;
-    snapshotBytes: number;
-    ledgerBytes: number;
-  };
-  lastFailure: DiagnosticFailureExplanation | null;
-}
-
 export interface ManualUpdateCheckResult {
   requestedByUser: true;
   releasePage: typeof SIGNED_RELEASES_URL;
@@ -128,7 +98,6 @@ export interface SettingsApi {
   deleteLocalTransferData(
     confirmation: DeleteLocalTransferDataConfirmation,
   ): Promise<void>;
-  exportDiagnostics(): Promise<DiagnosticsExport>;
   saveDiagnostics(): Promise<boolean>;
   versionInformation(): Promise<ComponentVersions>;
   manualUpdateCheck(): Promise<ManualUpdateCheckResult>;
@@ -149,7 +118,6 @@ export const settingsDesktopApi: SettingsApi = {
     invoke<void>("delete_local_transfer_data", {
       confirmation: confirmation.confirmation,
     }),
-  exportDiagnostics: () => invoke<DiagnosticsExport>("export_diagnostics"),
   saveDiagnostics: () => invoke<boolean>("save_diagnostics"),
   versionInformation: () =>
     invoke<ComponentVersions>("version_information"),

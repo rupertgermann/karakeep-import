@@ -357,6 +357,22 @@ impl Clock for FakeClock {
     }
 }
 
+struct CancelOnSleep {
+    clock: FakeClock,
+    cancellation: CancellationToken,
+}
+
+impl Clock for CancelOnSleep {
+    fn now(&self) -> Duration {
+        self.clock.now()
+    }
+
+    fn sleep(&self, duration: Duration) {
+        self.cancellation.cancel();
+        self.clock.sleep(duration);
+    }
+}
+
 fn ensured_created() -> EnsuredBookmark {
     EnsuredBookmark {
         bookmark: KarakeepBookmark {
@@ -569,7 +585,7 @@ fn retryable_api_failures_back_off_and_report_the_record_as_retried() {
         assert_eq!(report.records[0].status, RecordStatus::Delivered);
         assert!(report.records[0].retried);
         assert_eq!(report.totals.retried, 1);
-        assert_eq!(*clock.sleeps.lock().unwrap(), [expected_delay]);
+        assert_eq!(clock.now(), expected_delay);
     }
 }
 
@@ -695,16 +711,13 @@ fn request_rate_limit_is_shared_by_all_workers() {
         )
         .unwrap();
 
-    let mut request_times = api.request_times.lock().unwrap().clone();
-    request_times.sort();
-    assert_eq!(
-        request_times,
-        [
-            Duration::ZERO,
-            Duration::from_millis(500),
-            Duration::from_secs(1),
-            Duration::from_millis(1_500),
-        ]
+    let request_times = api.request_times.lock().unwrap();
+    assert_eq!(request_times.len(), 4);
+    // Concurrent workers can advance the fake clock before a request records its time.
+    let last_request = request_times.iter().max().unwrap();
+    assert!(
+        (Duration::from_millis(1_500)..=Duration::from_millis(1_750)).contains(last_request),
+        "four requests should take about three shared 500ms slots: {request_times:?}"
     );
 }
 
@@ -890,6 +903,62 @@ fn active_api_work_observes_cancellation_without_starting_a_retry() {
     assert_eq!(report.records[0].status, RecordStatus::Cancelled);
     assert_eq!(report.totals.cancelled, 1);
     assert!(clock.sleeps.lock().unwrap().is_empty());
+}
+
+#[test]
+fn cancelling_during_request_pacing_settles_before_the_next_slot() {
+    assert_cancellation_during_wait(Ok(ensured_created()), 1);
+}
+
+#[test]
+fn cancelling_during_retry_backoff_settles_before_the_next_attempt() {
+    assert_cancellation_during_wait(
+        Err(ApiError::new(
+            ApiErrorKind::RateLimited {
+                retry_after: Some(Duration::from_secs(30)),
+            },
+            "retry later",
+        )),
+        0,
+    );
+}
+
+fn assert_cancellation_during_wait(first: Result<EnsuredBookmark, ApiError>, delivered: usize) {
+    let cancellation = CancellationToken::new();
+    let clock = Arc::new(CancelOnSleep {
+        clock: FakeClock::default(),
+        cancellation: cancellation.clone(),
+    });
+    let api = Arc::new(ScriptedApi::new(vec![first, Ok(ensured_created())]));
+    let engine = DeliveryEngine::with_clock(
+        api.clone(),
+        Arc::new(MemoryLedger::default()),
+        DeliveryConfig {
+            requests_per_second: 0.1,
+            ..fast_retry_config(1)
+        },
+        clock.clone(),
+    )
+    .unwrap();
+    let report = engine
+        .run(
+            &VecSource(vec![record("first", &[]), record("second", &[])]),
+            &DestinationId::new("destination"),
+            &cancellation,
+            &NoopProgressSink,
+        )
+        .unwrap();
+
+    assert!(
+        clock.now() < Duration::from_millis(250),
+        "cancelling took {:?} of virtual time",
+        clock.now()
+    );
+    assert_eq!(*api.ensure_count.lock().unwrap(), 1);
+    assert_eq!(
+        (report.totals.delivered, report.totals.cancelled),
+        (delivered, 2 - delivered)
+    );
 }
 
 #[test]
