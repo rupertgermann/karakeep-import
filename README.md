@@ -28,6 +28,10 @@ X acquisition is best-effort. See the
 
 ![Transfer in progress with a processed bookmark count, progress bar, and Cancel transfer button](docs/screenshots/transfer-progress.png)
 
+**Transfer result**
+
+![Delivery finished with totals for delivered, created, existing, retried, failed, and cancelled bookmarks](docs/screenshots/transfer-result.png)
+
 **Settings** (sample data)
 
 ![Settings cards for source tags, delivery tuning, connection, local data, diagnostics, and updates](docs/screenshots/settings.png)
