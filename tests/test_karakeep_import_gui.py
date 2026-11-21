@@ -194,6 +194,7 @@ class ReflectingKarakeepHandler(BaseHTTPRequestHandler):
             self._reply(200, {"id": "user-1"})
 
     def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
         self._reply(
             400,
             {"message": f"Rejected {self.headers.get('Authorization')}"},
