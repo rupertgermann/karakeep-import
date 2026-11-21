@@ -218,7 +218,7 @@ The single-window flow covers:
 - Product name: **Karakeep Transfer**.
 - Default application identifier:
   `io.github.rupertgermann.karakeeptransfer`.
-- macOS 12 Monterey or newer, universal Apple Silicon and Intel DMG.
+- macOS 14.8.9 or newer, Apple Silicon DMG.
 - Windows 10 version 1803 or newer and Windows 11, x86-64 NSIS installer.
 - Native Windows ARM64, Linux packages, and app stores are outside the MVP.
 - All public macOS artifacts are Developer ID signed and notarized.

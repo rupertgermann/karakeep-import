@@ -50,28 +50,27 @@ resource tree (including production `node_modules` and NUL-containing files)
 contains a password-equivalent value. Explicit placeholders in dependency
 documentation, such as `replace-me`, are not treated as credentials.
 
-## macOS universal inputs
+## macOS arm64 inputs
 
-Use a clean macOS 12-or-newer release checkout. Dependency and runtime cache
-population is an explicit preparation step: npm and Cargo use their lockfiles,
-and the Field Theory preparation script accepts only the Node archives declared
-by `vendor/fieldtheory/manifest.json` after verifying SHA-256.
+Use a clean release checkout on Apple Silicon with macOS 14.8.9 or newer.
+Populate the dependency and runtime caches before staging. npm and Cargo use
+their lockfiles, and the Field Theory preparation script verifies the SHA-256
+of the Node archive declared in `vendor/fieldtheory/manifest.json`.
 
 ```bash
 npm ci --ignore-scripts
 cargo fetch --locked --manifest-path src-tauri/Cargo.toml
 npm run prepare:fieldtheory
 npm run build
-npm run release:inputs -- --target macos-universal
-npm run release:build-candidate -- --input release-inputs/macos-universal
+npm run release:inputs -- --target macos-arm64
+npm run release:build-candidate -- --input release-inputs/macos-arm64
 ```
 
-The output is `release-inputs/macos-universal`. Re-running preparation may
+The output is `release-inputs/macos-arm64`. Re-running preparation may
 replace only that exact default target directory. A custom `--output` must be
 a new, absent directory inside the checkout; protected paths and symlinked
-paths are rejected. It contains both macOS private
-Node runtimes (`darwin-arm64` and `darwin-x64`), the frontend build, Field
-Theory bridge resources, `RELEASE-METADATA.json`,
+paths are rejected. It contains the private `darwin-arm64` Node runtime,
+the frontend build, Field Theory bridge resources, `RELEASE-METADATA.json`,
 `RELEASE-NOTES.md`, `DEPENDENCY-INVENTORY.json`,
 `THIRD-PARTY-NOTICES.md`, and `SHA256SUMS`.
 It also contains `NATIVE-BUILD-COMMAND.txt`; that checksummed file invokes the
@@ -123,7 +122,7 @@ they exactly match that checkout state:
 
 ```bash
 npm run release:inputs -- \
-  --target macos-universal \
+  --target macos-arm64 \
   --commit "$(git rev-parse HEAD)" \
   --source-date-epoch "$(git show -s --format=%ct HEAD)"
 ```
@@ -164,7 +163,6 @@ local staging gate rejects a stale or incomplete Rust inventory.
 ## Acceptance evidence
 
 Retain platform acceptance results separately from the deterministic build
-inputs. The current unsigned macOS universal preflight is recorded in
-[`macos-universal-preflight.md`](./macos-universal-preflight.md); its failed and
-unavailable signing and smoke-test gates must be resolved before issue #16 can
-be accepted.
+inputs. Use the [macOS arm64 acceptance record](./release-acceptance/macos-arm64.md)
+for the current release. The [unsigned universal preflight](./macos-universal-preflight.md)
+records the earlier two-architecture build.

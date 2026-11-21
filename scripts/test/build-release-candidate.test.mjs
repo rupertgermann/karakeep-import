@@ -34,7 +34,7 @@ async function writeChecksums(input) {
   await writeFile(path.join(input, "SHA256SUMS"), `${entries.join("\n")}\n`);
 }
 
-async function fixture(target = "macos-universal") {
+async function fixture(target = "macos-arm64") {
   const root = await (await import("node:fs/promises")).mkdtemp(
     path.join(os.tmpdir(), "release-candidate-test-"),
   );
@@ -49,7 +49,7 @@ async function fixture(target = "macos-universal") {
   );
   await writeFile(
     path.join(root, "tauri.mjs"),
-    'import { readFile, writeFile } from "node:fs/promises";\nimport path from "node:path";\nconst config = process.argv[process.argv.indexOf("--config") + 1];\nawait writeFile(path.join("release-inputs", "macos-universal", "frontend", "index.html"), "attacker replacement\\n");\nif (await readFile("tauri-fail", "utf8").catch(() => null)) process.exit(7);\nconst value = JSON.parse(await readFile(config, "utf8"));\nconst resources = Object.keys(value.bundle.resources).find((key) => key !== "resources");\nawait writeFile("package-result.json", JSON.stringify({ frontend: await readFile(path.join(value.build.frontendDist, "index.html"), "utf8"), resource: await readFile(path.join(resources, "runtime.txt"), "utf8"), frontendDist: value.build.frontendDist, resources }));\n',
+    'import { readFile, writeFile } from "node:fs/promises";\nimport path from "node:path";\nconst config = process.argv[process.argv.indexOf("--config") + 1];\nawait writeFile(path.join("release-inputs", "macos-arm64", "frontend", "index.html"), "attacker replacement\\n");\nif (await readFile("tauri-fail", "utf8").catch(() => null)) process.exit(7);\nconst value = JSON.parse(await readFile(config, "utf8"));\nconst resources = Object.keys(value.bundle.resources).find((key) => key !== "resources");\nawait writeFile("package-result.json", JSON.stringify({ frontend: await readFile(path.join(value.build.frontendDist, "index.html"), "utf8"), resource: await readFile(path.join(resources, "runtime.txt"), "utf8"), frontendDist: value.build.frontendDist, resources }));\n',
   );
   await mkdir(path.join(root, "scripts"), { recursive: true });
   await writeFile(
@@ -87,7 +87,7 @@ async function fixture(target = "macos-universal") {
       commit,
       target,
       rustTarget:
-        target === "windows-x64" ? "x86_64-pc-windows-msvc" : "universal-apple-darwin",
+        target === "windows-x64" ? "x86_64-pc-windows-msvc" : "aarch64-apple-darwin",
       bundleFormat: target === "windows-x64" ? "nsis" : "dmg",
     }, null, 2)}\n`,
   );
@@ -112,7 +112,7 @@ test("verified plan binds Tauri to a canonical frontend and resources snapshot",
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
   assert.deepEqual(plan.tauri.args.slice(0, 8), [
-    "run", "tauri", "--", "build", "--target", "universal-apple-darwin", "--bundles", "dmg",
+    "run", "tauri", "--", "build", "--target", "aarch64-apple-darwin", "--bundles", "dmg",
   ]);
   assert.equal(plan.config.build.beforeBuildCommand, "");
   assert.match(
@@ -238,10 +238,10 @@ test("verified plan rejects a target with a mismatched Tauri target", async () =
   const { root, input } = await fixture();
   const metadataFile = path.join(input, "RELEASE-METADATA.json");
   const metadata = JSON.parse(await readFile(metadataFile, "utf8"));
-  metadata.rustTarget = "aarch64-apple-darwin";
+  metadata.rustTarget = "universal-apple-darwin";
   await writeFile(metadataFile, `${JSON.stringify(metadata)}\n`);
   await writeChecksums(input);
 
   const result = run(root, input);
-  assert.match(result.stderr, /does not match staged target macos-universal/);
+  assert.match(result.stderr, /does not match staged target macos-arm64/);
 });

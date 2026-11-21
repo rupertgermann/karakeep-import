@@ -35,7 +35,7 @@ with Karakeep, X, or Field Theory.
 
 ## Platform support
 
-- macOS 12 Monterey or newer on Apple Silicon and Intel
+- macOS 14.8.9 or newer on Apple Silicon
 - Windows 10 version 1803 or newer and Windows 11 on x86-64
 
 ## Browser support
@@ -140,7 +140,6 @@ async function createRepositoryFixture({ git = true } = {}) {
   const nodeVersion = "22.20.0";
   const runtimeContents = {
     "darwin-arm64": "arm64 node\n",
-    "darwin-x64": "x64 node\n",
     "win-x64": "windows node\n",
   };
   const sqliteContent = "official sqlite3 executable\n";
@@ -238,6 +237,7 @@ async function createRepositoryFixture({ git = true } = {}) {
     productName: "Karakeep Transfer",
     version: "0.1.0",
     identifier: "io.github.rupertgermann.karakeeptransfer",
+    bundle: { macOS: { minimumSystemVersion: "14.8.9" } },
   });
   await writeJson(path.join(root, "release", "release-inputs.json"), {
     schemaVersion: 1,
@@ -254,10 +254,10 @@ async function createRepositoryFixture({ git = true } = {}) {
       rust: commandVersion("rustc", ["--version"], "rustc "),
     },
     targets: {
-      "macos-universal": {
-        rustTarget: "universal-apple-darwin",
+      "macos-arm64": {
+        rustTarget: "aarch64-apple-darwin",
         bundleFormat: "dmg",
-        nodeRuntimes: ["darwin-arm64", "darwin-x64"],
+        nodeRuntimes: ["darwin-arm64"],
       },
       "windows-x64": {
         rustTarget: "x86_64-pc-windows-msvc",
@@ -288,22 +288,16 @@ async function createRepositoryFixture({ git = true } = {}) {
 
   const resources = path.join(root, "src-tauri", "resources");
   await mkdir(path.join(resources, "node", "darwin-arm64"), { recursive: true });
-  await mkdir(path.join(resources, "node", "darwin-x64"), { recursive: true });
   await mkdir(path.join(resources, "node", "win-x64"), { recursive: true });
   await writeFile(
     path.join(resources, "node", "darwin-arm64", "node"),
     runtimeContents["darwin-arm64"],
   );
   await writeFile(
-    path.join(resources, "node", "darwin-x64", "node"),
-    runtimeContents["darwin-x64"],
-  );
-  await writeFile(
     path.join(resources, "node", "win-x64", "node.exe"),
     runtimeContents["win-x64"],
   );
   await chmod(path.join(resources, "node", "darwin-arm64", "node"), 0o755);
-  await chmod(path.join(resources, "node", "darwin-x64", "node"), 0o755);
   await writeFile(path.join(resources, "node", "LICENSE"), "Node MIT\n");
   await mkdir(path.join(resources, "sqlite", "win-x64"), { recursive: true });
   await writeFile(
@@ -442,8 +436,8 @@ test("same pinned macOS inputs produce byte-identical release metadata", async (
   const first = path.join(root, "out-first");
   const second = path.join(root, "out-second");
 
-  const firstRun = run(root, "macos-universal", first);
-  const secondRun = run(root, "macos-universal", second);
+  const firstRun = run(root, "macos-arm64", first);
+  const secondRun = run(root, "macos-arm64", second);
   assert.equal(firstRun.status, 0, firstRun.stderr);
   assert.equal(secondRun.status, 0, secondRun.stderr);
 
@@ -468,7 +462,7 @@ test("release notes are staged, checksummed, and bound to release metadata", asy
   const output = path.join(root, "out");
   const source = path.join(root, "release", "release-notes.md");
 
-  const result = run(root, "macos-universal", output);
+  const result = run(root, "macos-arm64", output);
   assert.equal(result.status, 0, result.stderr);
 
   const staged = path.join(output, "RELEASE-NOTES.md");
@@ -498,7 +492,7 @@ test("release notes must name the exact configured product and version", async (
   const notes = path.join(root, "release", "release-notes.md");
   await writeFile(notes, releaseNotes.replace("0.1.0", "0.2.0"));
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(
     result.stderr,
@@ -523,7 +517,7 @@ test("release notes reject a missing required disclosure", async () => {
     const notes = path.join(root, "release", "release-notes.md");
     await writeFile(notes, releaseNotes.replaceAll(omitted, ""));
 
-    const result = run(root, "macos-universal", path.join(root, "out"));
+    const result = run(root, "macos-arm64", path.join(root, "out"));
 
     assert.match(
       result.stderr,
@@ -535,6 +529,7 @@ test("release notes reject a missing required disclosure", async () => {
 
 test("release note disclosures must be affirmative, sectioned, and actionable", async () => {
   for (const [disclosure, invalidNotes] of [
+    ["macOS support", releaseNotes.replace("14.8.9", "14.8.8")],
     [
       "Windows support",
       releaseNotes.replace(
@@ -566,7 +561,7 @@ test("release note disclosures must be affirmative, sectioned, and actionable", 
       invalidNotes,
     );
 
-    const result = run(root, "macos-universal", path.join(root, "out"));
+    const result = run(root, "macos-arm64", path.join(root, "out"));
 
     assert.match(
       result.stderr,
@@ -584,7 +579,7 @@ test("secret-like values in release notes are rejected before staging", async ()
     `${releaseNotes}\nAuthorization: Bearer live-secret-that-must-not-ship\n`,
   );
 
-  const result = run(root, "macos-universal", output);
+  const result = run(root, "macos-arm64", output);
 
   assert.match(result.stderr, /Forbidden secret-like value/);
   await assert.rejects(
@@ -616,7 +611,7 @@ test("macOS staging does not contain the Windows-only SQLite runtime", async () 
   const root = await createRepositoryFixture();
   const output = path.join(root, "out");
 
-  const result = run(root, "macos-universal", output);
+  const result = run(root, "macos-arm64", output);
   assert.equal(result.status, 0, result.stderr);
 
   await assert.rejects(
@@ -627,8 +622,8 @@ test("macOS staging does not contain the Windows-only SQLite runtime", async () 
 
 for (const [target, expected] of [
   [
-    "macos-universal",
-    "npm run release:build-candidate -- --input release-inputs/macos-universal\n",
+    "macos-arm64",
+    "npm run release:build-candidate -- --input release-inputs/macos-arm64\n",
   ],
   [
     "windows-x64",
@@ -652,13 +647,13 @@ for (const [target, expected] of [
 test("missing a required pinned runtime fails before staging", async () => {
   const root = await createRepositoryFixture();
   await writeFile(
-    path.join(root, "src-tauri", "resources", "node", "darwin-x64", "node"),
+    path.join(root, "src-tauri", "resources", "node", "darwin-arm64", "node"),
     "",
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
-  assert.match(result.stderr, /Required runtime resource is empty: .*darwin-x64.*node/);
+  assert.match(result.stderr, /Required runtime resource is empty: .*darwin-arm64.*node/);
 });
 
 test("runtime download code in packaged bridge sources is rejected", async () => {
@@ -676,7 +671,7 @@ test("runtime download code in packaged bridge sources is rejected", async () =>
     'await fetch("https://nodejs.org/dist/v99/node.tar.xz");\n',
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Undeclared runtime download code/);
 });
@@ -709,7 +704,7 @@ test("prepared Field Theory CLI shims are rejected from packaged resources", asy
     "../fieldtheory/bin/ft.mjs\n",
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Packaged Field Theory CLI shims are forbidden/);
 });
@@ -729,7 +724,7 @@ test("a modified prepared Field Theory package is rejected", async () => {
     "modified after verification\n",
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Prepared Field Theory package checksum mismatch/);
 });
@@ -741,7 +736,7 @@ test("a prepared Node executable modified after extraction is rejected", async (
     "modified after extraction\n",
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Prepared Node runtime darwin-arm64 does not match/);
 });
@@ -757,7 +752,7 @@ test("a Node executable without an independent manifest pin is rejected", async 
     manifest,
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(
     result.stderr,
@@ -782,7 +777,7 @@ test("a repinned Node archive cannot replace the independent executable pin", as
     manifest,
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(
     result.stderr,
@@ -827,7 +822,7 @@ test("password-equivalent values in packaged text are rejected", async () => {
     'const KARAKEEP_API_KEY = "secret-value-that-must-not-ship";\n',
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Forbidden secret-like value/);
 });
@@ -848,7 +843,7 @@ test("password-equivalent values in packaged node_modules are rejected", async (
     'const X_AUTH_TOKEN = "live-secret-value-that-must-not-ship";\n',
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Forbidden secret-like value/);
 });
@@ -873,7 +868,7 @@ test("password-equivalent values in NUL-containing packaged resources are reject
     secret,
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Forbidden secret-like value/);
 });
@@ -894,7 +889,7 @@ test("X cookie-header values in packaged resources are rejected", async () => {
     'const cookie = "auth_token=live-auth-cookie-value; ct0=live-csrf-cookie-value";\n',
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Forbidden secret-like value/);
   await assert.rejects(
@@ -930,7 +925,7 @@ test("dynamic X cookie-header construction in packaged source is allowed", async
     "const cookie = `ct0=${cleanCt0}; auth_token=${sanitizeCookieValue('auth_token', authToken)}`;\n",
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.equal(result.status, 0, result.stderr);
 });
@@ -949,7 +944,7 @@ test("password-equivalent values in unstaged Tauri resources are rejected", asyn
     'const KARAKEEP_API_KEY = "stale-secret-value-that-must-not-ship";\n',
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Forbidden secret-like value/);
 });
@@ -970,7 +965,7 @@ test("placeholder credentials in packaged dependency documentation are allowed",
     'KARAKEEP_API_KEY = "replace-me"\nAuthorization: Bearer example-token\n',
   );
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.equal(result.status, 0, result.stderr);
 });
@@ -979,7 +974,7 @@ test("generated inventory records versions, integrity, and licenses", async () =
   const root = await createRepositoryFixture();
   const output = path.join(root, "out");
 
-  const result = run(root, "macos-universal", output);
+  const result = run(root, "macos-arm64", output);
   assert.equal(result.status, 0, result.stderr);
   const inventory = JSON.parse(
     await readFile(path.join(output, "DEPENDENCY-INVENTORY.json"), "utf8"),
@@ -1011,12 +1006,7 @@ test("generated inventory records versions, integrity, and licenses", async () =
         ecosystem: "bundled",
         name: "node",
         version: "22.20.0",
-        integrity: [
-          manifest.node.artifacts["darwin-arm64"].sha256,
-          manifest.node.artifacts["darwin-x64"].sha256,
-        ]
-          .map((checksum) => `sha256-${checksum}`)
-          .join(","),
+        integrity: `sha256-${manifest.node.artifacts["darwin-arm64"].sha256}`,
         license: "MIT",
       },
       {
@@ -1073,7 +1063,7 @@ test("a drifting local build toolchain is rejected", async () => {
   config.buildToolchains.node = "0.0.0";
   await writeJson(configFile, config);
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(
     result.stderr,
@@ -1126,7 +1116,7 @@ test("release metadata refuses a dirty Git checkout", async () => {
   const root = await createRepositoryFixture();
   await writeFile(path.join(root, "dist", "index.html"), "dirty build\n");
 
-  const result = run(root, "macos-universal", path.join(root, "out"), {
+  const result = run(root, "macos-arm64", path.join(root, "out"), {
     allowDirty: true,
   });
 
@@ -1139,7 +1129,7 @@ test("custom release output never replaces an existing checkout directory", asyn
   await mkdir(output);
   await writeFile(path.join(output, "keep.txt"), "must survive\n");
 
-  const result = run(root, "macos-universal", output);
+  const result = run(root, "macos-arm64", output);
 
   assert.match(result.stderr, /Custom release output must be a new absent directory/);
   assert.equal(await readFile(path.join(output, "keep.txt"), "utf8"), "must survive\n");
@@ -1148,21 +1138,21 @@ test("custom release output never replaces an existing checkout directory", asyn
 test("custom release output cannot target protected or symlinked checkout paths", async () => {
   const root = await createRepositoryFixture();
   const protectedOutput = path.join(root, ".git", "release-output");
-  const protectedResult = run(root, "macos-universal", protectedOutput);
+  const protectedResult = run(root, "macos-arm64", protectedOutput);
   assert.match(protectedResult.stderr, /protected checkout path/);
 
   const outside = await mkdtemp(path.join(os.tmpdir(), "release-output-link-"));
   const link = path.join(root, "release-inputs", "linked");
   await mkdir(path.dirname(link), { recursive: true });
   await symlink(outside, link);
-  const linkedResult = run(root, "macos-universal", path.join(link, "output"));
+  const linkedResult = run(root, "macos-arm64", path.join(link, "output"));
   assert.match(linkedResult.stderr, /may not traverse a symlink/);
 });
 
 test("release preparation fails closed outside a real Git checkout", async () => {
   const root = await createRepositoryFixture({ git: false });
 
-  const result = run(root, "macos-universal", path.join(root, "out"));
+  const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Could not inspect release checkout/);
 });

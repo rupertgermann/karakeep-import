@@ -7,7 +7,7 @@ with Karakeep, X, or Field Theory.
 
 ## Platform support
 
-- macOS 12 Monterey or newer on Apple Silicon and Intel
+- macOS 14.8.9 or newer on Apple Silicon
 - Windows 10 version 1803 or newer and Windows 11 on x86-64
 
 ## Browser support

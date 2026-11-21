@@ -52,10 +52,11 @@ validated locally; Windows validation remains a required native-platform gate.
 The existing Python GUI remains available while the rest of the transfer
 workflow moves into the desktop app.
 
-In addition to Python, desktop development requires current Node.js, npm, the
-stable Rust toolchain, and the
+In addition to Python, desktop development uses Node.js 26.13.1 LTS with
+npm 11.20.0, the stable Rust toolchain, and the
 [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/) for
-your operating system.
+your operating system. With nvm, run `nvm install` from the repository root
+to install and select the pinned Node.js version.
 
 Install the frontend dependencies and run the automated checks:
 
@@ -80,12 +81,13 @@ npm run tauri dev
 The Tauri development and build commands first run
 `npm run prepare:fieldtheory`. This local build step:
 
-- verifies the checked-in Field Theory 1.3.22 package against its SHA-256;
-- installs its exact production dependency lock into the app resources;
-- downloads and verifies private Node.js 22.20.0 runtimes for macOS arm64 and
-  x64, or Windows x64;
+- verifies the checked-in Field Theory 1.3.22 package against its SHA-256.
+- installs its exact production dependency lock into the app resources.
+- downloads and verifies the private Node.js 26.13.1 runtime for macOS arm64
+  or Windows x64.
 - copies the Field Theory, Node, and dependency license notices into the app.
 
+The desktop app requires macOS 14.8.9 or newer on Apple Silicon.
 The accepted commit, source archive, package, Node artifacts, checksums, and
 licenses are recorded in
 [`vendor/fieldtheory/manifest.json`](./vendor/fieldtheory/manifest.json) and

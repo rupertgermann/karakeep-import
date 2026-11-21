@@ -219,13 +219,13 @@ async function prepareBridge() {
   });
 }
 
+const runtimeTargets = selectRuntimeTargets(process.platform, process.arch);
 const manifest = await readBundleManifest(repositoryRoot);
 await verifyVendoredPackage(repositoryRoot, manifest);
 await mkdir(resources, { recursive: true });
 await rm(path.join(resources, "node"), { recursive: true, force: true });
 await rm(path.join(resources, "sqlite"), { recursive: true, force: true });
 await prepareBridge();
-const runtimeTargets = selectRuntimeTargets(process.platform, process.arch);
 for (const target of runtimeTargets) {
   const artifact = manifest.node.artifacts[target];
   await extractNode(

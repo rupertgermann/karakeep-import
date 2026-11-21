@@ -7,7 +7,7 @@ by every package.
 | Component | Pinned version | License | Source |
 | --- | --- | --- | --- |
 | Field Theory CLI | 1.3.22 at `4b4a0f677e7077ac76848408b22091fc34330391` | MIT | <https://github.com/afar1/fieldtheory-cli> |
-| Node.js | 22.20.0 | MIT and bundled third-party notices | <https://nodejs.org/dist/v22.20.0/> |
+| Node.js | 26.13.1 | MIT and bundled third-party notices | <https://nodejs.org/dist/v26.13.1/> |
 | SQLite `sqlite3.exe` (Windows x64 only) | 3.53.4 | Public Domain | <https://www.sqlite.org/2026/sqlite-tools-win-x64-3530400.zip> |
 | commander | 14.0.3 | MIT | <https://www.npmjs.com/package/commander> |
 | dotenv | 17.4.2 | BSD-2-Clause | <https://www.npmjs.com/package/dotenv> |

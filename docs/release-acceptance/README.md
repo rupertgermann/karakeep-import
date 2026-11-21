@@ -6,8 +6,8 @@ do not prove that a signed installer works on a supported operating system.
 
 Use the records in this order:
 
-1. [`macos-universal.md`](./macos-universal.md) for the signed and notarized
-   universal macOS candidate.
+1. [`macos-arm64.md`](./macos-arm64.md) for the signed and notarized macOS
+   Apple Silicon candidate.
 2. [`windows-x64.md`](./windows-x64.md) for the signed Windows x64 candidate.
 3. [`publication.md`](./publication.md) only after both native records are
    accepted and the publication source satisfies its source-contraction gate.
@@ -57,10 +57,10 @@ Every named assertion is an object with exact status `PASS`. It contains
 exactly one distinct typed JSON file for every platform listed below; files
 cannot be shared across assertions. The target/platform pairs are exact:
 
-- `macos-universal`: `macos-arm64` and `macos-x86_64-native`;
+- `macos-arm64`: `macos-arm64`;
 - `windows-x64`: `windows-10-x64` and `windows-11-x64`.
 
-`M` means both exact macOS platforms, `W` means both exact Windows platforms,
+`M` means Apple Silicon, `W` means both exact Windows platforms,
 and `TW` means one target-wide record.
 
 | Assertion ID | Coverage | Check type |
@@ -123,8 +123,8 @@ macOS requires these additional assertions:
 | `notarization:application-and-dmg` | TW | `notarization` |
 | `gatekeeper:application-and-dmg` | TW | `gatekeeper` |
 | `dmg:hdiutil-verify` | TW | `dmg-verification` |
-| `architecture:universal` | TW | `universal-architecture` |
-| `minimum-macos:executable-slices` | M | `minimum-macos-version` |
+| `architecture:arm64` | TW | `arm64-architecture` |
+| `minimum-macos:executable` | M | `minimum-macos-version` |
 
 Windows requires these additional assertions:
 
@@ -138,9 +138,9 @@ Windows requires these additional assertions:
 | `application-payload:windows-x64` | TW | `x64-application-payload` |
 | `authenticode:platform-trust` | W | `authenticode-trust` |
 
-The matrix therefore contains 43 macOS assertions and 42 Windows assertions,
-with exactly 75 typed evidence records per target. Aggregate `gate:*` and
-`platform:*` assertions are not accepted.
+The macOS matrix requires 43 assertions and 43 typed records. The Windows
+matrix requires 42 assertions and 75 typed records. Use the individual
+assertion IDs listed above in each record.
 
 Signing identity metadata is also exact. macOS has only the
 `application-and-dmg` scope. Windows has exactly `installer`, `application`,

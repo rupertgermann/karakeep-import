@@ -100,7 +100,7 @@ fn current_versions_come_from_repository_build_inputs() {
     let ledger = DeliveryLedger::open_in_memory().expect("ledger initializes");
 
     assert_eq!(versions.field_theory, "1.3.22");
-    assert_eq!(versions.node, "22.20.0");
+    assert_eq!(versions.node, "26.13.1");
     assert_eq!(
         versions.schema,
         ledger.schema_version().expect("schema version").to_string()

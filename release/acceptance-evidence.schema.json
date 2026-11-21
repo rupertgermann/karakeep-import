@@ -20,7 +20,7 @@
     },
     "target": {
       "enum": [
-        "macos-universal",
+        "macos-arm64",
         "windows-x64"
       ]
     },
@@ -114,8 +114,8 @@
           "notarization:application-and-dmg",
           "gatekeeper:application-and-dmg",
           "dmg:hdiutil-verify",
-          "architecture:universal",
-          "minimum-macos:executable-slices",
+          "architecture:arm64",
+          "minimum-macos:executable",
           "signing-identity:installer",
           "signing-identity:application",
           "signing-identity:bundled-node",
@@ -182,7 +182,6 @@
           "enum": [
             "target-wide",
             "macos-arm64",
-            "macos-x86_64-native",
             "windows-10-x64",
             "windows-11-x64"
           ]
@@ -333,7 +332,7 @@
         },
         "target": {
           "enum": [
-            "macos-universal",
+            "macos-arm64",
             "windows-x64"
           ]
         },
@@ -355,7 +354,6 @@
           "enum": [
             "target-wide",
             "macos-arm64",
-            "macos-x86_64-native",
             "windows-10-x64",
             "windows-11-x64"
           ]
@@ -385,7 +383,7 @@
       "if": {
         "properties": {
           "target": {
-            "const": "macos-universal"
+            "const": "macos-arm64"
           }
         },
         "required": [
@@ -443,7 +441,7 @@
               "workflow:file-source-preserves-active-x",
               "workflow:cancellation-resume",
               "workflow:evidence-sanitization",
-              "minimum-macos:executable-slices",
+              "minimum-macos:executable",
               "checkout:clean",
               "package:release-inputs",
               "package:no-python-or-browser-gui",
@@ -454,7 +452,7 @@
               "notarization:application-and-dmg",
               "gatekeeper:application-and-dmg",
               "dmg:hdiutil-verify",
-              "architecture:universal"
+              "architecture:arm64"
             ]
           }
         }
