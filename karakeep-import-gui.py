@@ -964,25 +964,27 @@ class GuiRequestHandler(BaseHTTPRequestHandler):
                 self.send_error(400, detail)
                 return
 
-            self.send_response(200)
-            self.send_header(
-                "Content-Type",
-                "application/x-ndjson; charset=utf-8",
-            )
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-
-            output_stream = cast(TextIO, process.stdout)
-            with output_stream:
-                for line in output_stream:
-                    self._send_event(
-                        {
-                            "type": "output",
-                            "text": self._redact(line, effective_api_key),
-                        }
+            with process:
+                try:
+                    self.send_response(200)
+                    self.send_header(
+                        "Content-Type",
+                        "application/x-ndjson; charset=utf-8",
                     )
-            exit_code = process.wait()
-            self._send_event({"type": "complete", "exitCode": exit_code})
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+
+                    for line in cast(TextIO, process.stdout):
+                        self._send_event(
+                            {
+                                "type": "output",
+                                "text": self._redact(line, effective_api_key),
+                            }
+                        )
+                    exit_code = process.wait()
+                    self._send_event({"type": "complete", "exitCode": exit_code})
+                except ConnectionError:
+                    process.terminate()
 
     def _prepare_input(self, payload: Mapping[str, Any], directory: Path) -> Path:
         content = payload.get("inputContent")

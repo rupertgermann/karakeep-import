@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -11,11 +13,11 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import TextIO, cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from tests.test_karakeep_import import FakeKarakeepHandler
 
@@ -542,6 +544,49 @@ class GuiAcceptanceTests(unittest.TestCase):
                     ("POST", "/api/v1/bookmarks/bookmark-1/tags"),
                 ],
             )
+
+    def test_lost_browser_connection_reaps_the_importer(self):
+        gui = load_gui_module()
+        with (
+            gui.create_server(port=0) as server,
+            tempfile.TemporaryDirectory() as directory,
+        ):
+            body = json.dumps(make_payload(directory)).encode("utf-8")
+            request = (
+                "POST /api/run HTTP/1.0\r\n"
+                f"X-Karakeep-GUI-Token: {server.run_token}\r\n"
+                f"Content-Length: {len(body)}\r\n\r\n"
+            ).encode("ascii") + body
+            for phase, delivered_writes in (("headers", 0), ("output", 1)):
+                child_code = "import sys; sys.stdin.read(1)"
+                if phase == "output":
+                    child_code = f"print('progress'); {child_code}"
+                with (
+                    self.subTest(phase=phase),
+                    subprocess.Popen(
+                        [sys.executable, "-u", "-c", child_code],
+                        stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE,
+                        text=True,
+                    ) as child,
+                ):
+                    connection = Mock(spec=socket.socket)
+                    connection.makefile.return_value = io.BytesIO(request)
+                    connection.sendall.side_effect = [None] * delivered_writes + [
+                        BrokenPipeError()
+                    ]
+                    try:
+                        with (
+                            patch.object(gui.subprocess, "Popen", return_value=child),
+                            suppress(BrokenPipeError),
+                        ):
+                            gui.GuiRequestHandler(
+                                connection, ("127.0.0.1", 0), server
+                            )
+                        self.assertNotIn(child.returncode, (None, 0))
+                    finally:
+                        if child.returncode is None:
+                            child.kill()
 
     def test_uploaded_failure_filename_cannot_collide_with_the_failure_log(self):
         gui = load_gui_module()
