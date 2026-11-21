@@ -165,7 +165,7 @@ input[type="checkbox"]:disabled {
   margin-top: 0.1rem;
 }
 
-.source-card button:not(.dropdown-trigger) {
+.source-card button:where(:not(.dropdown-trigger)) {
   padding: 0.8rem 1.15rem;
   border: 0;
   background: #526b54;
@@ -173,7 +173,7 @@ input[type="checkbox"]:disabled {
   font-weight: 700;
 }
 
-.source-card button:not(.dropdown-trigger):disabled {
+.source-card button:where(:not(.dropdown-trigger)):disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -455,7 +455,7 @@ footer p {
   font-weight: 700;
 }
 
-.file-source-panel button:not(.dropdown-trigger) {
+.file-source-panel button:where(:not(.dropdown-trigger)) {
   min-height: 2.75rem;
   padding: 0.65rem 1rem;
   border: 1px solid #9e9a8f;
@@ -465,7 +465,7 @@ footer p {
   font-weight: 700;
 }
 
-.file-source-panel button:not(.dropdown-trigger):disabled {
+.file-source-panel button:where(:not(.dropdown-trigger)):disabled {
   cursor: wait;
   opacity: 0.65;
 }
