@@ -455,10 +455,8 @@ impl<'a> ChromeParser<'a> {
                     .filter(|value| !value.is_empty());
             }
             "a" => self.finish_bookmark()?,
-            "dl" => {
-                if self.folder_depths.pop().unwrap_or(false) {
-                    self.folders.pop();
-                }
+            "dl" if self.folder_depths.pop() == Some(true) => {
+                self.folders.pop();
             }
             _ => {}
         }
