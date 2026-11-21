@@ -24,6 +24,10 @@ X acquisition is best-effort. See the
 
 ![Transfer review with a demo destination, bookmark counts, folders, and mapping options](docs/screenshots/transfer-review.png)
 
+**Transfer progress**
+
+![Transfer in progress with a processed bookmark count, progress bar, and Cancel transfer button](docs/screenshots/transfer-progress.png)
+
 **Settings** (sample data)
 
 ![Settings cards for source tags, delivery tuning, connection, local data, diagnostics, and updates](docs/screenshots/settings.png)
