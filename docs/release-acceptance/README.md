@@ -12,6 +12,9 @@ Use the records in this order:
 3. [`publication.md`](./publication.md) only after both native records are
    accepted and the publication source satisfies its source-contraction gate.
 
+Prepare the workflow checks with the
+[X and File Source test data](./transfer-fixtures/README.md).
+
 Copy each template to a versioned Markdown record in this directory. The native
 release finalizer additionally requires one machine-readable
 `acceptance-evidence.json` file beside its referenced evidence files for each
