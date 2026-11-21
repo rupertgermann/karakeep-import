@@ -39,9 +39,17 @@ describe("X Source setup", () => {
     expect(
       await screen.findByRole("combobox", { name: "Browser" }),
     ).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("combobox", { name: "Profile" }), {
-      target: { value: "Profile 2" },
-    });
+    const profile = screen.getByRole("combobox", { name: "Profile" });
+    profile.focus();
+    fireEvent.keyDown(profile, { key: "ArrowDown" });
+    await waitFor(() => expect(screen.getByRole("listbox")).toBeVisible());
+    expect(
+      screen.getByRole("option", { name: "Personal", selected: true }),
+    ).toBeVisible();
+    const research = screen.getByRole("option", { name: "Research" });
+    fireEvent.pointerDown(research);
+    fireEvent.click(research);
+    expect(profile).toHaveTextContent("Research");
 
     const confirm = screen.getByRole("button", { name: "Use this X Source" });
     expect(confirm).toBeDisabled();
@@ -124,12 +132,12 @@ describe("X Source setup", () => {
 
     render(<XSourceSetup api={api} onChooseAnotherSource={vi.fn()} />);
 
-    fireEvent.change(
-      await screen.findByRole("combobox", { name: "Browser" }),
-      { target: { value: "firefox" } },
-    );
-    expect(screen.getByRole("combobox", { name: "Profile" })).toHaveValue(
-      "Profiles/abc.default-release",
+    fireEvent.click(await screen.findByRole("combobox", { name: "Browser" }));
+    const firefox = await screen.findByRole("option", { name: "Firefox" });
+    fireEvent.pointerDown(firefox);
+    fireEvent.click(firefox);
+    expect(screen.getByRole("combobox", { name: "Profile" })).toHaveTextContent(
+      "default-release",
     );
     fireEvent.click(
       screen.getByRole("checkbox", {

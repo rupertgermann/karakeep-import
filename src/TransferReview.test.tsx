@@ -417,12 +417,15 @@ describe("TransferReview transfer options", () => {
     });
   });
 
-  it("chooses the source field that becomes the creation date", () => {
+  it("chooses the source field that becomes the creation date", async () => {
     const onOptionsChange = renderOptions();
 
-    fireEvent.change(screen.getByLabelText("Creation date"), {
-      target: { value: "bookmarkedAt" },
+    fireEvent.click(screen.getByRole("combobox", { name: "Creation date" }));
+    const bookmarkedAt = await screen.findByRole("option", {
+      name: "bookmarkedAt",
     });
+    fireEvent.pointerDown(bookmarkedAt);
+    fireEvent.click(bookmarkedAt);
 
     expect(onOptionsChange).toHaveBeenCalledWith({
       ...defaultTransferOptions,

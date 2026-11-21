@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import Dropdown from "./Dropdown";
 import type {
   TimestampField,
   TransferOptions,
@@ -255,23 +256,13 @@ function TransferOptionsPanel({
         />
       </div>
 
-      <label htmlFor="transfer-timestamp-field">Creation date</label>
-      <select
-        id="transfer-timestamp-field"
+      <Dropdown<TimestampField>
+        label="Creation date"
+        disabled={busy}
         value={options.timestampField}
-        onChange={(event) =>
-          onChange({
-            ...options,
-            timestampField: event.target.value as TimestampField,
-          })
-        }
-      >
-        {timestampFields.map((field) => (
-          <option key={field.value} value={field.value}>
-            {field.label}
-          </option>
-        ))}
-      </select>
+        options={timestampFields}
+        onChange={(timestampField) => onChange({ ...options, timestampField })}
+      />
 
       <label htmlFor="transfer-limit">Limit this run to</label>
       <input

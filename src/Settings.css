@@ -62,7 +62,6 @@
   min-height: 2.5rem;
   padding: 0.45rem 0.75rem;
   border: 1px solid #bdb8ab;
-  border-radius: 0.625rem;
   background: transparent;
   color: #405a43;
   font-weight: 700;
@@ -161,12 +160,6 @@
   align-items: center;
   min-height: 2rem;
   font-size: 0.875rem;
-}
-
-.settings-option input {
-  flex: none;
-  margin: 0;
-  accent-color: #526b54;
 }
 
 .settings-tuning {

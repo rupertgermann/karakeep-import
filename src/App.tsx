@@ -495,7 +495,7 @@ export default function App({
             aria-label={status.label}
           >
             <span className="status-dot" aria-hidden="true" />
-            {status.text}
+            <span className="bridge-status-text">{status.text}</span>
           </p>
           {health ? (
             <button

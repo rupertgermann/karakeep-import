@@ -1,4 +1,5 @@
 :root {
+  --control-radius: 0.75rem;
   color: #263028;
   background: #f3efe6;
   font-family:
@@ -22,9 +23,64 @@ body {
 }
 
 button,
-input,
-select {
+input {
   font: inherit;
+}
+
+button {
+  border-radius: var(--control-radius);
+}
+
+input[type="checkbox"] {
+  display: inline-grid;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: none;
+  place-items: center;
+  margin: 0;
+  appearance: none;
+  border: 1px solid #858f80;
+  border-radius: 0.32rem;
+  background: #fffdf8;
+  cursor: pointer;
+}
+
+input[type="checkbox"]:hover:not(:disabled) {
+  border-color: #405a43;
+}
+
+input[type="checkbox"]:checked {
+  border-color: #526b54;
+  background: #526b54;
+}
+
+input[type="checkbox"]:checked::before {
+  width: 0.3rem;
+  height: 0.55rem;
+  border: solid #fffdf8;
+  border-width: 0 2px 2px 0;
+  content: "";
+  transform: translateY(-1px) rotate(45deg);
+}
+
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid #526b54;
+  outline-offset: 2px;
+}
+
+input[type="checkbox"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (forced-colors: active) {
+  input[type="checkbox"] {
+    appearance: auto;
+  }
+
+  input[type="checkbox"]:checked::before {
+    content: none;
+  }
 }
 
 .app-shell {
@@ -53,6 +109,7 @@ select {
 
 .app-header-actions {
   flex-wrap: wrap;
+  align-items: stretch;
 }
 
 .source-card,
@@ -90,20 +147,9 @@ select {
   gap: 1rem;
 }
 
-.source-fields label {
-  display: grid;
-  gap: 0.5rem;
+.source-fields .dropdown-label {
   color: #3e5641;
   font-weight: 650;
-}
-
-.source-fields select {
-  min-width: 0;
-  padding: 0.75rem;
-  border: 1px solid #b9b4a7;
-  border-radius: 0.75rem;
-  background: #fffdf8;
-  color: #263028;
 }
 
 .consent {
@@ -116,22 +162,18 @@ select {
 }
 
 .consent input {
-  width: 1.15rem;
-  height: 1.15rem;
   margin-top: 0.1rem;
-  accent-color: #526b54;
 }
 
-.source-card button {
+.source-card button:not(.dropdown-trigger) {
   padding: 0.8rem 1.15rem;
   border: 0;
-  border-radius: 999px;
   background: #526b54;
   color: #fff;
   font-weight: 700;
 }
 
-.source-card button:disabled {
+.source-card button:not(.dropdown-trigger):disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -149,14 +191,17 @@ select {
   gap: 0.75rem;
 }
 
+.bridge-status,
+.settings-trigger {
+  min-height: 2.75rem;
+}
+
 .settings-trigger {
   display: inline-grid;
   min-width: 2.75rem;
-  min-height: 2.75rem;
   place-items: center;
   padding: 0.5rem 0.625rem;
   border: 1px solid #cec9bc;
-  border-radius: 0.75rem;
   background: #fbf8f1;
   color: #405a43;
   cursor: pointer;
@@ -216,11 +261,15 @@ select {
   margin: 0;
   padding: 0.4rem 0.75rem;
   border: 1px solid #cec9bc;
-  border-radius: 999px;
+  border-radius: var(--control-radius);
   background: #f3efe6;
   color: #3e5641;
   font-size: 0.875rem;
   font-weight: 650;
+}
+
+.bridge-status-text {
+  transform: translateY(-0.125em);
 }
 
 .status-dot {
@@ -303,7 +352,7 @@ select {
   color: #263028;
 }
 
-.destination-form input:focus-visible,
+.destination-form input:not([type="checkbox"]):focus-visible,
 .button:focus-visible {
   outline: 3px solid rgb(82 107 84 / 25%);
   outline-offset: 2px;
@@ -345,7 +394,6 @@ select {
   justify-self: start;
   padding: 0.75rem 1.1rem;
   border: 1px solid #405a43;
-  border-radius: 999px;
   background: #526b54;
   color: #fffdf8;
   cursor: pointer;
@@ -402,38 +450,22 @@ footer p {
   margin: 0.75rem 0;
 }
 
-.file-source-format {
-  display: grid;
-  gap: 0.4rem;
-}
-
-.file-source-format span {
+.file-source-controls .dropdown-label {
   font-size: 0.875rem;
   font-weight: 700;
 }
 
-.file-source-format select,
-.file-source-panel button {
+.file-source-panel button:not(.dropdown-trigger) {
   min-height: 2.75rem;
-  border: 1px solid #9e9a8f;
-  border-radius: 0.75rem;
-}
-
-.file-source-format select {
-  padding: 0.6rem 0.75rem;
-  background: #fffdf8;
-  color: inherit;
-}
-
-.file-source-panel button {
   padding: 0.65rem 1rem;
+  border: 1px solid #9e9a8f;
   background: #526b54;
   color: #fff;
   cursor: pointer;
   font-weight: 700;
 }
 
-.file-source-panel button:disabled {
+.file-source-panel button:not(.dropdown-trigger):disabled {
   cursor: wait;
   opacity: 0.65;
 }
