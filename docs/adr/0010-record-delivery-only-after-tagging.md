@@ -1,7 +1,6 @@
 # Record delivery only after tagging
 
-A source bookmark enters the delivery ledger only after Karakeep has created or
-confirmed the bookmark and attached every required source and folder tag. If
-bookmark creation succeeds but tagging fails, the source remains pending; a
-later run reuses the existing Karakeep bookmark and retries tagging. This
-prevents partial delivery from being mistaken for completion.
+The delivery ledger records attempts and their outcomes. It marks a bookmark
+as delivered only after Karakeep confirms that the bookmark exists and has
+every required tag. If a tag fails to attach, the bookmark stays pending. On
+a later run, the app reuses the existing bookmark and retries the missing tags.

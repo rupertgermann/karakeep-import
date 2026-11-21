@@ -1,9 +1,10 @@
 # Use an app-owned Field Theory bridge
 
-The bundled Field Theory package will remain an unchanged, checksum-verified
-upstream release. An app-owned Node bridge will call the pinned package's
-acquisition modules and expose a versioned NDJSON protocol for source
-discovery, acquisition progress, cancellation, results, and redacted errors.
-Tauri will not parse human CLI output, and bridge messages will never contain X
-session values. Contract tests tie each bridge release to the exact bundled
-Field Theory version.
+The app verifies the checksum of the vendored Field Theory package. The
+package includes a local patch to pause bookmark backfill on HTTP 429 and
+save its progress. [Field Theory runtime notices](../../vendor/fieldtheory/THIRD_PARTY_NOTICES.md)
+
+The app's Node bridge calls the package's acquisition modules. It sends
+source discovery, acquisition progress, cancellation, results, and redacted
+errors through a versioned NDJSON protocol. X session values stay out of
+bridge messages.

@@ -1,7 +1,9 @@
-# Require signed public builds
+# Require signed production installers
 
-Every public macOS app and DMG will be Developer ID signed and notarized, and
-every public Windows installer and executable will be Authenticode signed.
-Unsigned artifacts are limited to local development and automated tests, while
-release credentials remain confined to the local release environments. No
-temporary unsigned public release may bypass this gate.
+Production macOS apps and DMGs require Developer ID signatures and
+notarization. Production Windows installers and executables require
+Authenticode signatures. Keep signing credentials on the release hosts.
+[Signed release acceptance](../release-acceptance/README.md)
+
+The Apple Silicon DMG published with v0.1.1 is an explicitly approved unsigned
+test build. [v0.1.1 release](https://github.com/rupertgermann/karakeep-import/releases/tag/v0.1.1)

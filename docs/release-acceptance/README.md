@@ -1,8 +1,8 @@
 # Native release acceptance
 
-This directory defines the evidence required to accept and publish a Karakeep
-Transfer desktop release. Deterministic release inputs are necessary, but they
-do not prove that a signed installer works on a supported operating system.
+Use these records to accept and publish signed Karakeep Transfer installers.
+Native tests verify that the packaged app works on its supported operating
+systems. [Signing decision](../adr/0018-require-signed-public-builds.md)
 
 Use the records in this order:
 

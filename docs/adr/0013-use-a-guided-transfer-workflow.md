@@ -1,8 +1,7 @@
 # Use a guided transfer workflow
 
-The desktop UI will guide users through connecting Karakeep, choosing an X
-source, acquiring bookmarks, reviewing a transfer preview, confirming delivery,
-and viewing results. It will not reproduce the browser GUI's controls for
-workers, request rate, retries, timeouts, state paths, payload fields, or
-progress intervals; the backend owns safe defaults for those concerns. Data
-management and redacted diagnostics belong in Settings.
+The desktop UI guides users through connecting Karakeep, acquiring X bookmarks
+or choosing a bookmark file, reviewing the transfer preview, confirming
+delivery, and viewing results. Settings contains advanced delivery tuning,
+local data management, and redacted diagnostics. The transfer review contains
+the mapping options for the current run. [Source mapping and delivery tuning](0025-split-import-options-into-mapping-and-tuning.md)

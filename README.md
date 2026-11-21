@@ -5,6 +5,10 @@ Karakeep. Use an existing X session in a supported browser profile, or choose a
 Field Theory JSONL or Chrome/Netscape bookmarks HTML export. The app keeps
 transfer progress locally so you can resume an interrupted run.
 
+**[Download v0.1.1 for macOS on Apple Silicon](https://github.com/rupertgermann/karakeep-import/releases/download/v0.1.1/Karakeep-Transfer-0.1.1-macos-arm64-unsigned.dmg)**
+
+The test DMG is unsigned.
+
 ## Use the app
 
 - macOS 14.8.9 or newer on Apple Silicon
@@ -12,10 +16,11 @@ transfer progress locally so you can resume an interrupted run.
 
 1. In **Connect Karakeep**, enter your server address and an API key. The app
    stores the key in your operating system's credential vault.
-2. Choose an X browser profile and consent to temporary use of its existing
-   session, or select **Use a bookmark file** and pick an export.
+2. For X, choose a signed-in browser profile and grant temporary access to its
+   session. Select **Use this X Source**, then **Acquire X bookmarks**. For an
+   export, select **Use a bookmark file** and preview the file.
 3. Review the destination, pending bookmarks, and mapping options. Select
-   **Start transfer** when the preview looks right.
+   **Start transfer**, then **Confirm transfer**.
 
 X acquisition is best-effort. See the
 [supported browser matrix](docs/platform-browser-matrix.md).

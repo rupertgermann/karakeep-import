@@ -4,9 +4,9 @@ Karakeep Transfer release builds are prepared on controlled local macOS and
 Windows machines. GitHub Actions does not build, sign, package, or publish the
 desktop app.
 
-This stage prepares deterministic, unsigned installer inputs. Signing,
-notarization, Authenticode, native installation tests, and publication are
-separate release gates.
+This stage prepares deterministic installer inputs. Follow the native
+acceptance process for signing, testing, and publishing production
+installers. [Signed release acceptance](release-acceptance/README.md)
 
 ## Pinned inputs
 
@@ -27,11 +27,10 @@ The remaining authoritative inputs are:
   source and package SHA-256 values, private Node archive and executable
   SHA-256 values, and the Windows SQLite archive SHA-256, official SHA3-256,
   and executable SHA-256 values;
-- the prepared `src-tauri/resources` tree, containing the unchanged Field
-  Theory package, production bridge dependencies and license files, and the
-  private Node executable for the native target. Windows x64 resources also
-  contain only the pinned `sqlite3.exe` helper required by Field Theory's
-  Chromium-cookie reader.
+- the prepared `src-tauri/resources` tree with the pinned Field Theory package,
+  including its rate-limit patch, the bridge dependencies and licenses, and
+  the private Node executable for the native target. Windows x64 resources also
+  contain the pinned `sqlite3.exe` helper for Chromium cookie access.
 
 The command rejects release notes whose first heading does not exactly match
 the configured product name and version, or which omit the unofficial status,
@@ -67,6 +66,9 @@ npm run build
 npm run release:inputs -- --target macos-arm64
 npm run release:build-candidate -- --input release-inputs/macos-arm64
 ```
+
+For an unsigned test DMG, add `--no-sign` to the last command.
+[Signing decision](adr/0018-require-signed-public-builds.md)
 
 The output is `release-inputs/macos-arm64`. Re-running preparation may
 replace only that exact default target directory. A custom `--output` must be
@@ -108,9 +110,9 @@ deterministic metadata, notices, and checksum files. The packaged bridge puts
 the private SQLite directory first on its Windows-only `PATH`; no separately
 installed SQLite command is required. Its `NATIVE-BUILD-COMMAND.txt` contains
 the tracked Windows wrapper command shown above; run it from the checkout root
-on the controlled Windows release machine. The later issue #17 Authenticode gate must
-verify every shipped executable, including this helper, as well as the app and
-installer.
+on the controlled Windows release machine. The Windows acceptance record
+requires Authenticode verification for the installer, the app, and all shipped
+executables, including the SQLite helper. [Windows acceptance](release-acceptance/windows-x64.md)
 
 Do not prepare a Windows release from macOS or a macOS release from Windows.
 Each target proceeds from this staging gate into its native, local signing and

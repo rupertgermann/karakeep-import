@@ -1,10 +1,7 @@
 # Map X folders to Karakeep tags
 
-Acquisition will include X bookmark folders. Delivery will add the `twitter`
-source tag to every bookmark and map each X folder to a same-named Karakeep
-human tag, deduplicating tags case-insensitively. It will not add a
-`fieldtheory` tag because Field Theory is implementation plumbing rather than a
-user-facing source or organizational concept.
+Acquisition includes X bookmark folders. Delivery maps each folder to a
+same-named Karakeep tag and deduplicates tags case-insensitively. The transfer
+review controls whether this run attaches tags carried by the source.
 
-Superseded on the source default tag list by
-[ADR 0026](./0026-choose-source-default-tags-in-settings.md).
+The source marker is a separate setting. [Source default tags](0026-choose-source-default-tags-in-settings.md)

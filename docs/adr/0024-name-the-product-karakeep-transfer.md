@@ -1,7 +1,5 @@
 # Name the product Karakeep Transfer
 
-The desktop product and application name will be **Karakeep Transfer**. It
-describes both the primary X workflow and secondary file sources without
-exposing Field Theory as implementation plumbing. First-run and About surfaces
-will identify it as an unofficial community tool rather than an official
-Karakeep or X product.
+The desktop app is named **Karakeep Transfer**. The name covers transfers
+from both X and bookmark files. The app identifies itself as an unofficial
+community tool in its footer.

@@ -61,8 +61,7 @@ _Avoid_: Media archive
 
 **Source Tag**:
 A Karakeep human tag identifying the source service of a transferred bookmark.
-For X bookmarks, the source tag is `twitter`.
-_Avoid_: Field Theory tag
+The library owner chooses which source tags a transfer can attach.
 
 **Folder Tag**:
 A Karakeep human tag that preserves an X bookmark's folder membership using the
@@ -80,8 +79,8 @@ tag attached.
 _Avoid_: Created bookmark, partially delivered bookmark
 
 **Delivery Ledger**:
-The private local record of bookmarks whose delivery to Karakeep completed,
-used to resume and repeat transfer runs safely.
+The private local record of transfer runs, delivery attempts, and completed
+deliveries, used to resume and repeat transfer runs safely.
 _Avoid_: Import log, bookmark database
 
 **X Session**:

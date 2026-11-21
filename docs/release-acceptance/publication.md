@@ -1,9 +1,8 @@
-# Manual release publication checklist
+# Publish signed desktop installers
 
-Use this checklist only after the signed macOS and Windows records are
-`ACCEPTED`. It binds the accepted source commit to the release materials and
-final signed artifacts. It records manual GitHub publication and verification
-of the downloaded assets.
+Use this checklist after both signed platform records reach `ACCEPTED`.
+Record the accepted source commit, the final signed installers, and the
+checks you run on the assets downloaded from GitHub.
 
 Follow the status and confidentiality rules in [`README.md`](./README.md).
 Copy this template to a versioned publication record before use.
