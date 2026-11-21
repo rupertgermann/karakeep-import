@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export const SIGNED_RELEASES_URL =
-  "https://github.com/rupertgermann/karakeep-import/releases/latest";
+const GITHUB_RELEASES_URL =
+  "https://github.com/rupertgermann/karakeep-import/releases";
 
 export type ReplaceXSourceConfirmation = Readonly<{
   confirmation: "replace-x-source";
@@ -47,7 +47,7 @@ export interface ComponentVersions {
 
 export interface ManualUpdateCheckResult {
   requestedByUser: true;
-  releasePage: typeof SIGNED_RELEASES_URL;
+  releasePage: typeof GITHUB_RELEASES_URL;
   downloadsUpdate: false;
   executesUpdate: false;
 }
@@ -125,7 +125,7 @@ export const settingsDesktopApi: SettingsApi = {
     const result =
       await invoke<ManualUpdateCheckResult>("manual_update_check");
     if (
-      result.releasePage !== SIGNED_RELEASES_URL ||
+      result.releasePage !== GITHUB_RELEASES_URL ||
       result.downloadsUpdate ||
       result.executesUpdate
     ) {

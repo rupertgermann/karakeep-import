@@ -1,7 +1,6 @@
 use serde::Serialize;
 
-pub const GITHUB_RELEASES_URL: &str =
-    "https://github.com/rupertgermann/karakeep-import/releases/latest";
+pub const GITHUB_RELEASES_URL: &str = "https://github.com/rupertgermann/karakeep-import/releases";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

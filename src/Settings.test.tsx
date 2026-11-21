@@ -40,8 +40,7 @@ function createSettingsApi(): SettingsApi {
     versionInformation: vi.fn().mockResolvedValue(versions),
     manualUpdateCheck: vi.fn().mockResolvedValue({
       requestedByUser: true,
-      releasePage:
-        "https://github.com/rupertgermann/karakeep-import/releases/latest",
+      releasePage: "https://github.com/rupertgermann/karakeep-import/releases",
       downloadsUpdate: false,
       executesUpdate: false,
     }),
@@ -377,16 +376,16 @@ describe("Settings", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the signed release link after a manual update check", async () => {
+  it("links to the GitHub release overview after a manual update check", async () => {
     render(<Settings api={createSettingsApi()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
 
     expect(
-      await screen.findByRole("link", { name: "Open signed releases" }),
+      await screen.findByRole("link", { name: "Open GitHub releases" }),
     ).toHaveAttribute(
       "href",
-      "https://github.com/rupertgermann/karakeep-import/releases/latest",
+      "https://github.com/rupertgermann/karakeep-import/releases",
     );
   });
 });

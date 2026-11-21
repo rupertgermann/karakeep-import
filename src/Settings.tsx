@@ -150,7 +150,7 @@ export default function Settings({
   function checkForUpdates() {
     return runAction(async () => {
       setUpdate(await api.manualUpdateCheck());
-      setStatus("The signed release page is ready to open.");
+      setStatus("The GitHub releases page is ready to open.");
     });
   }
 
@@ -300,7 +300,7 @@ export default function Settings({
                 target="_blank"
                 rel="noreferrer noopener"
               >
-                Open signed releases
+                Open GitHub releases
               </a>
             </p>
           ) : null}
