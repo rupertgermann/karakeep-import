@@ -17,6 +17,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { npmInvocation } from "./lib/npm-invocation.mjs";
+
 const scriptRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -193,9 +195,7 @@ function commandVersion(command, args, prefix = "") {
 function validateBuildToolchains(expected) {
   const installed = {
     node: process.versions.node,
-    npm: commandVersion(process.platform === "win32" ? "npm.cmd" : "npm", [
-      "--version",
-    ]),
+    npm: commandVersion(...npmInvocation(["--version"])),
     rust: commandVersion("rustc", ["--version"], "rustc "),
   };
   for (const name of ["node", "npm", "rust"]) {
@@ -304,6 +304,9 @@ function validateReleaseNotes(content, product, macOSMinimum) {
 }
 
 async function regularFiles(root) {
+  if (!(await lstat(root)).isDirectory()) {
+    throw new Error(`Unsupported packaged resource: ${root}`);
+  }
   const files = [];
   async function visit(directory) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -321,19 +324,45 @@ async function regularFiles(root) {
   return files.sort();
 }
 
-async function validateBridgeSources(resources) {
+async function validateBridgeSources(root, resources) {
+  const checkout = "fieldtheory-bridge/src/";
+  const tracked = spawnSync(
+    "git",
+    ["ls-tree", "-r", "--name-only", "-z", "HEAD", "--", checkout],
+    { cwd: root, encoding: "utf8" },
+  );
+  if (tracked.status !== 0) {
+    throw new Error("Could not inspect tracked Field Theory bridge sources.");
+  }
+  const expected = new Set(tracked.stdout.split("\0").filter(Boolean));
   const sources = path.join(resources, "fieldtheory", "bridge", "src");
   for (const file of await regularFiles(sources)) {
-    const content = await readFile(file, "utf8");
+    const relative = path.relative(sources, file).split(path.sep).join("/");
+    const source = path.join(root, checkout, relative);
+    const bytes = await readFile(file);
+    if (
+      !expected.delete(checkout + relative) ||
+      !(await lstat(source)).isFile() ||
+      !bytes.equals(await readFile(source))
+    ) {
+      throw new Error(
+        `Prepared Field Theory bridge source does not match checkout: ${relative}`,
+      );
+    }
     if (
       /nodejs\.org\/dist\/|registry\.npmjs\.org\/|(?:npm|pnpm|yarn)\s+(?:ci|install)\b/i.test(
-        content,
+        bytes.toString("utf8"),
       )
     ) {
       throw new Error(
         `Undeclared runtime download code in packaged bridge source: ${file}`,
       );
     }
+  }
+  if (expected.size > 0) {
+    throw new Error(
+      `Prepared Field Theory bridge source does not match checkout: missing ${[...expected].join(", ")}`,
+    );
   }
 }
 
@@ -662,7 +691,7 @@ async function validateInputs(
   }
   await requireNonempty(path.join(root, "dist", "index.html"), "frontend build");
   await validateNoBridgeCliShims(resources);
-  await validateBridgeSources(resources);
+  await validateBridgeSources(root, resources);
   await validateNoReleaseWorkflows(root);
 
   const rustInventory = await readJson(rustInventoryFile);

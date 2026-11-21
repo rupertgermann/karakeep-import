@@ -12,6 +12,11 @@ const script = path.resolve(
   "..",
   "build-release-candidate.mjs",
 );
+const nativeTarget = process.platform === "win32" ? "windows-x64" : "macos-arm64";
+const nativeRustTarget = nativeTarget === "windows-x64"
+  ? "x86_64-pc-windows-msvc"
+  : "aarch64-apple-darwin";
+const nativeBundle = nativeTarget === "windows-x64" ? "nsis" : "dmg";
 
 const sha256 = async (file) =>
   createHash("sha256").update(await readFile(file)).digest("hex");
@@ -34,7 +39,7 @@ async function writeChecksums(input) {
   await writeFile(path.join(input, "SHA256SUMS"), `${entries.join("\n")}\n`);
 }
 
-async function fixture(target = "macos-arm64") {
+async function fixture(target = nativeTarget) {
   const root = await (await import("node:fs/promises")).mkdtemp(
     path.join(os.tmpdir(), "release-candidate-test-"),
   );
@@ -49,7 +54,7 @@ async function fixture(target = "macos-arm64") {
   );
   await writeFile(
     path.join(root, "tauri.mjs"),
-    'import { readFile, writeFile } from "node:fs/promises";\nimport path from "node:path";\nconst config = process.argv[process.argv.indexOf("--config") + 1];\nawait writeFile(path.join("release-inputs", "macos-arm64", "frontend", "index.html"), "attacker replacement\\n");\nif (await readFile("tauri-fail", "utf8").catch(() => null)) process.exit(7);\nconst value = JSON.parse(await readFile(config, "utf8"));\nconst resources = Object.keys(value.bundle.resources).find((key) => key !== "resources");\nawait writeFile("package-result.json", JSON.stringify({ frontend: await readFile(path.join(value.build.frontendDist, "index.html"), "utf8"), resource: await readFile(path.join(resources, "runtime.txt"), "utf8"), frontendDist: value.build.frontendDist, resources }));\n',
+    `import { readFile, writeFile } from "node:fs/promises";\nimport path from "node:path";\nconst config = process.argv[process.argv.indexOf("--config") + 1];\nawait writeFile(path.join("release-inputs", ${JSON.stringify(target)}, "frontend", "index.html"), "attacker replacement\\n");\nif (await readFile("tauri-fail", "utf8").catch(() => null)) process.exit(7);\nconst value = JSON.parse(await readFile(config, "utf8"));\nconst resources = Object.keys(value.bundle.resources).find((key) => key !== "resources");\nawait writeFile("package-result.json", JSON.stringify({ frontend: await readFile(path.join(value.build.frontendDist, "index.html"), "utf8"), resource: await readFile(path.join(resources, "runtime.txt"), "utf8"), frontendDist: value.build.frontendDist, resources }));\n`,
   );
   await mkdir(path.join(root, "scripts"), { recursive: true });
   await writeFile(
@@ -96,12 +101,13 @@ async function fixture(target = "macos-arm64") {
   return { root, input, commit };
 }
 
-function run(root, input, { dryRun = true } = {}) {
+function run(root, input, { dryRun = true, env = process.env } = {}) {
   const args = [script, "--input", input];
   if (dryRun) args.push("--dry-run");
   return spawnSync(process.execPath, args, {
     cwd: root,
     encoding: "utf8",
+    env,
   });
 }
 
@@ -111,25 +117,36 @@ test("verified plan binds Tauri to a canonical frontend and resources snapshot",
 
   assert.equal(result.status, 0, result.stderr);
   const plan = JSON.parse(result.stdout);
-  assert.deepEqual(plan.tauri.args.slice(0, 8), [
-    "run", "tauri", "--", "build", "--target", "aarch64-apple-darwin", "--bundles", "dmg",
+  assert.deepEqual(plan.tauri.args.slice(-8), [
+    "run", "tauri", "--", "build", "--target", nativeRustTarget, "--bundles", nativeBundle,
   ]);
   assert.equal(plan.config.build.beforeBuildCommand, "");
   assert.match(
-    plan.config.build.frontendDist,
+    plan.config.build.frontendDist.replaceAll(path.sep, "/"),
     /release-inputs\/\.verify-[0-9a-f-]{36}\/frontend$/,
   );
   assert.deepEqual(plan.config.bundle.resources.resources, null);
   const resources = Object.keys(plan.config.bundle.resources).find(
     (key) => key !== "resources",
   );
-  assert.match(resources, /release-inputs\/\.verify-[0-9a-f-]{36}\/resources$/);
+  assert.match(resources.replaceAll(path.sep, "/"), /release-inputs\/\.verify-[0-9a-f-]{36}\/resources$/);
   assert.equal(plan.config.bundle.resources[resources], "");
   assert.notEqual(plan.config.build.frontendDist, path.join(input, "frontend"));
   assert.deepEqual(
     (await readdir(path.join(root, "release-inputs"))).filter((name) => name.startsWith(".verify-")),
     [],
   );
+});
+
+test("frontend rebuild uses the invoking npm CLI even when its path has spaces", async () => {
+  const { root, input } = await fixture();
+  const npmCli = path.join(root, "canonical", "npm entry.mjs");
+  await writeFile(npmCli, 'console.error("fixture npm reached"); process.exit(9);\n');
+
+  const result = run(root, input, { env: { ...process.env, npm_execpath: npmCli } });
+
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /Could not rebuild frontend for canonical staging: fixture npm reached/);
 });
 
 test("package consumes the canonical snapshot after supplied staging is mutated", async () => {
@@ -141,7 +158,7 @@ test("package consumes the canonical snapshot after supplied staging is mutated"
   assert.equal(packaged.frontend, "staged frontend\n");
   assert.equal(packaged.resource, "staged resource\n");
   assert.notEqual(packaged.frontendDist, path.join(input, "frontend"));
-  assert.match(packaged.resources, /release-inputs\/\.verify-[0-9a-f-]{36}\/resources$/);
+  assert.match(packaged.resources.replaceAll(path.sep, "/"), /release-inputs\/\.verify-[0-9a-f-]{36}\/resources$/);
   assert.equal(
     await readFile(path.join(input, "frontend", "index.html"), "utf8"),
     "attacker replacement\n",
@@ -194,10 +211,11 @@ test("verified plan rejects a stage whose attacker rewrites SHA256SUMS", async (
 });
 
 test("verified plan rejects a release target on the wrong native host", async () => {
-  const { root, input } = await fixture("windows-x64");
+  const wrongTarget = nativeTarget === "windows-x64" ? "macos-arm64" : "windows-x64";
+  const { root, input } = await fixture(wrongTarget);
   const result = run(root, input);
 
-  assert.match(result.stderr, /must run on win32/);
+  assert.match(result.stderr, /must run on (?:darwin|win32)/);
 });
 
 test("verified plan rejects an unlisted staged file", async () => {
@@ -219,7 +237,7 @@ test("verified plan requires every release-control file", async () => {
 
 test("verified plan rejects a symlinked staged directory", async () => {
   const { root, input } = await fixture();
-  await symlink("resources", path.join(input, "frontend", "linked-resources"));
+  await symlink(path.join(input, "resources"), path.join(input, "frontend", "linked-resources"), "junction");
 
   const result = run(root, input);
   assert.match(result.stderr, /Staged inputs must not contain symlinks/);
@@ -228,7 +246,7 @@ test("verified plan rejects a symlinked staged directory", async () => {
 test("verified plan rejects a symlinked staged input root", async () => {
   const { root, input } = await fixture();
   const alias = path.join(root, "release-inputs", "alias");
-  await symlink(input, alias);
+  await symlink(input, alias, "junction");
 
   const result = run(root, alias);
   assert.match(result.stderr, /Staged inputs must not contain symlinks/);
@@ -243,5 +261,5 @@ test("verified plan rejects a target with a mismatched Tauri target", async () =
   await writeChecksums(input);
 
   const result = run(root, input);
-  assert.match(result.stderr, /does not match staged target macos-arm64/);
+  assert.ok(result.stderr.includes(`does not match staged target ${nativeTarget}`), result.stderr);
 });

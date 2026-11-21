@@ -25,3 +25,47 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m unittest discover -s tests -v
       - run: python -m compileall -q karakeep-import.py karakeep-import-gui.py tests
+
+  desktop:
+    if: github.event_name != 'push'
+    runs-on: macos-latest
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+      - run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefix fieldtheory-bridge
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:fieldtheory
+      - name: Prepare Rust test assets
+        run: |
+          npx --no-install vite build
+          mkdir -p src-tauri/resources
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+  windows-release-preflight:
+    if: github.event_name != 'push'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+      - name: Select the pinned release toolchain
+        shell: pwsh
+        run: |
+          $rust = (Get-Content release/release-inputs.json -Raw | ConvertFrom-Json).buildToolchains.rust
+          rustup toolchain install $rust --profile minimal
+          "RUSTUP_TOOLCHAIN=$rust" >> $env:GITHUB_ENV
+      - run: npm ci --ignore-scripts
+      - run: npm run prepare:fieldtheory
+      - run: npx --no-install vite build
+      - run: npm run release:inputs -- --target windows-x64
+      - run: npm run release:build-candidate -- --input release-inputs/windows-x64 --dry-run
+      - run: node --test scripts/test/build-release-candidate.test.mjs

@@ -471,6 +471,8 @@ impl DeliveryRun {
             }
         }
         let classified_failure = classified_failure_code(&report.records);
+        let authentication_failed =
+            classified_failure == Some(DeliveryFailureCode::DestinationAuthentication);
         let run_status = if report.totals.cancelled > 0 {
             RunStatus::Interrupted
         } else if report.totals.failed > 0 {
@@ -479,7 +481,7 @@ impl DeliveryRun {
             RunStatus::Completed
         };
         let result = DeliveryResult::from(&report.totals);
-        if adapter.finish_run(run_status).is_err() {
+        if adapter.finish_run(run_status).is_err() && !authentication_failed {
             return publish_terminal(
                 self.events.as_ref(),
                 DeliveryTerminalEvent::Failed {
@@ -490,15 +492,17 @@ impl DeliveryRun {
             );
         }
 
-        let terminal = if report.totals.cancelled > 0 {
-            DeliveryTerminalEvent::Cancelled {
-                delivery_id: self.delivery_id.clone(),
-                result,
-            }
-        } else if let Some(code) = classified_failure {
+        let terminal = if let Some(code) =
+            classified_failure.filter(|_| authentication_failed || report.totals.cancelled == 0)
+        {
             DeliveryTerminalEvent::Failed {
                 delivery_id: self.delivery_id.clone(),
                 code,
+                result,
+            }
+        } else if report.totals.cancelled > 0 {
+            DeliveryTerminalEvent::Cancelled {
+                delivery_id: self.delivery_id.clone(),
                 result,
             }
         } else {

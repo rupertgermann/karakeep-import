@@ -248,9 +248,9 @@ async function createRepositoryFixture({ git = true } = {}) {
     },
     buildToolchains: {
       node: process.versions.node,
-      npm: commandVersion(process.platform === "win32" ? "npm.cmd" : "npm", [
-        "--version",
-      ]),
+      npm: process.platform === "win32"
+        ? commandVersion("cmd.exe", ["/d", "/c", "npm --version"])
+        : commandVersion("npm", ["--version"]),
       rust: commandVersion("rustc", ["--version"], "rustc "),
     },
     targets: {
@@ -320,6 +320,11 @@ async function createRepositoryFixture({ git = true } = {}) {
       "runtime-environment.mjs",
     ),
     "export const runtimeEnvironment = (environment) => environment;\n",
+  );
+  await cp(
+    path.join(resources, "fieldtheory", "bridge", "src"),
+    path.join(root, "fieldtheory-bridge", "src"),
+    { recursive: true },
   );
   await writeJson(path.join(resources, "fieldtheory", "bridge", "package.json"), {
     name: "karakeep-fieldtheory-bridge",
@@ -658,22 +663,41 @@ test("missing a required pinned runtime fails before staging", async () => {
 
 test("runtime download code in packaged bridge sources is rejected", async () => {
   const root = await createRepositoryFixture();
-  await writeFile(
-    path.join(
-      root,
-      "src-tauri",
-      "resources",
-      "fieldtheory",
-      "bridge",
-      "src",
-      "download.mjs",
-    ),
-    'await fetch("https://nodejs.org/dist/v99/node.tar.xz");\n',
-  );
+  const content = 'await fetch("https://nodejs.org/dist/v99/node.tar.xz");\n';
+  await writeFile(path.join(root, "fieldtheory-bridge", "src", "download.mjs"), content);
+  await writeFile(path.join(root, "src-tauri/resources/fieldtheory/bridge/src", "download.mjs"), content);
 
   const result = run(root, "macos-arm64", path.join(root, "out"));
 
   assert.match(result.stderr, /Undeclared runtime download code/);
+});
+
+test("staging rejects stale prepared bridge sources", async (t) => {
+  const checkout = "fieldtheory-bridge/src";
+  const prepared = "src-tauri/resources/fieldtheory/bridge/src";
+  for (const [caseName, file, ...trees] of [
+    ["changed file", "index.mjs", prepared],
+    ["extra file", "old.mjs", prepared],
+    ["missing file", "new.mjs", checkout],
+    ["ignored file in both trees", "ignored.mjs", checkout, prepared],
+  ]) {
+    await t.test(caseName, async () => {
+      const root = await createRepositoryFixture();
+      const output = path.join(root, "out");
+      if (file === "ignored.mjs") {
+        await writeFile(path.join(root, ".gitignore"), "ignored.mjs\n", { flag: "a" });
+      }
+      for (const tree of trees) {
+        await writeFile(path.join(root, tree, file), "export const changed = true;\n");
+      }
+
+      const result = run(root, "macos-arm64", output);
+
+      assert.equal(result.status, 1, result.stdout);
+      assert.match(result.stderr, /Prepared Field Theory bridge source does not match checkout/);
+      await assert.rejects(readFile(path.join(output, "RELEASE-METADATA.json")), { code: "ENOENT" });
+    });
+  }
 });
 
 test("prepared Field Theory CLI shims are rejected from packaged resources", async () => {
@@ -809,18 +833,9 @@ test("a prepared SQLite executable modified after extraction is rejected", async
 
 test("password-equivalent values in packaged text are rejected", async () => {
   const root = await createRepositoryFixture();
-  await writeFile(
-    path.join(
-      root,
-      "src-tauri",
-      "resources",
-      "fieldtheory",
-      "bridge",
-      "src",
-      "leak.mjs",
-    ),
-    'const KARAKEEP_API_KEY = "secret-value-that-must-not-ship";\n',
-  );
+  const content = 'const KARAKEEP_API_KEY = "secret-value-that-must-not-ship";\n';
+  await writeFile(path.join(root, "fieldtheory-bridge", "src", "leak.mjs"), content);
+  await writeFile(path.join(root, "src-tauri/resources/fieldtheory/bridge/src", "leak.mjs"), content);
 
   const result = run(root, "macos-arm64", path.join(root, "out"));
 

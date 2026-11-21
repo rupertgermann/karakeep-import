@@ -112,6 +112,9 @@ impl KarakeepApi for MixedOutcomeApi {
                 "mixed-outcome-api-key-canary",
             ));
         }
+        if draft.url.ends_with("/permanent-failure") {
+            return Err(ApiError::new(ApiErrorKind::Permanent, "bookmark rejected"));
+        }
         let (id, origin) = if draft.url.ends_with("/resumed-existing") {
             ("existing-bookmark", BookmarkOrigin::Existing)
         } else {
@@ -816,5 +819,73 @@ fn retry_resends_failed_records_without_expanding_the_reviewed_batch() {
                 .pending,
         ),
         (1, 1),
+    );
+}
+
+#[test]
+fn authentication_failure_stops_delivery_and_leaves_only_the_reviewed_pending_records_retryable() {
+    let config = delivery::DeliveryConfig {
+        pending_limit: Some(4),
+        ..fast_config()
+    };
+    let coordinator = DeliveryCoordinator::with_config(ledger(), config).unwrap();
+    let target = destination("user-a");
+    let first_id = delivery_id("delivery-rejected-key");
+    let first = coordinator
+        .run(
+            Arc::new(MixedOutcomeApi),
+            first_id.clone(),
+            preview(&[
+                "permanent-failure",
+                "created",
+                "authentication-failure",
+                "waiting",
+                "outside-limit",
+            ]),
+            target.clone(),
+            Arc::new(RecordingEvents::default()),
+        )
+        .unwrap();
+    assert!(
+        matches!(
+            first,
+            DeliveryTerminalEvent::Failed {
+                code: DeliveryFailureCode::DestinationAuthentication,
+                result: delivery_coordinator::DeliveryResult {
+                    delivered: 1,
+                    failed: 2,
+                    cancelled: 1,
+                    ..
+                },
+                ..
+            }
+        ),
+        "unexpected terminal event: {first:?}"
+    );
+
+    let retry = coordinator
+        .prepare_retry(
+            Arc::new(SuccessfulApi::default()),
+            delivery_id("delivery-after-reconnect"),
+            &first_id,
+            target.clone(),
+            Arc::new(RecordingEvents::default()),
+            fast_config(),
+        )
+        .unwrap()
+        .execute();
+    assert!(matches!(
+        retry,
+        DeliveryTerminalEvent::Completed {
+            result: delivery_coordinator::DeliveryResult { delivered: 3, .. },
+            ..
+        }
+    ));
+    assert_eq!(
+        coordinator
+            .preview(&preview(&["outside-limit"]), &target, None)
+            .unwrap()
+            .pending,
+        1
     );
 }

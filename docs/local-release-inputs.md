@@ -44,11 +44,13 @@ extracts the declared executable into a temporary directory, and verifies both
 the independently pinned executable digest and the prepared runtime byte. It
 fails if the current toolchains differ from the pinned versions, a lock or
 license inventory is incomplete, the prepared resources are missing or
-modified, Field Theory checksums disagree, packaged bridge code attempts to
-download a runtime, or either the complete source resource tree or staged
-resource tree (including production `node_modules` and NUL-containing files)
-contains a password-equivalent value. Explicit placeholders in dependency
-documentation, such as `replace-me`, are not treated as credentials.
+modified, Field Theory checksums disagree, or packaged bridge code attempts
+to download a runtime. Prepared bridge sources must match the tracked file
+paths and bytes in the checkout's `fieldtheory-bridge/src`. Both the complete
+source resource tree and the staged resource tree (including production
+`node_modules` and NUL-containing files) are checked for password-equivalent
+values. Explicit placeholders such as `replace-me` are allowed in dependency
+documentation.
 
 ## macOS arm64 inputs
 

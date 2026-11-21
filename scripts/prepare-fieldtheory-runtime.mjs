@@ -22,6 +22,7 @@ import {
   sha3_256,
   verifyVendoredPackage,
 } from "./lib/fieldtheory-bundle.mjs";
+import { npmInvocation } from "./lib/npm-invocation.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -203,14 +204,13 @@ async function prepareBridge() {
   );
 
   run(
-    "npm",
-    [
+    ...npmInvocation([
       "ci",
       "--omit=dev",
       "--ignore-scripts",
       "--cache",
       path.join(cache, "npm"),
-    ],
+    ]),
     path.join(destination, "bridge"),
   );
   await rm(path.join(destination, "bridge", "node_modules", ".bin"), {

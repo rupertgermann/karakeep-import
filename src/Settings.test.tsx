@@ -7,29 +7,16 @@ import {
   DELETE_LOCAL_TRANSFER_DATA,
   FORGET_KARAKEEP_CONNECTION,
   REPLACE_X_SOURCE,
-  type DiagnosticsExport,
+  type ComponentVersions,
   type SettingsApi,
 } from "./settings-api";
 
-const diagnostics: DiagnosticsExport = {
-  generatedByUserAction: true,
-  includesBookmarkContent: false,
-  telemetryEnabled: false,
-  versions: {
-    app: "0.1.0",
-    fieldTheory: "1.3.22",
-    node: "22.17.0",
-    schema: "1",
-    karakeepBaseline: "0.32.0",
-  },
-  source: "ready",
-  destination: "ready",
-  storage: {
-    dataDirectory: "[redacted]",
-    snapshotBytes: 1_024,
-    ledgerBytes: 2_048,
-  },
-  lastFailure: null,
+const versions: ComponentVersions = {
+  app: "0.1.0",
+  fieldTheory: "1.3.22",
+  node: "22.17.0",
+  schema: "1",
+  karakeepBaseline: "0.32.0",
 };
 
 function createSettingsApi(): SettingsApi {
@@ -49,9 +36,8 @@ function createSettingsApi(): SettingsApi {
     }),
     replaceXSource: vi.fn().mockResolvedValue(undefined),
     deleteLocalTransferData: vi.fn().mockResolvedValue(undefined),
-    exportDiagnostics: vi.fn().mockResolvedValue(diagnostics),
     saveDiagnostics: vi.fn().mockResolvedValue(false),
-    versionInformation: vi.fn().mockResolvedValue(diagnostics.versions),
+    versionInformation: vi.fn().mockResolvedValue(versions),
     manualUpdateCheck: vi.fn().mockResolvedValue({
       requestedByUser: true,
       releasePage:
@@ -312,7 +298,6 @@ describe("Settings", () => {
     );
 
     await waitFor(() => expect(api.saveDiagnostics).toHaveBeenCalledOnce());
-    expect(api.exportDiagnostics).not.toHaveBeenCalled();
     expect(
       await screen.findByText("Redacted diagnostics were saved."),
     ).toBeInTheDocument();

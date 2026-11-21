@@ -41,26 +41,6 @@ function settingsApi(): SettingsApi {
     }),
     replaceXSource: vi.fn().mockResolvedValue(undefined),
     deleteLocalTransferData: vi.fn().mockResolvedValue(undefined),
-    exportDiagnostics: vi.fn().mockResolvedValue({
-      generatedByUserAction: true,
-      includesBookmarkContent: false,
-      telemetryEnabled: false,
-      versions: {
-        app: "0.1.0",
-        fieldTheory: "1.3.22",
-        node: "22.20.0",
-        schema: "1",
-        karakeepBaseline: "0.32.0",
-      },
-      source: "ready",
-      destination: "ready",
-      storage: {
-        dataDirectory: "[redacted]",
-        snapshotBytes: 0,
-        ledgerBytes: 0,
-      },
-      lastFailure: null,
-    }),
     saveDiagnostics: vi.fn().mockResolvedValue(false),
     versionInformation: vi.fn().mockResolvedValue({
       app: "0.1.0",

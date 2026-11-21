@@ -57,14 +57,6 @@ describe("settings desktop API", () => {
     });
   });
 
-  it("requests a redacted diagnostics export as data", async () => {
-    mocks.invoke.mockResolvedValue({});
-
-    await settingsDesktopApi.exportDiagnostics();
-
-    expect(mocks.invoke).toHaveBeenCalledWith("export_diagnostics");
-  });
-
   it.each([true, false])(
     "reports whether the native diagnostics Save dialog completed: %s",
     async (saved) => {

@@ -169,11 +169,11 @@ API key and without sending data to Karakeep:
 python3 karakeep-import.py
 ```
 
-The summary reports the current input size, records already completed in the
-state file, records pending in this run, usable timestamps, archived-media
-references, static tags, and the normalized target API URL. Dry runs respect
-selection and payload options such as `--limit`, `--timestamp-field`, and
-`--tag`.
+The summary reports the input size, records eligible before the resume check,
+usable timestamps, archived-media references, static tags, and the normalized
+target API URL. The actual pending count is calculated during live import once
+Karakeep has identified the account. Dry runs respect selection and payload
+options such as `--limit`, `--timestamp-field`, and `--tag`.
 
 Use a different Field Theory export with `--input`:
 
@@ -274,8 +274,8 @@ failed bookmarks.
 ## Resume and retry
 
 Successful records are appended to `.karakeep-import-state.jsonl`. Subsequent
-runs skip source IDs marked `complete`, including records completed by a
-limited batch:
+runs authenticate before skipping source IDs marked `complete` for the same
+Karakeep server and account, including records completed by a limited batch:
 
 ```bash
 python3 karakeep-import.py --execute
@@ -297,6 +297,11 @@ python3 karakeep-import.py --execute \
 State and failure files are append-only. Keep the state file to preserve resume
 behavior. Removing it makes every source record eligible for processing again,
 while Karakeep's URL deduplication still prevents duplicate link bookmarks.
+
+Older logs keep their existing rows. Those rows have no server or account
+identity and are ignored by the resume check. To rebuild scoped history, run a
+live import against the intended destination. Karakeep deduplicates existing
+links, and each completed record is appended with its destination scope.
 
 ## Bookmark mapping
 
