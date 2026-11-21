@@ -34,22 +34,65 @@ pub struct FileSourcePreview {
     pub bookmarks: Vec<BookmarkPreview>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FileSourceError {
-    message: String,
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "number", rename_all = "camelCase")]
+pub enum FileSourcePosition {
+    Line(usize),
+    Bookmark(usize),
 }
 
-impl FileSourceError {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
+impl fmt::Display for FileSourcePosition {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Line(number) => write!(formatter, "Line {number}"),
+            Self::Bookmark(number) => write!(formatter, "Bookmark {number}"),
         }
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "code", rename_all = "camelCase")]
+pub enum FileSourceError {
+    FileUnreadable,
+    InvalidFileSource,
+    InvalidRecord { position: FileSourcePosition },
+    DuplicateSourceId { position: FileSourcePosition },
+    InvalidUrl { position: FileSourcePosition },
+    DuplicateUrl { position: FileSourcePosition },
+}
+
 impl fmt::Display for FileSourceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
+        match self {
+            Self::FileUnreadable => formatter.write_str("The selected file could not be read."),
+            Self::InvalidFileSource => {
+                formatter.write_str("The selected file is not a valid supported File Source.")
+            }
+            Self::InvalidRecord { position } => {
+                write!(
+                    formatter,
+                    "{position} must contain a valid bookmark record."
+                )
+            }
+            Self::DuplicateSourceId { position } => {
+                write!(
+                    formatter,
+                    "{position} has the same bookmark ID as an earlier record."
+                )
+            }
+            Self::InvalidUrl { position } => {
+                write!(
+                    formatter,
+                    "{position} must contain a valid HTTP or HTTPS bookmark URL."
+                )
+            }
+            Self::DuplicateUrl { position } => {
+                write!(
+                    formatter,
+                    "{position} has the same URL as an earlier bookmark."
+                )
+            }
+        }
     }
 }
 
@@ -63,12 +106,7 @@ pub fn preview_file(
     requested_format: FileSourceFormat,
     options: &TransferOptions,
 ) -> Result<FileSourcePreview, FileSourceError> {
-    let contents = fs::read_to_string(path).map_err(|error| {
-        FileSourceError::new(format!(
-            "Could not read File Source {}: {error}",
-            path.display()
-        ))
-    })?;
+    let contents = fs::read_to_string(path).map_err(|_| FileSourceError::FileUnreadable)?;
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -130,38 +168,25 @@ fn parse_field_theory(
     let mut seen_urls = HashSet::new();
 
     for (index, line) in contents.lines().enumerate() {
-        let line_number = index + 1;
         if line.trim().is_empty() {
             continue;
         }
-        let value: Value = serde_json::from_str(line).map_err(|error| {
-            FileSourceError::new(format!("Invalid JSON on line {line_number}: {error}"))
-        })?;
-        let record = value.as_object().ok_or_else(|| {
-            FileSourceError::new(format!(
-                "Field Theory line {line_number} is not a JSON object"
-            ))
-        })?;
-        let source_id = source_id(record).ok_or_else(|| {
-            FileSourceError::new(format!(
-                "Field Theory record on line {line_number} has no tweetId, id, or URL"
-            ))
-        })?;
+        let position = FileSourcePosition::Line(index + 1);
+        let value: Value =
+            serde_json::from_str(line).map_err(|_| FileSourceError::InvalidRecord { position })?;
+        let record = value
+            .as_object()
+            .ok_or(FileSourceError::InvalidRecord { position })?;
+        let source_id = source_id(record).ok_or(FileSourceError::InvalidRecord { position })?;
         let url = string_field(record, "url");
         if !is_web_url(&url) {
-            return Err(FileSourceError::new(format!(
-                "Record {source_id} on line {line_number} has no valid http(s) URL"
-            )));
+            return Err(FileSourceError::InvalidUrl { position });
         }
         if !seen_ids.insert(source_id.clone()) {
-            return Err(FileSourceError::new(format!(
-                "Duplicate source ID {source_id} on line {line_number}"
-            )));
+            return Err(FileSourceError::DuplicateSourceId { position });
         }
         if !seen_urls.insert(url.clone()) {
-            return Err(FileSourceError::new(format!(
-                "Duplicate URL {url} on line {line_number}"
-            )));
+            return Err(FileSourceError::DuplicateUrl { position });
         }
         bookmarks.push(map_field_theory(record, source_id, url, options));
     }
@@ -468,15 +493,8 @@ impl<'a> ChromeParser<'a> {
             return Ok(());
         };
         let title = compact_text(&bookmark.title);
-        let url = normalize_chrome_url(&bookmark.href).ok_or_else(|| {
-            FileSourceError::new(format!(
-                "Chrome bookmark {} has no supported http(s) URL",
-                if title.is_empty() {
-                    "(untitled)"
-                } else {
-                    &title
-                }
-            ))
+        let url = normalize_chrome_url(&bookmark.href).ok_or(FileSourceError::InvalidUrl {
+            position: FileSourcePosition::Bookmark(self.bookmarks.len() + 1),
         })?;
         let created_at = chrome_timestamp(&bookmark.added_at, self.options.timestamp_field);
         let folders: Vec<String> = if self.options.include_export_tags {
@@ -521,11 +539,9 @@ fn parse_chrome(
     let mut seen_urls = HashSet::new();
     for (index, bookmark) in parser.bookmarks.iter().enumerate() {
         if !seen_urls.insert(bookmark.url.clone()) {
-            return Err(FileSourceError::new(format!(
-                "Duplicate URL {} in Chrome bookmark {}",
-                bookmark.url,
-                index + 1
-            )));
+            return Err(FileSourceError::DuplicateUrl {
+                position: FileSourcePosition::Bookmark(index + 1),
+            });
         }
     }
     Ok(parser.bookmarks)
@@ -537,9 +553,7 @@ fn tokenize_html(contents: &str, parser: &mut ChromeParser<'_>) -> Result<(), Fi
         let start = cursor + relative_start;
         parser.text(&contents[cursor..start]);
         let Some(end) = find_tag_end(contents, start + 1) else {
-            return Err(FileSourceError::new(
-                "Chrome bookmarks HTML has an unterminated tag",
-            ));
+            return Err(FileSourceError::InvalidFileSource);
         };
         let raw = contents[start + 1..end].trim();
         cursor = end + 1;

@@ -18,6 +18,28 @@ use serde::Serialize;
 pub use crate::karakeep::RequestCancellation as Cancellation;
 
 const CANCELLATION_POLL_INTERVAL: Duration = Duration::from_millis(25);
+pub(crate) const MAX_DELIVERY_WORKERS: usize = 32;
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static WORKER_STARTS_BEFORE_FAILURE: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+fn spawn_worker<'scope, 'env>(
+    scope: &'scope thread::Scope<'scope, 'env>,
+    worker: impl FnOnce() + Send + 'scope,
+) -> std::io::Result<()> {
+    #[cfg(test)]
+    if WORKER_STARTS_BEFORE_FAILURE.with(|remaining| {
+        remaining.get().is_some_and(|count| {
+            remaining.set(count.checked_sub(1));
+            count == 0
+        })
+    }) {
+        return Err(std::io::ErrorKind::WouldBlock.into());
+    }
+    thread::Builder::new().spawn_scoped(scope, worker).map(drop)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DestinationId(String);
@@ -244,6 +266,8 @@ impl Clock for SystemClock {
 pub struct DeliveryRunReport {
     pub records: Vec<RecordResult>,
     pub totals: DeliveryTotals,
+    #[serde(skip)]
+    pub(crate) worker_start_failed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -387,7 +411,11 @@ impl DeliveryEngine {
             initial_totals.total = initial_totals.skipped + pending.len();
         }
 
-        let worker_count = self.config.max_concurrency.min(pending.len());
+        let worker_count = self
+            .config
+            .max_concurrency
+            .min(MAX_DELIVERY_WORKERS)
+            .min(pending.len());
         let queue = Arc::new(Mutex::new(pending));
         let totals = Arc::new(Mutex::new(initial_totals));
         let completed = Arc::new(Mutex::new(Vec::new()));
@@ -396,13 +424,15 @@ impl DeliveryEngine {
             authentication_failed: AtomicBool::new(false),
         };
 
-        thread::scope(|scope| {
+        let unstarted = thread::scope(|scope| {
+            // Keep workers from delivering anything until startup succeeds.
+            let mut queued = queue.lock().unwrap();
             for _ in 0..worker_count {
                 let cancellation = &cancellation;
                 let queue = queue.clone();
                 let totals = totals.clone();
                 let completed = completed.clone();
-                scope.spawn(move || {
+                let started = spawn_worker(scope, move || {
                     loop {
                         let Some((index, record, prior_attempts)) =
                             queue.lock().unwrap().pop_front()
@@ -428,20 +458,41 @@ impl DeliveryEngine {
                         completed.lock().unwrap().push((index, result));
                     }
                 });
+                if started.is_err() {
+                    return Some(std::mem::take(&mut *queued));
+                }
             }
+            None
         });
 
         let mut records = Arc::try_unwrap(completed)
             .unwrap_or_else(|_| unreachable!("delivery workers have joined"))
             .into_inner()
             .unwrap();
-        records.sort_by_key(|(index, _)| *index);
-        let records = records.into_iter().map(|(_, result)| result).collect();
-        let totals = Arc::try_unwrap(totals)
+        let mut totals = Arc::try_unwrap(totals)
             .unwrap_or_else(|_| unreachable!("delivery workers have joined"))
             .into_inner()
             .unwrap();
-        Ok(DeliveryRunReport { records, totals })
+        let worker_start_failed = unstarted.is_some();
+        if let Some(unstarted) = unstarted {
+            for (index, record, _) in unstarted {
+                let result = failed(
+                    record.source_id,
+                    None,
+                    false,
+                    None,
+                    "A delivery worker could not start.".into(),
+                );
+                totals.observe(&result);
+                records.push((index, result));
+            }
+        }
+        records.sort_by_key(|(index, _)| *index);
+        Ok(DeliveryRunReport {
+            records: records.into_iter().map(|(_, result)| result).collect(),
+            totals,
+            worker_start_failed,
+        })
     }
 
     fn deliver_one(

@@ -211,6 +211,29 @@ class ImporterTests(unittest.TestCase):
             with self.assertRaises(importer.ImportFailure):
                 importer.load_records(path)
 
+    def test_preview_rejects_malformed_field_theory_bookmark_urls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bookmarks.jsonl"
+            for url in (
+                "https://",
+                "https://:443/page",
+                "https://" + "[::1/page",
+                "https://example.com:invalid/page",
+                "https://example.com/path with spaces",
+            ):
+                with self.subTest(url=url):
+                    path.write_text(
+                        json.dumps({**SAMPLE, "url": url}) + "\n", encoding="utf-8"
+                    )
+                    with (
+                        redirect_stdout(io.StringIO()),
+                        redirect_stderr(io.StringIO()) as errors,
+                    ):
+                        result = importer.main(["--input", str(path)])
+
+                    self.assertEqual(result, 1)
+                    self.assertIn("line 1 has no valid http(s) URL", errors.getvalue())
+
     def test_load_records_auto_detects_chrome_bookmarks(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bookmarks.html"

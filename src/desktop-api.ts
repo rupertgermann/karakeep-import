@@ -68,10 +68,16 @@ export interface FileSourcePreview {
   bookmarks: BookmarkPreview[];
 }
 
-export interface FileSourceCommandError {
-  code: "fileUnreadable" | "invalidFileSource";
-  message: string;
-}
+export type FileSourceCommandError =
+  | {
+      code: "fileUnreadable" | "invalidFileSource";
+      message: string;
+    }
+  | {
+      code: "invalidRecord" | "duplicateSourceId" | "invalidUrl" | "duplicateUrl";
+      message: string;
+      position: { kind: "line" | "bookmark"; number: number };
+    };
 
 export interface FileSourceApi {
   selectFileSource(): Promise<string | null>;

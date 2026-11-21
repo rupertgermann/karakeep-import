@@ -1,7 +1,10 @@
 use std::fs;
 
 use karakeep_transfer_lib::{
-    file_source::{FileSourceFormat, ResolvedFileSourceFormat, preview_file, preview_text},
+    file_source::{
+        FileSourceError, FileSourceFormat, FileSourcePosition, ResolvedFileSourceFormat,
+        preview_file, preview_text,
+    },
     transfer_options::{SourceDefaultTags, TransferOptions},
 };
 
@@ -257,10 +260,11 @@ fn field_theory_duplicate_source_ids_are_rejected() {
         &source_tag_options(),
     )
     .expect_err("duplicate source ID must fail");
-    assert!(
-        error
-            .to_string()
-            .contains("Duplicate source ID same on line 2")
+    assert_eq!(
+        error,
+        FileSourceError::DuplicateSourceId {
+            position: FileSourcePosition::Line(2)
+        }
     );
 }
 
@@ -277,10 +281,11 @@ fn field_theory_duplicate_urls_are_rejected() {
         &source_tag_options(),
     )
     .expect_err("duplicate URL must fail");
-    assert!(
-        error
-            .to_string()
-            .contains("Duplicate URL https://example.com/same on line 2")
+    assert_eq!(
+        error,
+        FileSourceError::DuplicateUrl {
+            position: FileSourcePosition::Line(2)
+        }
     );
 }
 
@@ -300,10 +305,11 @@ fn chrome_duplicates_are_rejected_after_view_source_normalization() {
     )
     .expect_err("normalized duplicate must fail");
 
-    assert!(
-        error
-            .to_string()
-            .contains("Duplicate URL https://example.com/docs in Chrome bookmark 2")
+    assert_eq!(
+        error,
+        FileSourceError::DuplicateUrl {
+            position: FileSourcePosition::Bookmark(2)
+        }
     );
 }
 
@@ -342,7 +348,12 @@ fn invalid_json_objects_are_rejected() {
         &source_tag_options(),
     )
     .expect_err("non-object JSONL value must fail");
-    assert!(error.to_string().contains("line 1 is not a JSON object"));
+    assert_eq!(
+        error,
+        FileSourceError::InvalidRecord {
+            position: FileSourcePosition::Line(1)
+        }
+    );
 }
 
 #[test]
@@ -354,10 +365,11 @@ fn non_web_chrome_urls_are_rejected() {
         &source_tag_options(),
     )
     .expect_err("bookmarklet must fail");
-    assert!(
-        error
-            .to_string()
-            .contains("Chrome bookmark Bookmarklet has no supported http(s) URL")
+    assert_eq!(
+        error,
+        FileSourceError::InvalidUrl {
+            position: FileSourcePosition::Bookmark(1)
+        }
     );
 }
 

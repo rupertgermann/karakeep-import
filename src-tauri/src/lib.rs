@@ -218,10 +218,19 @@ impl XSelectionState {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct FileSourceCommandError {
-    code: &'static str,
-    message: &'static str,
+    #[serde(flatten)]
+    error: file_source::FileSourceError,
+    message: String,
+}
+
+impl From<file_source::FileSourceError> for FileSourceCommandError {
+    fn from(error: file_source::FileSourceError) -> Self {
+        Self {
+            message: error.to_string(),
+            error,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -247,10 +256,7 @@ impl FileSelectionState {
 }
 
 fn file_unreadable() -> FileSourceCommandError {
-    FileSourceCommandError {
-        code: "fileUnreadable",
-        message: "The selected file could not be read.",
-    }
+    file_source::FileSourceError::FileUnreadable.into()
 }
 
 #[tauri::command]
@@ -277,12 +283,7 @@ fn preview_selected_file_source(
     format: file_source::FileSourceFormat,
 ) -> Result<file_source::FileSourcePreview, FileSourceCommandError> {
     selections.authorize(path)?;
-    file_source::preview_file(path, format, &TransferOptions::default()).map_err(|_| {
-        FileSourceCommandError {
-            code: "invalidFileSource",
-            message: "The selected file is not a valid supported File Source.",
-        }
-    })
+    file_source::preview_file(path, format, &TransferOptions::default()).map_err(Into::into)
 }
 
 #[tauri::command]
@@ -1638,7 +1639,10 @@ mod tests {
             super::file_source::FileSourceFormat::FieldTheoryJsonl,
         )
         .expect_err("an arbitrary frontend path is not authorized");
-        assert_eq!(error.code, "fileUnreadable");
+        assert_eq!(
+            error.error,
+            super::file_source::FileSourceError::FileUnreadable
+        );
 
         selections
             .select(selected.clone())
@@ -1657,7 +1661,10 @@ mod tests {
             super::file_source::FileSourceFormat::FieldTheoryJsonl,
         )
         .expect_err("a different frontend path remains unauthorized");
-        assert_eq!(error.code, "fileUnreadable");
+        assert_eq!(
+            error.error,
+            super::file_source::FileSourceError::FileUnreadable
+        );
     }
 
     #[test]
@@ -1791,25 +1798,48 @@ mod tests {
     }
 
     #[test]
-    fn invalid_file_source_details_are_redacted_at_the_desktop_boundary() {
+    fn invalid_file_source_details_give_a_safe_position_at_the_desktop_boundary() {
         let temporary = tempfile::tempdir().expect("temporary directory");
-        let path = temporary.path().join("private-bookmarks.jsonl");
-        std::fs::write(
-            &path,
-            "{\"id\":\"bookmark-content-canary\",\"url\":\"not-a-web-url\"}\n",
-        )
-        .expect("invalid fixture");
-        assert_command_response_with_body(
-            "preview_file_source",
-            tauri::ipc::InvokeBody::Json(json!({
-                "path": path,
-                "format": "fieldTheoryJsonl"
-            })),
-            Err(json!({
-                "code": "invalidFileSource",
-                "message": "The selected file is not a valid supported File Source."
-            })),
-        );
+        let path = temporary.path().join("private-bookmarks");
+        for (format, contents, expected) in [
+            (
+                "fieldTheoryJsonl",
+                "\n{\"id\":\"bookmark-content-canary\",\"url\":\"not-a-web-url\"}\n",
+                json!({
+                    "code": "invalidUrl",
+                    "message": "Line 2 must contain a valid HTTP or HTTPS bookmark URL.",
+                    "position": { "kind": "line", "number": 2 }
+                }),
+            ),
+            (
+                "chromeNetscape",
+                r#"<DL><A HREF="https://example.com/private">Private</A><A HREF="https://example.com/private">Duplicate</A></DL>"#,
+                json!({
+                    "code": "duplicateUrl",
+                    "message": "Bookmark 2 has the same URL as an earlier bookmark.",
+                    "position": { "kind": "bookmark", "number": 2 }
+                }),
+            ),
+            (
+                "chromeNetscape",
+                r#"<DL><A HREF="https://example.com/private">Private</A><A HREF="file:///private/bookmark">Unsupported</A></DL>"#,
+                json!({
+                    "code": "invalidUrl",
+                    "message": "Bookmark 2 must contain a valid HTTP or HTTPS bookmark URL.",
+                    "position": { "kind": "bookmark", "number": 2 }
+                }),
+            ),
+        ] {
+            std::fs::write(&path, contents).expect("invalid fixture");
+            assert_command_response_with_body(
+                "preview_file_source",
+                tauri::ipc::InvokeBody::Json(json!({
+                    "path": path,
+                    "format": format
+                })),
+                Err(expected),
+            );
+        }
     }
 
     #[test]
@@ -2242,5 +2272,88 @@ mod tests {
         assert!(selections.authorize(&other_profile).is_err());
         selections.clear().expect("selection clears");
         assert!(selections.authorize(&selected).is_err());
+    }
+
+    #[test]
+    fn worker_start_failure_emits_a_terminal_event_and_keeps_the_batch_retryable() {
+        struct Events(Mutex<Vec<super::DeliveryEvent>>);
+        impl super::DeliveryEventSink for Events {
+            fn publish(&self, event: super::DeliveryEvent) {
+                self.0.lock().expect("event lock").push(event);
+            }
+        }
+
+        let state = test_transfer_state();
+        let coordinator = state.coordinator().expect("test coordinator");
+        let api = Arc::new(SuccessfulDeliveryApi::default());
+        let events = Arc::new(Events(Mutex::new(Vec::new())));
+        let destination =
+            super::DestinationIdentity::new("https://keep.example", "user").expect("destination");
+        let preview = super::file_source::preview_text(
+            "bookmarks.jsonl",
+            r#"{"tweetId":"1","url":"https://x.com/example/status/1"}
+{"tweetId":"2","url":"https://x.com/example/status/2"}
+{"tweetId":"3","url":"https://x.com/example/status/3"}"#,
+            super::file_source::FileSourceFormat::FieldTheoryJsonl,
+            &TransferOptions::default(),
+        )
+        .expect("preview");
+        let config = super::delivery::DeliveryConfig {
+            max_concurrency: 2,
+            requests_per_second: 100_000.0,
+            pending_limit: Some(2),
+            ..super::delivery::DeliveryConfig::default()
+        };
+        let delivery_id = super::DeliveryId::new("startup").expect("delivery ID");
+
+        super::delivery::WORKER_STARTS_BEFORE_FAILURE.set(Some(1));
+        let terminal = coordinator
+            .prepare_run(
+                api.clone(),
+                delivery_id.clone(),
+                preview.clone(),
+                destination.clone(),
+                events.clone(),
+                config.clone(),
+            )
+            .expect("prepared delivery")
+            .execute();
+        assert!(matches!(
+            &terminal,
+            super::DeliveryTerminalEvent::Failed {
+                code: super::DeliveryFailureCode::DeliveryFailed,
+                result,
+                ..
+            } if result.failed == 2 && result.delivered == 0
+        ));
+        assert_eq!(
+            *events.0.lock().expect("event lock"),
+            [super::DeliveryEvent::Terminal(terminal)]
+        );
+        assert_eq!(api.creates.load(Ordering::SeqCst), 0);
+
+        let retried = coordinator
+            .prepare_retry(
+                api.clone(),
+                super::DeliveryId::new("retry").expect("delivery ID"),
+                &delivery_id,
+                destination.clone(),
+                events,
+                config,
+            )
+            .expect("prepared retry")
+            .execute();
+        assert!(matches!(
+            retried,
+            super::DeliveryTerminalEvent::Completed { result, .. } if result.delivered == 2
+        ));
+        assert_eq!(api.creates.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            coordinator
+                .preview(&preview, &destination, None)
+                .expect("fresh preview")
+                .pending,
+            1
+        );
     }
 }

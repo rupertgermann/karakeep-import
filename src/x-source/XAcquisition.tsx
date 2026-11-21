@@ -199,6 +199,10 @@ export default function XAcquisition({
         Bookmark records and X folder membership stay in private local app
         storage. Image and video files are not downloaded.
       </p>
+      <p>
+        To avoid mixing bookmarks, use Settings → Replace X Source before
+        acquiring from a different X account in the same browser profile.
+      </p>
 
       {view.step === "running" ? (
         <>

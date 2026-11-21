@@ -886,6 +886,60 @@ describe("Karakeep Transfer shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps the file source when an abandoned X Source selection completes", async () => {
+    const source = {
+      browserId: "chrome",
+      browserName: "Google Chrome",
+      profileId: "Default",
+      profileName: "Personal",
+    };
+    let resolveSelection: (value: typeof source) => void = () => {};
+    const pendingSelection = new Promise<typeof source>((resolve) => {
+      resolveSelection = resolve;
+    });
+    const api = desktopApi(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        appName: "Karakeep Transfer",
+        version: "0.1.0",
+      }),
+      {
+        destinationStatus: vi.fn().mockResolvedValue(rememberedDestination),
+        discoverXSources: vi.fn().mockResolvedValue({
+          browsers: [
+            {
+              id: source.browserId,
+              name: source.browserName,
+              profiles: [{ id: source.profileId, name: source.profileName }],
+            },
+          ],
+        }),
+        selectXSource: vi.fn().mockReturnValue(pendingSelection),
+      },
+    );
+
+    render(<App desktopApi={api} xAcquisitionApi={xAcquisitionApi()} />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Use my X Source" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("checkbox", {
+        name: /temporarily using my existing authenticated X session/i,
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use this X Source" }));
+    expect(screen.getByRole("combobox", { name: "Profile" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Choose another source" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use a bookmark file" }));
+    await act(async () => {
+      resolveSelection(source);
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "Preview a bookmark file" }),
+    ).toBeInTheDocument();
+  });
+
   it("returns an idle selected X Source to the source choice", async () => {
     const api = desktopApi(
       vi.fn().mockResolvedValue({

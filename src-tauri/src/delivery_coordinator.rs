@@ -470,10 +470,14 @@ impl DeliveryRun {
                 });
             }
         }
-        let classified_failure = classified_failure_code(&report.records);
+        let classified_failure = if report.worker_start_failed {
+            Some(DeliveryFailureCode::DeliveryFailed)
+        } else {
+            classified_failure_code(&report.records)
+        };
         let authentication_failed =
             classified_failure == Some(DeliveryFailureCode::DestinationAuthentication);
-        let run_status = if report.totals.cancelled > 0 {
+        let run_status = if report.worker_start_failed || report.totals.cancelled > 0 {
             RunStatus::Interrupted
         } else if report.totals.failed > 0 {
             RunStatus::PartiallyCompleted

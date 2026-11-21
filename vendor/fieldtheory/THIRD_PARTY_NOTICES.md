@@ -15,6 +15,10 @@ by every package.
 | sql.js-fts5 | 1.4.0 | MIT | <https://www.npmjs.com/package/sql.js-fts5> |
 | undici | 6.29.1 | MIT | <https://www.npmjs.com/package/undici> |
 
+The pinned Field Theory package includes a local patch that lets Karakeep
+Transfer pause and save its bookmark backfill on HTTP 429.
+[Bookmark rate-limit patch](https://github.com/rupertgermann/karakeep-import/blob/main/vendor/fieldtheory/bookmark-rate-limit.patch)
+
 The authoritative artifact checksums are in
 [`manifest.json`](./manifest.json). Field Theory's complete MIT text is in
 [`LICENSE`](./LICENSE); Node and npm dependency license texts are copied into
