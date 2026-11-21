@@ -29,7 +29,11 @@ function connectionErrorMessage(error: unknown): string {
     case "authentication":
       return "Karakeep rejected the API key. Check the key and try again.";
     case "credential_vault":
-      return "Unlock your credential store and allow Karakeep Transfer access, then try again.";
+      return (
+        "Karakeep Transfer could not access your system credential store. " +
+        "Try reopening the app from Finder on macOS or the Start menu on Windows. " +
+        "Check that the store is unlocked and allow access if prompted."
+      );
     case "insecure_destination":
       return "This destination does not satisfy the connection security policy.";
     case "invalid_server_url":

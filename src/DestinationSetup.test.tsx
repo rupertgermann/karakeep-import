@@ -134,7 +134,7 @@ describe("Destination connection", () => {
     expect(screen.queryByText(/backend-canary/)).not.toBeInTheDocument();
   });
 
-  it("explains how to recover when the system credential store denies access", async () => {
+  it("offers a normal app restart when the system credential store is unavailable", async () => {
     const api = destinationApi({
       connectDestination: vi.fn().mockRejectedValue({ code: "credential_vault" }),
     });
@@ -147,7 +147,7 @@ describe("Destination connection", () => {
     expect(
       await screen.findByRole("alert", { name: "Karakeep connection failed" }),
     ).toHaveTextContent(
-      "Unlock your credential store and allow Karakeep Transfer access, then try again.",
+      "Try reopening the app from Finder on macOS or the Start menu on Windows.",
     );
   });
 
